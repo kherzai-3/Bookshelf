@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+.claude/context_state/dirty.txt
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+data/
+.env

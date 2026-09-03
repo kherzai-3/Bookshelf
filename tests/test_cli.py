@@ -1,0 +1,228 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from bookrag.cli import main
+from tests.helpers import build_narrative_epub, build_sample_epub
+
+
+@pytest.fixture(autouse=True)
+def _library_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = tmp_path / "library"
+    monkeypatch.setenv("BOOKRAG_LIBRARY_ROOT", str(root))
+    return root
+
+
+def test_ingest_epub_end_to_end(tmp_path: Path, _library_root: Path) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+
+    exit_code = main(["ingest", str(epub_path)])
+
+    assert exit_code == 0
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    metadata = json.loads((book_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["title"] == "Test Book"
+    assert metadata["author"] == "Test Author"
+    assert metadata["chapter_count"] == 2
+    assert (book_dir / "source.epub").exists()
+
+
+def test_ingest_with_series_flags(tmp_path: Path, _library_root: Path) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+
+    exit_code = main(
+        ["ingest", str(epub_path), "--series", "The Saga", "--series-position", "1"]
+    )
+
+    assert exit_code == 0
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    metadata = json.loads((book_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["series"] == {"name": "The Saga", "position": 1}
+
+
+def test_ingest_series_without_position_is_rejected(tmp_path: Path, _library_root: Path) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+
+    exit_code = main(["ingest", str(epub_path), "--series", "The Saga"])
+
+    assert exit_code == 1
+    assert not _library_root.exists()  # rejected before save_book ever ran
+
+
+def test_ingest_missing_file(tmp_path: Path, _library_root: Path) -> None:
+    exit_code = main(["ingest", str(tmp_path / "missing.epub")])
+
+    assert exit_code == 1
+
+
+def test_ingest_unsupported_extension(tmp_path: Path, _library_root: Path) -> None:
+    bogus = tmp_path / "notes.txt"
+    bogus.write_text("not a book", encoding="utf-8")
+
+    exit_code = main(["ingest", str(bogus)])
+
+    assert exit_code == 1
+
+
+def test_ingest_corrupt_epub_fails_cleanly_instead_of_crashing(
+    tmp_path: Path, _library_root: Path
+) -> None:
+    corrupt = tmp_path / "corrupt.epub"
+    corrupt.write_bytes(b"this is not a real epub/zip file")
+
+    exit_code = main(["ingest", str(corrupt)])
+
+    assert exit_code == 1
+    assert not _library_root.exists()  # save_book never ran; nothing left behind
+
+
+def test_ingest_writes_an_ingestion_report(tmp_path: Path, _library_root: Path) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+
+    exit_code = main(["ingest", str(epub_path)])
+
+    assert exit_code == 0
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    report = (book_dir / "ingestion_report.txt").read_text(encoding="utf-8")
+    assert "classification: chapter-bound" in report
+
+
+def test_ingest_deletes_source_from_incoming_on_success(
+    tmp_path: Path, _library_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    monkeypatch.setenv("BOOKRAG_INCOMING_ROOT", str(incoming))
+    epub_path = incoming / "sample.epub"
+    build_sample_epub(epub_path)
+
+    exit_code = main(["ingest", str(epub_path)])
+
+    assert exit_code == 0
+    assert not epub_path.exists()
+
+
+def test_ingest_does_not_delete_source_outside_incoming(
+    tmp_path: Path, _library_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    monkeypatch.setenv("BOOKRAG_INCOMING_ROOT", str(incoming))
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    epub_path = elsewhere / "sample.epub"
+    build_sample_epub(epub_path)
+
+    exit_code = main(["ingest", str(epub_path)])
+
+    assert exit_code == 0
+    assert epub_path.exists()
+
+
+def test_extract_passes_model_override_to_get_provider(
+    tmp_path: Path, _library_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+
+    calls: list[tuple[str | None, str | None]] = []
+
+    def fake_get_provider(name: str | None = None, model: str | None = None):
+        calls.append((name, model))
+        from bookrag.providers.fake_provider import FakeProvider
+
+        return FakeProvider()
+
+    monkeypatch.setattr("bookrag.cli.get_provider", fake_get_provider)
+
+    exit_code = main(["extract", book_dir.name, "--provider", "fake", "--model", "qwen2.5:7b-instruct"])
+
+    assert exit_code == 0
+    assert calls == [("fake", "qwen2.5:7b-instruct")]
+
+
+def test_extract_with_fake_provider(tmp_path: Path, _library_root: Path) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+
+    exit_code = main(["extract", book_dir.name, "--provider", "fake"])
+
+    assert exit_code == 0
+    assert (book_dir / "facts.jsonl").exists()
+    assert (_library_root / "entities.json").exists()
+
+
+def test_extract_prints_per_chapter_progress(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+
+    main(["extract", book_dir.name, "--provider", "fake"])
+
+    output = capsys.readouterr().out
+    assert "[1/2] chapter done - elapsed" in output
+    assert "[2/2] chapter done - elapsed" in output
+    assert "remaining" in output
+
+
+def test_eval_with_fake_provider(tmp_path: Path, _library_root: Path) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+
+    exit_code = main(["eval", book_dir.name, "--chapters", "0,1", "--providers", "fake"])
+
+    assert exit_code == 0
+    # eval is read-only - it must not have created facts.jsonl/entities.json
+    assert not (book_dir / "facts.jsonl").exists()
+    assert not (_library_root / "entities.json").exists()
+
+
+def test_chat_single_question_with_fake_provider(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_narrative_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    main(["extract", book_dir.name, "--provider", "fake"])
+    capsys.readouterr()  # discard ingest/extract output
+
+    exit_code = main(
+        ["chat", book_dir.name, "--chapter", "0", "--provider", "fake", "--question", "Who is in chapter 0?"]
+    )
+
+    assert exit_code == 0
+    assert "[fake answer] Based on:" in capsys.readouterr().out
+
+
+def test_chat_rejects_out_of_range_chapter(tmp_path: Path, _library_root: Path) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+
+    exit_code = main(
+        ["chat", book_dir.name, "--chapter", "99", "--provider", "fake", "--question", "anything"]
+    )
+
+    assert exit_code == 1
+
+
+def test_chat_unknown_book_id(tmp_path: Path, _library_root: Path) -> None:
+    exit_code = main(["chat", "no-such-book", "--chapter", "0", "--provider", "fake", "--question", "anything"])
+
+    assert exit_code == 1

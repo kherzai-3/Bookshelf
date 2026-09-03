@@ -1,0 +1,43 @@
+# Pinned, reproducible dependency lock - generated from `pip freeze` against
+# the working venv (excludes bookrag itself, which is installed editable via
+# `pip install -e .`; see pyproject.toml for the source-of-truth dependency
+# *groups*, this file is the flat pinned resolution of them).
+#
+# Regenerate after changing pyproject.toml's dependencies:
+#   .venv/Scripts/python.exe -m pip install -e ".[core,providers,dev]"
+#   .venv/Scripts/python.exe -m pip freeze | grep -v -i "book_rag\|Editable install" > requirements.txt
+annotated-types==0.8.0
+anthropic==1.2.0
+anyio==4.14.2
+colorama==0.4.6
+deprecation==2.1.0
+docstring_parser==0.18.0
+EbookLib==0.20
+h11==0.16.0
+httpcore2==2.12.0
+httpx2==2.12.0
+idna==3.19
+iniconfig==2.3.0
+jiter==0.16.0
+lance-namespace==0.11.1
+lance-namespace-urllib3-client==0.11.1
+lancedb==0.38.0
+lxml==6.1.2
+numpy==2.5.2
+packaging==26.3
+pluggy==1.6.0
+pyarrow==25.0.1
+pydantic==2.13.5
+pydantic_core==2.46.5
+Pygments==2.21.0
+pymupdf==1.28.2
+pytest==9.1.1
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.3
+six==1.17.0
+sniffio==1.3.1
+tqdm==4.70.0
+truststore==0.10.4
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+urllib3==2.7.0

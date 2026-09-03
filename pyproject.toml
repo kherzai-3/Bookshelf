@@ -1,0 +1,33 @@
+[project]
+name = "bookrag"
+version = "0.0.1"
+description = "RAG tool for ingesting .epub/.pdf books and querying spoiler-safe character, setting, and theme catalogs."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+# Ingestion + storage: epub/pdf parsing, embeddings, local vector store.
+core = [
+    "ebooklib",
+    "pymupdf",
+    "lancedb",
+]
+# Pluggable LLM backends (Claude via Anthropic API, local/open-source via Ollama)
+# plus the eval harness to compare extraction/query output across them.
+providers = [
+    "anthropic",
+    "python-dotenv",
+]
+dev = [
+    "pytest",
+]
+
+[project.scripts]
+bookrag = "bookrag.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bookrag"]
