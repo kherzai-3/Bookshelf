@@ -3,9 +3,10 @@
 A tool that ingests `.epub`/`.pdf` novels and builds a spoiler-safe catalog of
 characters, settings, and themes — each fact tagged with the chapter it was
 revealed in, so a reference to chapter N never leaks what happens after it.
-It can **ingest** books and **extract** facts about them; a natural-language
-query/chat interface on top of the extracted facts hasn't been built yet
-(the spoiler-safety filter it will use, `bookrag.query.facts_as_of`, has).
+It can **ingest** books, **extract** facts about them, and answer
+**natural-language questions** about a book through `bookrag chat`, which
+never shows the answering model a fact from beyond the chapter you've
+actually read (via `bookrag.query.facts_as_of`).
 
 ## Setup
 
@@ -63,8 +64,19 @@ Three providers, chosen via `--provider`/`--providers` or `$BOOKRAG_PROVIDER`:
   graphics (no NVIDIA GPU), it doesn't get that break.
 
   - **This machine**: `llama3.2:3b` (3B params) is the practical choice -
-    measured at roughly 10-15s/chapter for short chapters, ~47 minutes for
-    a full 75-chapter novel (`data/library/ranger-s-apprentice-1-2-bindup`).
+    measured at roughly 20-90s/chapter depending on real chapter length and
+    how much a chapter turns out to contain, ~2-2.5 hours for a full
+    75-chapter novel (`data/library/ranger-s-apprentice-1-2-bindup`). This
+    is slower than an earlier measurement of this same book (~47 minutes) -
+    the extraction prompt was substantially reworked since then (explicit
+    per-category definitions, self-containment requirements, a worked
+    example) specifically to extract more thorough, better-categorized
+    facts per chapter, and generating more content per chapter costs more
+    wall-clock time. Confirmed worth it: `status`-category facts (milestone
+    role/rank/life-condition changes) went from 5 across an entire book to
+    483, and a real question that previously got a wrong or uncertain
+    answer through `bookrag chat` ("has this character become an
+    apprentice yet?") is now answered correctly.
   - **A machine with a GPU**: set `OLLAMA_MODEL` to something meaningfully
     larger (e.g. `qwen2.5:7b-instruct` or bigger) - larger models are
     generally more reliable at both instruction-following (respecting the
@@ -129,7 +141,26 @@ bookrag ingest path/to/book.pdf --title "Custom Title" --author "Someone"
 # required whenever --series is given.
 bookrag ingest book1.epub --series "The Saga" --series-position 1
 bookrag ingest book2.epub --series "The Saga" --series-position 2
+
+# self-help, philosophy, or other non-narrative books - selects a different
+# category/entity taxonomy for extraction (see below). Defaults to
+# "fiction" - not auto-detected, so this must be passed explicitly.
+bookrag ingest atomic-habits.epub --content-type nonfiction
 ```
+
+**Fiction vs. nonfiction content:** `bookrag extract`'s category/entity
+taxonomy is fundamentally different depending on `--content-type`, because
+a novel's characters/settings/themes and a self-help book's concepts/
+techniques/claims don't map onto the same schema - forcing nonfiction
+content through the fiction categories was confirmed (via a real
+before/after `bookrag eval` comparison) to actively misfile generic
+illustrative examples ("desk," "phone," "bedroom") as if they were
+meaningful recurring story *settings*. `--content-type nonfiction` gives
+`extract`/`eval`/`chat` an entirely different set of categories instead
+(`definition`, `claim`, `technique`, `example`, `relationship`,
+`description`) and entity types (`character`, `concept`, `theme` - no
+`setting`), with their own extraction/answer prompts. Set once at ingest
+time, in `metadata.json` - not something you choose again later.
 
 Each ingest prints a **sanity summary** (chapter count, word-count spread,
 first/last chapter titles) and writes it, plus a **classification**, to
@@ -143,6 +174,11 @@ first/last chapter titles) and writes it, plus a **classification**, to
   don't care whether a chapter's boundary lines up with the book's own
   chapter numbers or ToC, only that it has *a* consistent position. The
   fragments just won't read as "real" chapters if you look at their titles.
+  If the fragments are also *implausibly small* (well under a real
+  chapter's length - real case: a page-scanned epub with one physical page
+  per fragment), ingestion automatically consolidates many small fragments
+  into larger, more coherent ones before this classification even runs -
+  printed at ingest time and noted in the report when it happens.
 
 Title/author are resolved in this order: explicit flag > the file's own
 internal metadata > best-effort guess from the filename (e.g.
@@ -187,6 +223,32 @@ provider per chapter) plus an automated **groundedness score** per
 provider — a cheap lexical check (do a fact's key words actually appear in
 the chapter text), not a semantic judge. Meaningful even with one provider
 configured; more useful once a second (e.g. local-model) provider exists.
+
+### Chatting with a book
+
+Once a book has been extracted, ask it questions - spoiler-safe up to
+whatever chapter you specify:
+
+```bash
+# one-off question, then exit
+bookrag chat <book-id> --chapter 20 --question "Who is Halt?"
+
+# interactive session - drop --question, get a `> ` prompt, Ctrl+C to exit
+bookrag chat <book-id> --chapter 20
+```
+
+`--chapter` (0-indexed, required) is the reader's current position - facts
+from later chapters are never shown to the answering model, going through
+the same `facts_as_of` primitive that guarantees spoiler-safety everywhere
+else. Facts are grouped by entity and category and tagged with the chapter
+they came from (e.g. `[ch 9] has completed the Choosing Day`) so the model
+has an explicit recency signal when two facts about the same specific
+detail conflict (a status that changes over the course of the book) -
+later chapters are treated as superseding earlier ones for the same detail,
+never as contradictions to arbitrarily pick between. `--provider`/`--model`
+work the same as `extract`. There's no multi-turn memory yet (each question
+in an interactive session is answered independently) and no way to bump
+`--chapter` mid-session - restart with a new `--chapter` value instead.
 
 ### Where books end up
 
@@ -246,57 +308,89 @@ data/library/entities.json    # global entity registry: entity_id -> canonical
   link to a character already known as "Ishmael" unless the provider's own
   output happens to name them consistently. Aliases can be added to
   `data/library/entities.json` by hand today; automatic linking is future work.
-- **Small local models are less reliable at strict JSON than Claude.**
-  `llama3.2:3b`'s first real test produced a JSON array with a syntax error
-  (missing comma). Mitigated by sending `"format": "json"` to Ollama, which
-  constrains generation to always be syntactically valid - confirmed clean
-  across 5 repeat runs after the fix - but a schema-conformance failure
-  (right JSON, wrong keys) is still possible and surfaces as
+- **Small local models are less reliable at strict JSON than Claude -
+  mitigated with real, grammar-level structural guarantees, not just a
+  request.** `llama3.2:3b`'s first real test produced a JSON array with a
+  syntax error (missing comma). `OllamaProvider.extract_facts` now sends a
+  full JSON Schema (`parsing.extraction_response_schema()`) as Ollama's
+  `format` field (Ollama 0.33.2+), not just the string `"json"` - this
+  grammar-constrains sampling so `entity_type`/`category` can never drift
+  outside their enums and a fact's `statement` can't exceed a length cap,
+  verified empirically to hold even adversarially. A schema-conformance
+  failure is still possible for providers that don't schema-constrain
+  (Anthropic, or Ollama's dict-wrapping quirks) and surfaces as
   `ExtractionParseError`, visible in `bookrag eval`'s parse-failure count.
-- **No natural-language query/chat interface yet.** `bookrag.query.facts_as_of`
-  is the tested spoiler-safety primitive (never returns a fact past the
-  given chapter), but there's no CLI command or RAG answer-synthesis layer
-  on top of it yet - that's the next planned piece.
-- **Small local models can hallucinate entity names - mitigated for new
-  entities, not yet for facts about known ones.** Running the full
-  75-chapter Ranger's Apprentice omnibus through `llama3.2:3b` correctly
-  identified the real main cast (Will, Halt, Horace, Gilan, Evanlyn, Duncan,
-  Erak, Morgarath, Alyss) but also produced "Arthur Penhaligon" - a
-  character from an entirely different book series (Garth Nix's *Keys to
-  the Kingdom*) - attached to a real line about Will not knowing his
-  parentage. `extract_book` now rejects a fact naming a **brand-new**
-  entity whose name doesn't literally appear anywhere in that chapter's
-  text (this exact case is caught: "Arthur Penhaligon" never occurs in
-  chapter 2), reporting the count as `ungrounded_entity_count`. This does
-  **not** catch a hallucinated fact wrongly attributed to an
-  **already-known** entity (e.g. misattributing someone else's line to
-  Will, once Will is established) - that's a harder, unsolved problem, since
-  requiring the name to reappear in every chapter would reject perfectly
-  good pronoun-only references.
-- **`entity_type` is now a strictly enforced, fixed list** -
-  `{"character", "setting", "theme"}` only (`providers/parsing.py`). This
-  isn't just tidiness: `resolve_entity` matches an existing entity by
-  `(name, type)` together, so a drifting type string for the same real
-  entity across extraction runs would silently fail to match and create a
-  *duplicate* entity rather than reuse the one already known - unbounded
-  type drift means unbounded entity drift. The real case found (`monster`/
-  `creature` for Kalkara/Wargal) is folded into `character` via a small,
-  explicit alias map; anything else is rejected as a parse failure rather
-  than silently accepted, so a genuinely new category is a visible
-  decision (add an alias), not something that just accumulates over time.
-  Still a real constraint on the future query layer, though: querying
-  "characters" must not become a strict `entity_type == "character"`
-  filter that excludes `monster`/`creature`-derived entries folded into it -
-  they're all stored as `"character"` today specifically so a query can't
-  miss them.
-- **No resumable extraction.** `bookrag extract` always starts from chapter
-  0 and overwrites `facts.jsonl` from scratch - killing/interrupting a long
-  run loses all progress, there's no "resume from the last completed
-  chapter." Confirmed worth building: the sharpest case is a series
-  ingested book-by-book, then later replaced or supplemented by a combined
-  omnibus edition - long single-file extractions (or re-extractions after
-  a partial run) are exactly where losing everything to one interruption
-  hurts most.
+- **An open-ended schema array under grammar-constrained decoding can
+  cause runaway generation, not a clean failure.** Real, diagnosed case: a
+  request generated 8,490+ output tokens (normal chapters produce
+  500-1500) over nearly 15 minutes before Ollama's own server gave up and
+  restarted - traced via Ollama's own logs to a fact array with no upper
+  bound, which gives the model no structural reason to ever stop adding
+  items if it doesn't confidently choose to. Fixed with `maxItems: 25` on
+  the schema's `facts` array (chosen from real observed data - the
+  richest real chapter seen produced 32, itself an outlier). This is also
+  why `bookrag extract` on a real book now takes meaningfully longer than
+  it used to (see "This machine" above) - both because more thorough
+  extraction naturally produces more output, and because the request
+  timeout (`OllamaProvider.DEFAULT_TIMEOUT_SECONDS`) was raised to 900s to
+  give a legitimately long chapter room to finish.
+- **Small local models can hallucinate entity names - mitigated in layers
+  for brand-new entities, not for re-mentions of already-known ones.**
+  Running the full 75-chapter Ranger's Apprentice omnibus through
+  `llama3.2:3b` once produced "Arthur Penhaligon" - a character from an
+  entirely different book series (Garth Nix's *Keys to the Kingdom*) -
+  attached to a real line about Will, extracted from a chapter whose only
+  content was a bare table of contents. Three defenses now apply: (1)
+  `extract.pipeline.MIN_NARRATIVE_WORDS` skips calling the provider at all
+  for the shortest non-narrative fragments (a floor, not a full fix - a
+  100+ word front-matter block still reaches the model), (2) the
+  extraction prompt explicitly instructs returning `{"facts": []}` for
+  non-narrative text, (3) `extract_book` rejects a fact naming a
+  **brand-new** entity whose name doesn't literally appear anywhere in
+  that chapter's text (`ungrounded_entity_count`). Together these stopped
+  that exact case from recurring on re-test. What remains unsolved: a fact
+  wrongly attached to an **already-known** entity in a chapter that
+  doesn't actually discuss them - real observed case: a table-of-contents
+  chapter re-referenced a publisher/author/cover-credit entity that was
+  legitimately established on an earlier copyright-page chapter, producing
+  low-value noise (not fabrication - every name involved is real and was
+  genuinely mentioned somewhere in the book). Gating re-mentions the same
+  way as brand-new entities isn't a fix - it would reject perfectly good
+  pronoun-only references to a character introduced chapters earlier.
+- **`entity_type` is now a strictly enforced, fixed list, and `category` is
+  schema-enum-constrained (Ollama) but leniently normalized elsewhere** -
+  `entity_type` ∈ `{"character", "setting", "theme"}`, `category` ∈ the six
+  documented values (`providers/parsing.py`). `entity_type` matters for
+  correctness, not just tidiness: `resolve_entity` matches an existing
+  entity by `(name, type)` together, so a drifting type string for the same
+  real entity across extraction runs would silently fail to match and
+  create a *duplicate* entity rather than reuse the one already known - the
+  real case found (`monster`/`creature` for Kalkara/Wargal) is folded into
+  `character` via a small alias map; anything else is rejected as a parse
+  failure. `category` doesn't gate identity the same way, so an
+  unrecognized value (real observed drift, pre-schema: `"location"`,
+  `"author"`) is folded into `"description"` instead of rejecting the whole
+  fact - the Ollama schema's `enum` prevents this drift structurally going
+  forward, but the lenient fallback stays as a net for providers that don't
+  schema-constrain.
+- **No fuzzy/semantic matching of entity names - naming-variant duplicates
+  are a real, observed problem, not just a hypothetical one.** A single
+  real extraction run produced separate entities for `Wargal`, `Wargals`,
+  and `The Wargals` (the same creatures, referred to differently across
+  chapters), further split across different `entity_type`s depending on
+  how a given chapter phrased it. `resolve_entity` only does exact,
+  case-insensitive string matching - it has no way to recognize these as
+  the same thing. Consolidating duplicates and adding semantic/similarity
+  search over facts (e.g. finding "the choosing ceremony" when the catalog
+  calls it "the Choosing Day") is planned future work, not yet started.
+- **No resumable extraction, and now a bigger deal than when this was
+  first written.** `bookrag extract` always starts from chapter 0 and
+  overwrites `facts.jsonl` from scratch - killing/interrupting a long run
+  loses all progress, there's no "resume from the last completed chapter."
+  This was already known to be worth building; it's more pressing now that
+  a full real-book run takes on the order of 2+ hours (see "This machine"
+  above) rather than under an hour - an interruption near the end costs
+  much more than it used to.
 
 ## Future ideas (need a planning pass before building)
 

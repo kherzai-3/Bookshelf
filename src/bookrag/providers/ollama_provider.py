@@ -12,8 +12,8 @@ import urllib.request
 from bookrag.providers.base import ExtractedFact
 from bookrag.providers.parsing import extraction_response_schema, parse_facts
 from bookrag.providers.prompts import (
-    ANSWER_SYSTEM_PROMPT,
-    EXTRACTION_SYSTEM_PROMPT,
+    ANSWER_SYSTEM_PROMPTS,
+    EXTRACTION_SYSTEM_PROMPTS,
     build_answer_user_message,
     build_user_message,
 )
@@ -51,9 +51,11 @@ class OllamaProvider:
         self._num_ctx = num_ctx
         self._timeout = timeout
 
-    def extract_facts(self, chapter_text: str, known_entities: list[str]) -> list[ExtractedFact]:
+    def extract_facts(
+        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+    ) -> list[ExtractedFact]:
         content = self._chat(
-            EXTRACTION_SYSTEM_PROMPT,
+            EXTRACTION_SYSTEM_PROMPTS[content_type],
             build_user_message(chapter_text, known_entities),
             # A full JSON Schema, not just the string "json" - grammar-
             # constrains sampling so entity_type/category can never drift
@@ -61,16 +63,16 @@ class OllamaProvider:
             # maxLength, rather than merely hoping the model's prose-shaped
             # output happens to match (verified empirically against this
             # project's local Ollama to hold even adversarially).
-            response_format=extraction_response_schema(),
+            response_format=extraction_response_schema(content_type),
             temperature=DEFAULT_EXTRACTION_TEMPERATURE,
         )
-        return parse_facts(content)
+        return parse_facts(content, content_type)
 
-    def answer_question(self, question: str, context: str) -> str:
+    def answer_question(self, question: str, context: str, content_type: str = "fiction") -> str:
         # No response_format/temperature override here - a chat answer is
         # free text, not a structured fact list, and benefits from Ollama's
         # normal conversational sampling defaults.
-        return self._chat(ANSWER_SYSTEM_PROMPT, build_answer_user_message(question, context))
+        return self._chat(ANSWER_SYSTEM_PROMPTS[content_type], build_answer_user_message(question, context))
 
     def _chat(
         self,

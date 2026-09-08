@@ -8,7 +8,8 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/ingest/chapter.py](src/bookrag/ingest/chapter.py.md) — shared `Chapter` data model used by every loader.
 - [src/bookrag/ingest/epub_loader.py](src/bookrag/ingest/epub_loader.py.md) — loads an `.epub` into per-chapter plain text, in reading order.
 - [src/bookrag/ingest/pdf_loader.py](src/bookrag/ingest/pdf_loader.py.md) — loads a `.pdf` into per-chapter plain text via its TOC/outline.
-- [src/bookrag/storage.py](src/bookrag/storage.py.md) — persists a book (source + chapters + metadata) to `data/library/<book_id>/`; series-aware index + reading-order helper.
+- [src/bookrag/ingest/consolidate.py](src/bookrag/ingest/consolidate.py.md) — merges many small/incoherent chapter fragments into larger, coherent ones for extraction.
+- [src/bookrag/storage.py](src/bookrag/storage.py.md) — persists a book (source + chapters + metadata incl. `content_type`) to `data/library/<book_id>/`; series-aware index + reading-order helper.
 - [src/bookrag/query.py](src/bookrag/query.py.md) — `facts_as_of`: the spoiler-safety filter primitive; `format_context` renders facts for a provider.
 - [src/bookrag/eval.py](src/bookrag/eval.py.md) — read-only provider comparison: side-by-side report + groundedness score.
 - [src/bookrag/cli.py](src/bookrag/cli.py.md) — `bookrag ingest|extract|eval|chat` CLI entry point.
@@ -19,13 +20,14 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/providers/anthropic_provider.py](src/bookrag/providers/anthropic_provider.py.md) — Claude-backed provider (untested - no API credential available).
 - [src/bookrag/providers/ollama_provider.py](src/bookrag/providers/ollama_provider.py.md) — local, no-API-key provider via Ollama; the practical default.
 - [src/bookrag/providers/prompts.py](src/bookrag/providers/prompts.py.md) — shared extraction and answer-question system prompts.
-- [src/bookrag/providers/parsing.py](src/bookrag/providers/parsing.py.md) — shared lenient JSON-to-`ExtractedFact` parsing; owns the allowed entity-type/category lists and the Ollama structured-output schema.
+- [src/bookrag/providers/parsing.py](src/bookrag/providers/parsing.py.md) — shared lenient JSON-to-`ExtractedFact` parsing; owns the fiction/nonfiction entity-type/category taxonomies and the Ollama structured-output schema.
 - [src/bookrag/providers/registry.py](src/bookrag/providers/registry.py.md) — `get_provider(name)` lookup; `DEFAULT_PROVIDER = "ollama"`.
 - [src/bookrag/extract/__init__.py](src/bookrag/extract/__init__.py.md) — `extract` subpackage marker.
 - [src/bookrag/extract/resolve.py](src/bookrag/extract/resolve.py.md) — entity name → `entity_id` resolution against `data/library/entities.json`.
 - [src/bookrag/extract/pipeline.py](src/bookrag/extract/pipeline.py.md) — `extract_book`: runs a provider over every chapter, writes `facts.jsonl`.
 - [tests/helpers.py](../tests/helpers.py.md) — shared synthetic epub/pdf builders.
 - [tests/test_epub_loader.py](../tests/test_epub_loader.py.md) — covers `epub_loader` (chapters + metadata) with a synthetic in-test epub.
+- [tests/test_consolidate.py](../tests/test_consolidate.py.md) — covers `ingest.consolidate`'s trigger decision and merge logic.
 - [tests/test_pdf_loader.py](../tests/test_pdf_loader.py.md) — covers `pdf_loader` (chapters + metadata), TOC and no-TOC fallback paths.
 - [tests/test_storage.py](../tests/test_storage.py.md) — covers `storage.py`, including the series/chapter-2-collision guarantee.
 - [tests/test_storage_series_reading_order.py](../tests/test_storage_series_reading_order.py.md) — covers `series_reading_order`.

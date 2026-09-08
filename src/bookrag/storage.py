@@ -55,6 +55,7 @@ def save_book(
     author: str | None = None,
     series_name: str | None = None,
     series_position: int | None = None,
+    content_type: str = "fiction",
     root: Path | None = None,
 ) -> str:
     root = root or library_root()
@@ -76,6 +77,7 @@ def save_book(
                 if series_name is not None
                 else None
             ),
+            "content_type": content_type,
             "source_format": source_path.suffix.lstrip(".").lower(),
             "source_filename": source_path.name,
             "ingested_at": datetime.now(timezone.utc).isoformat(),
@@ -101,6 +103,11 @@ def load_chapters(book_id: str, root: Path | None = None) -> list[Chapter]:
     root = root or library_root()
     lines = (root / book_id / "chapters.jsonl").read_text(encoding="utf-8").splitlines()
     return [Chapter(**json.loads(line)) for line in lines]
+
+
+def load_metadata(book_id: str, root: Path | None = None) -> dict:
+    root = root or library_root()
+    return json.loads((root / book_id / "metadata.json").read_text(encoding="utf-8"))
 
 
 def load_index(root: Path | None = None) -> dict:

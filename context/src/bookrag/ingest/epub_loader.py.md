@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/epub_loader.py
-last_synced: 2026-09-02T00:00:00Z
-source_hash: 9b76b68020c47eaaec31e3184f06f2c294c9125c
+last_synced: 2026-09-08T00:00:00Z
+source_hash: 0a5d269bbb9cb81d3a6da2bc7ee8a84e85c64938
 ---
 
 ## Purpose
@@ -54,6 +54,22 @@ settings, themes) can be scoped per chapter for spoiler-safety.
   on that sentinel string. The sentinel is wrapped in a Private Use Area
   Unicode character so it can't collide with real book text (a literal NUL
   byte, the more obvious choice, is rejected by lxml as invalid XML text).
+- **`_split_by_headings` scopes to `<body>` before doing anything else -
+  real, observed bug otherwise.** A spine item that's a raw-passthrough
+  `EpubItem` rather than `EpubHtml` (real case: Atomic Habits' actual
+  Internet-Archive-produced source - see Open Questions below - declares
+  `media_type="text/html"`, so it never gets upgraded to `EpubHtml`) keeps
+  its original `<head><title>` intact; `tree.text_content()` on the whole
+  document leaked that invisible title text ("Page 142") in as the literal
+  first line of every such chapter's extracted text, across all 286
+  chapters of that real book. `EpubHtml.get_content()` rebuilds `<head>`
+  empty, which is why this was never visible for normally-packaged epubs.
+  The heading xpath had to change from absolute (`"//h1 | //h2 | //h3"`) to
+  relative (`".//h1 | ...")` in the same fix - lxml's `//` is absolute from
+  the document root regardless of which element `.xpath()` is called on, so
+  reassigning `tree` to the `<body>` element alone would have silently done
+  nothing without this. See
+  `tests/test_epub_loader.py::test_load_chapters_does_not_leak_head_title_into_chapter_text`.
 
 ## Dependencies
 - Internal: `bookrag.ingest.chapter.Chapter` (shared with `pdf_loader.py`)
@@ -68,14 +84,23 @@ settings, themes) can be scoped per chapter for spoiler-safety.
 - Some real-world text has garbled characters after extraction (observed:
   em-dash became `�` in a chapter title) - likely an encoding edge case in
   `text_content()` or the source file itself; not yet investigated.
-- **Some epubs have no exploitable structural signal at all** (observed:
-  Atomic Habits - no heading markup in any content document AND an empty
-  nav TOC, `<ol/>` with zero entries). `load_chapters` then returns one
-  "chapter" per spine file, which may be an arbitrary page-sized fragment
-  bearing no relation to real chapters (286 untitled fragments for a book
-  with ~20 real chapters). No further heuristic was attempted - with zero
-  signal, any chapter-merging guess would be fabricated, not extracted.
-  Left as a documented limitation (README) for the sanity summary to
-  surface, same posture as other unfixable-without-more-signal cases.
+- **Some epubs have no exploitable structural signal at all** (confirmed by
+  direct inspection: Atomic Habits is a page-scanned, Internet-Archive-
+  produced epub - 286 spine files, each literally one physical page
+  (`page_0.html` ... `page_284.html`), zero `h1`-`h6` tags anywhere, empty
+  nav TOC. Real section titles ("THE 1ST LAW Make It Obvious") exist only
+  as plain unstyled paragraphs, indistinguishable from any other text - not
+  recoverable via any generalizable heading- or class-based heuristic).
+  `load_chapters` returns one "chapter" per spine file in this case, same
+  as always - genuinely correct given zero structural signal to do
+  otherwise; fabricating chapter boundaries from nothing would be worse
+  than not trying. What's no longer left unaddressed: 286 arbitrary
+  page-sized fragments being individually fed to extraction one at a time
+  (incoherent, redundant, slow) - see `ingest/consolidate.py`, which merges
+  many small fragments into larger, more coherent ones for exactly this
+  case, applied at ingest time in `cli._ingest` (after `load_chapters`,
+  before `save_book`) rather than here, since it's a format-agnostic
+  concern (equally applicable to a PDF that also comes out over-fragmented,
+  not just epub-specific).
 - Chapter titles from `book.toc` (nav labels) aren't cross-referenced yet;
   could improve title recall for epubs whose content lacks heading tags.

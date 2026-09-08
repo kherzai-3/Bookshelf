@@ -7,8 +7,8 @@ import os
 from bookrag.providers.base import ExtractedFact
 from bookrag.providers.parsing import parse_facts
 from bookrag.providers.prompts import (
-    ANSWER_SYSTEM_PROMPT,
-    EXTRACTION_SYSTEM_PROMPT,
+    ANSWER_SYSTEM_PROMPTS,
+    EXTRACTION_SYSTEM_PROMPTS,
     build_answer_user_message,
     build_user_message,
 )
@@ -29,12 +29,16 @@ class AnthropicProvider:
         self._client = anthropic.Anthropic(api_key=api_key)
         self._model = model or os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
 
-    def extract_facts(self, chapter_text: str, known_entities: list[str]) -> list[ExtractedFact]:
-        raw_text = self._complete(EXTRACTION_SYSTEM_PROMPT, build_user_message(chapter_text, known_entities))
-        return parse_facts(raw_text)
+    def extract_facts(
+        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+    ) -> list[ExtractedFact]:
+        raw_text = self._complete(
+            EXTRACTION_SYSTEM_PROMPTS[content_type], build_user_message(chapter_text, known_entities)
+        )
+        return parse_facts(raw_text, content_type)
 
-    def answer_question(self, question: str, context: str) -> str:
-        return self._complete(ANSWER_SYSTEM_PROMPT, build_answer_user_message(question, context))
+    def answer_question(self, question: str, context: str, content_type: str = "fiction") -> str:
+        return self._complete(ANSWER_SYSTEM_PROMPTS[content_type], build_answer_user_message(question, context))
 
     def _complete(self, system: str, user_message: str) -> str:
         message = self._client.messages.create(

@@ -1,7 +1,7 @@
 ---
 source: tests/helpers.py
-last_synced: 2026-09-03T00:00:00Z
-source_hash: 552cbb3e4e131b1b372b4300163d6b7f72995b79
+last_synced: 2026-09-08T00:00:00Z
+source_hash: 52d1df732e772dc144de5e0bf5412f9d53f2327c
 ---
 
 ## Purpose
@@ -24,6 +24,11 @@ have something real to assert against.
   for a new entity: every sentence starts with one of `FakeProvider`'s own
   pronoun stopwords (It/He/She/They/We), and no other word in it is
   capitalized.
+- `build_fragmented_epub(path, fragment_count=40, words_per_fragment=100)` —
+  many small, untitled, unheaded spine documents (no `h1`-`h3` markup at
+  all), mirroring a real page-scanned Internet-Archive epub (Atomic
+  Habits' actual source: one physical page per spine file) - for tests
+  that need `ingest.consolidate.should_consolidate` to actually trigger.
 
 ## Key Decisions
 - `NARRATIVE_PADDING` is appended, never prepended, to a test's real

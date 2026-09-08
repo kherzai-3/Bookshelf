@@ -9,7 +9,7 @@ from pathlib import Path
 
 from bookrag.ingest.chapter import Chapter
 from bookrag.providers.base import ExtractedFact, ExtractionParseError, Provider
-from bookrag.storage import library_root, load_chapters
+from bookrag.storage import library_root, load_chapters, load_metadata
 
 
 @dataclass
@@ -28,13 +28,14 @@ def run_eval(
 ) -> list[ProviderChapterResult]:
     root = root or library_root()
     chapters = {c.index: c for c in load_chapters(book_id, root)}
+    content_type = load_metadata(book_id, root).get("content_type", "fiction")
 
     results: list[ProviderChapterResult] = []
     for chapter_index in chapter_indices:
         chapter = chapters[chapter_index]
         for provider_name, provider in providers.items():
             try:
-                facts = provider.extract_facts(chapter.text, [])
+                facts = provider.extract_facts(chapter.text, [], content_type)
                 parse_ok = True
             except ExtractionParseError:
                 facts = []

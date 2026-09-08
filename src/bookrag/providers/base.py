@@ -11,7 +11,7 @@ from typing import Protocol
 @dataclass
 class ExtractedFact:
     entity_name: str
-    entity_type: str  # "character" | "setting" | "theme"
+    entity_type: str  # fiction: "character"|"setting"|"theme"; nonfiction: "character"|"concept"|"theme"
     category: str
     statement: str
 
@@ -22,6 +22,8 @@ class ExtractionParseError(Exception):
 
 
 class Provider(Protocol):
-    def extract_facts(self, chapter_text: str, known_entities: list[str]) -> list[ExtractedFact]: ...
+    def extract_facts(
+        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+    ) -> list[ExtractedFact]: ...
 
-    def answer_question(self, question: str, context: str) -> str: ...
+    def answer_question(self, question: str, context: str, content_type: str = "fiction") -> str: ...

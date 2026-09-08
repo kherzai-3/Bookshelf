@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from bookrag.ingest.chapter import Chapter
-from bookrag.storage import save_book, slugify, unique_book_id
+from bookrag.storage import load_metadata, save_book, slugify, unique_book_id
 
 
 def test_slugify_normalizes_punctuation_and_case() -> None:
@@ -43,10 +43,23 @@ def test_save_book_writes_source_metadata_and_chapters(tmp_path: Path) -> None:
     assert metadata["author"] == "J.R.R. Tolkien"
     assert metadata["series"] is None
     assert metadata["chapter_count"] == 2
+    assert metadata["content_type"] == "fiction"  # default when not specified
 
     lines = (book_dir / "chapters.jsonl").read_text(encoding="utf-8").splitlines()
     assert json.loads(lines[0]) == {"index": 0, "title": "Chapter One", "text": "The hero arrives."}
     assert json.loads(lines[1]) == {"index": 1, "title": "Chapter Two", "text": "The hero leaves."}
+
+
+def test_save_book_persists_an_explicit_content_type(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+
+    book_id = save_book(
+        source, [Chapter(0, "One", "text")], title="Atomic Habits", content_type="nonfiction", root=root
+    )
+
+    assert load_metadata(book_id, root=root)["content_type"] == "nonfiction"
 
 
 def test_series_books_each_keep_their_own_chapter_2(tmp_path: Path) -> None:

@@ -1,27 +1,53 @@
 ---
 source: src/bookrag/providers/prompts.py
-last_synced: 2026-09-03T00:00:00Z
-source_hash: cf815be99948804ed61faee32a5b1769d2ca79db
+last_synced: 2026-09-08T00:00:00Z
+source_hash: 66cb54c90e63504327c2ba2ad80b48854c8caf3c
 ---
 
 ## Purpose
 The shared prompts every provider uses for each task - factored out so
 providers are judged by `eval.py` (extraction) or compared (question
 answering) on the model's output, not on subtly different wording of the
-instructions.
+instructions. Now two parallel pairs (fiction/nonfiction), selected by a
+book's `content_type` (see `storage.py`/`extract/pipeline.py`).
 
 ## Public Interface
-- `EXTRACTION_SYSTEM_PROMPT: str` — a one-line definition per category, an
-  explicit self-containment rule for `statement`, an anti-fabrication +
-  non-narrative-content rule, and one worked example. Response shape is
-  `{"facts": [...]}`, matching `parsing.extraction_response_schema()`.
+- `EXTRACTION_SYSTEM_PROMPT: str` — the fiction extraction prompt: a
+  one-line definition per category, an explicit self-containment rule for
+  `statement`, an anti-fabrication + non-narrative-content rule, and one
+  worked example. Response shape is `{"facts": [...]}`, matching
+  `parsing.extraction_response_schema()`.
+- `EXTRACTION_SYSTEM_PROMPT_NONFICTION: str` — a full parallel prompt (not
+  an interpolated template), for `parsing.ALLOWED_CATEGORIES_NONFICTION`/
+  `ALLOWED_ENTITY_TYPES_NONFICTION`'s taxonomy - its own worked example
+  ("habit stacking", not Will/Halt), and its "return `{"facts": []}`"
+  condition is framed around front/back matter (copyright notice,
+  dedication, index, acknowledgments) rather than "not part of the story's
+  narrative" - the fiction wording would misfire on a nonfiction book's
+  *entire* body, which is never narrative in that sense.
+- `EXTRACTION_SYSTEM_PROMPTS: dict[str, str]` — `{"fiction": ...,
+  "nonfiction": ...}`, so providers do a simple `[content_type]` lookup
+  rather than branching logic duplicated in each implementation.
 - `build_user_message(chapter_text: str, known_entities: list[str]) -> str` —
   frames `known_entities` as "use these exact names for someone already
-  introduced," not "don't restate" (see Key Decisions).
-- `ANSWER_SYSTEM_PROMPT: str` — instructs the model to answer only from the
-  facts it's given and never from outside knowledge of the book, since
-  outside knowledge could leak spoilers past the reader's current chapter.
-- `build_answer_user_message(question: str, context: str) -> str`
+  introduced," not "don't restate" (see Key Decisions). Shared unchanged by
+  both content types - already fully mode-agnostic.
+- `ANSWER_SYSTEM_PROMPT: str` — the fiction answer prompt: instructs the
+  model to answer only from the facts it's given and never from outside
+  knowledge of the book, since outside knowledge could leak spoilers past
+  the reader's current chapter.
+- `ANSWER_SYSTEM_PROMPT_NONFICTION: str` — same structure and mechanism
+  explanation, reframed: "spoiler" reads oddly for a self-help book
+  (nothing is "spoiled" by an early technique) - reframed around reading
+  progress ("a later chapter may define a term... in a way the reader
+  hasn't reached yet") instead. `query.format_context`/`facts_as_of` need
+  no changes for this - they group purely by `entity_id`/`category` with
+  no fiction-specific strings anywhere; only the prose explaining that
+  shape to the answering model differs.
+- `ANSWER_SYSTEM_PROMPTS: dict[str, str]` — same lookup pattern as
+  `EXTRACTION_SYSTEM_PROMPTS`.
+- `build_answer_user_message(question: str, context: str) -> str` — shared
+  unchanged by both content types.
 
 ## Key Decisions
 - `EXTRACTION_SYSTEM_PROMPT` no longer says "only report new or changed
@@ -64,3 +90,17 @@ instructions.
   catalog itself never dedupes or discards facts (see `query.py`'s context
   doc for why), so recency resolution has to happen here, in how the model
   is told to read the context it's given.
+- **Nonfiction gets full parallel prompts, not a parameterized shared
+  template.** Considered and rejected: the fiction prompt is fiction-
+  specific well beyond its category list ("a single chapter of a novel,"
+  a worked example about Will/Halt/the oakleaf, category definitions
+  phrased narratively) - interpolating mode-specific vocabulary into one
+  shared template would produce a harder-to-tune result than two clean
+  prompts. Confirmed the taxonomy mismatch was real, not just
+  theoretical, via a checkpoint run (`bookrag eval` against real
+  consolidated Atomic Habits chapters, current fiction prompt): "Habits
+  Academy" (a real named thing) got the same generic `theme/description`
+  treatment as an abstract idea, and an entire chapter about environment
+  design for habit formation filed "desk", "phone", "bedroom", "coffee
+  shop" as cataloged story `setting`s - see `parsing.py`'s context doc for
+  the taxonomy design this drove.

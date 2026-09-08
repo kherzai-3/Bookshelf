@@ -8,7 +8,9 @@ from bookrag.storage import save_book
 
 
 class _AlwaysFailsProvider:
-    def extract_facts(self, chapter_text: str, known_entities: list[str]) -> list[ExtractedFact]:
+    def extract_facts(
+        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+    ) -> list[ExtractedFact]:
         raise ExtractionParseError("simulated parse failure")
 
 

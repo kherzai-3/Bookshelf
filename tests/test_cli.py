@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from bookrag.cli import main
-from tests.helpers import build_narrative_epub, build_sample_epub
+from tests.helpers import build_fragmented_epub, build_narrative_epub, build_sample_epub
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +27,48 @@ def test_ingest_epub_end_to_end(tmp_path: Path, _library_root: Path) -> None:
     assert metadata["author"] == "Test Author"
     assert metadata["chapter_count"] == 2
     assert (book_dir / "source.epub").exists()
+
+
+def test_ingest_consolidates_many_small_fragments(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "fragmented.epub"
+    build_fragmented_epub(epub_path, fragment_count=40, words_per_fragment=100)  # 4000 words total
+
+    exit_code = main(["ingest", str(epub_path)])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "consolidated 40 raw fragments into" in output
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    metadata = json.loads((book_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["chapter_count"] < 40
+    report = (book_dir / "ingestion_report.txt").read_text(encoding="utf-8")
+    assert "consolidated 40 raw fragments into" in report
+
+
+def test_ingest_defaults_to_fiction_content_type(tmp_path: Path, _library_root: Path) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+
+    exit_code = main(["ingest", str(epub_path)])
+
+    assert exit_code == 0
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    metadata = json.loads((book_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["content_type"] == "fiction"
+
+
+def test_ingest_with_explicit_content_type(tmp_path: Path, _library_root: Path) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+
+    exit_code = main(["ingest", str(epub_path), "--content-type", "nonfiction"])
+
+    assert exit_code == 0
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    metadata = json.loads((book_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["content_type"] == "nonfiction"
 
 
 def test_ingest_with_series_flags(tmp_path: Path, _library_root: Path) -> None:
@@ -207,6 +249,29 @@ def test_chat_single_question_with_fake_provider(
 
     assert exit_code == 0
     assert "[fake answer] Based on:" in capsys.readouterr().out
+
+
+def test_chat_passes_content_type_from_metadata_to_answer_question(
+    tmp_path: Path, _library_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_narrative_epub(epub_path)
+    main(["ingest", str(epub_path), "--content-type", "nonfiction"])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+
+    seen_content_types: list[str] = []
+
+    class _RecordingProvider:
+        def answer_question(self, question, context, content_type="fiction"):
+            seen_content_types.append(content_type)
+            return "answer"
+
+    monkeypatch.setattr("bookrag.cli.get_provider", lambda name=None, model=None: _RecordingProvider())
+
+    exit_code = main(["chat", book_dir.name, "--chapter", "0", "--question", "anything"])
+
+    assert exit_code == 0
+    assert seen_content_types == ["nonfiction"]
 
 
 def test_chat_rejects_out_of_range_chapter(tmp_path: Path, _library_root: Path) -> None:

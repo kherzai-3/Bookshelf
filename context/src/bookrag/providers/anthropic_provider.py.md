@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/anthropic_provider.py
-last_synced: 2026-09-03T00:00:00Z
-source_hash: 51735211df5823ccd0e345fe7ee6a3789ceb0113
+last_synced: 2026-09-08T00:00:00Z
+source_hash: 3f20b8d6b42d94b1f234597422d4dae62b790046
 ---
 
 ## Purpose
@@ -16,11 +16,13 @@ parses a JSON array of new/changed facts back.
   `ANTHROPIC_API_KEY` isn't set (checked after `.env` loading, now done in
   `providers/__init__.py`), so a misconfigured run fails immediately and
   clearly rather than on the first extraction call.
-- `AnthropicProvider.extract_facts(chapter_text, known_entities) ->
-  list[ExtractedFact]`
-- `AnthropicProvider.answer_question(question, context) -> str` — shares
-  the `_complete` helper with `extract_facts`, just swaps in
-  `ANSWER_SYSTEM_PROMPT`/`build_answer_user_message`.
+- `AnthropicProvider.extract_facts(chapter_text, known_entities, content_type="fiction") ->
+  list[ExtractedFact]` — `content_type` selects the prompt/taxonomy the
+  same way as `OllamaProvider`, just without the schema-forcing (see Open
+  Questions).
+- `AnthropicProvider.answer_question(question, context, content_type="fiction") -> str`
+  — shares the `_complete` helper with `extract_facts`, just swaps in
+  `ANSWER_SYSTEM_PROMPTS[content_type]`/`build_answer_user_message`.
 
 ## Key Decisions
 - `.env` loading moved to `providers/__init__.py` (no longer done here
@@ -34,14 +36,15 @@ parses a JSON array of new/changed facts back.
   (the user has no direct API key), which is why `OllamaProvider` exists
   and is now the practical default (`registry.DEFAULT_PROVIDER`). This
   class is kept for whenever direct API/Bedrock/Vertex access exists.
-- Shares `EXTRACTION_SYSTEM_PROMPT`/`build_user_message` (`prompts.py`) and
+- Shares `EXTRACTION_SYSTEM_PROMPTS`/`build_user_message` (`prompts.py`) and
   `parse_facts` (`parsing.py`) with `OllamaProvider` - factored out so the
   eval harness compares providers on the same prompt, not incidentally
   different wording.
 
 ## Dependencies
 - Internal: `bookrag.providers.parsing.parse_facts`,
-  `bookrag.providers.prompts` (`EXTRACTION_SYSTEM_PROMPT`, `build_user_message`)
+  `bookrag.providers.prompts` (`EXTRACTION_SYSTEM_PROMPTS`,
+  `ANSWER_SYSTEM_PROMPTS`, `build_user_message`, `build_answer_user_message`)
 - External: `anthropic`, `python-dotenv`
 
 ## Open Questions / TODOs

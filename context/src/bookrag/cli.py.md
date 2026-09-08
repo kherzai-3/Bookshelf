@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-03T00:00:00Z
-source_hash: f103ee2a3d122ad100f63856da851a913f9145ee
+last_synced: 2026-09-08T00:00:00Z
+source_hash: f60176dfe952bd17ddbe3a1f8629275ab344ca55
 ---
 
 ## Purpose
@@ -15,9 +15,13 @@ read-only), `chat` (spoiler-safe Q&A against a book, up to a given chapter).
   takes an explicit `argv` (rather than always reading `sys.argv`) so tests
   can call it directly without subprocessing.
 - CLI: `bookrag ingest <path> [--title] [--author] [--series NAME]
-  [--series-position N]` — `--series-position` is required whenever
-  `--series` is given (rejected with exit code 1 otherwise, before anything
-  is written).
+  [--series-position N] [--content-type fiction|nonfiction]` —
+  `--series-position` is required whenever `--series` is given (rejected
+  with exit code 1 otherwise, before anything is written). `--content-type`
+  defaults to `"fiction"`, is persisted to `metadata.json`, and later
+  selects which extraction category/entity-type taxonomy and prompt pair
+  `extract`/`eval`/`chat` use for this book - explicit, not auto-detected
+  (matches this project's posture elsewhere, e.g. `--series-position`).
 - CLI: `bookrag extract <book-id> [--provider NAME] [--model NAME]` —
   `--provider` is `"anthropic"`, `"ollama"`, or `"fake"`; defaults via
   `providers.registry.get_provider` (`$BOOKRAG_PROVIDER` then
@@ -78,7 +82,19 @@ read-only), `chat` (spoiler-safe Q&A against a book, up to a given chapter).
   (via `load_chapters`) before calling `facts_as_of` - `facts_as_of` itself
   doesn't range-check (an out-of-range chapter would just silently include
   every fact), so this is the one place that turns a typo'd chapter number
-  into a clear error instead of a quietly-too-generous answer.
+  into a clear error instead of a quietly-too-generous answer. It also
+  loads the book's `content_type` (`load_metadata(...).get("content_type",
+  "fiction")`) alongside the chapter count, passed to every
+  `answer_question` call so a nonfiction book gets the nonfiction answer
+  prompt.
+- `_ingest` calls `ingest.consolidate.should_consolidate`/
+  `consolidate_fragments` right after `loader.load_chapters`, before
+  `sanity_summary`/`classify_ingestion`/`save_book` all run - so every
+  downstream consumer sees the (possibly consolidated) chapter list, never
+  the raw one. `raw_chapter_count` is threaded through to
+  `write_ingestion_report` (as `None` when nothing changed) purely so the
+  consolidation note is visible on later review of the report file, not
+  just in the terminal at ingest time.
 
 ## Public Interface (continued)
 - `classify_ingestion(chapters) -> "chapter-bound" | "text-bound"` —
@@ -97,13 +113,15 @@ read-only), `chat` (spoiler-safe Q&A against a book, up to a given chapter).
   problem this feature exists to solve.
 - `_format_duration(seconds: float) -> str` — `"45s"` / `"3m12s"` /
   `"1h2m3s"`, whichever units are non-zero.
-- `write_ingestion_report(book_id, chapters, root=None) -> Path` — writes
-  `data/library/<book_id>/ingestion_report.txt`: the classification plus
-  everything `sanity_summary` prints, persisted rather than only shown at
-  ingest time. When `"text-bound"`, appends a note that chapter-scoped
-  cataloging/spoiler-safe querying still work correctly against the
-  fragment boundaries - they just won't align with the book's real
-  chapters/TOC.
+- `write_ingestion_report(book_id, chapters, root=None, raw_chapter_count=None) -> Path`
+  — writes `data/library/<book_id>/ingestion_report.txt`: the
+  classification plus everything `sanity_summary` prints, persisted rather
+  than only shown at ingest time. When `raw_chapter_count` is given (and
+  differs from `len(chapters)`), appends a note that fragments were
+  consolidated (see `ingest/consolidate.py`) with the before/after counts.
+  When `"text-bound"`, appends a note that chapter-scoped cataloging/
+  spoiler-safe querying still work correctly against the fragment
+  boundaries - they just won't align with the book's real chapters/TOC.
 - `sanity_summary(chapters: list[Chapter], edge_count: int = 3) -> list[str]`
   — printed after every ingest: min/median/max chapter word count, plus the
   first and last `edge_count` chapter titles. Chapter extraction is
@@ -115,16 +133,23 @@ read-only), `chat` (spoiler-safe Q&A against a book, up to a given chapter).
 
 ## Dependencies
 - Internal: `bookrag.ingest.epub_loader`, `bookrag.ingest.pdf_loader`,
-  `bookrag.ingest.chapter.Chapter`, `bookrag.storage` (`save_book`,
-  `load_chapters`, `library_root`, `incoming_root`),
-  `bookrag.titles.guess_title_author`, `bookrag.extract.pipeline.extract_book`,
-  `bookrag.eval` (`run_eval`, `summarize`), `bookrag.providers.registry.get_provider`,
-  `bookrag.query` (`facts_as_of`, `format_context`)
+  `bookrag.ingest.chapter.Chapter`, `bookrag.ingest.consolidate`
+  (`should_consolidate`, `consolidate_fragments`), `bookrag.storage`
+  (`save_book`, `load_chapters`, `load_metadata`, `library_root`,
+  `incoming_root`), `bookrag.titles.guess_title_author`,
+  `bookrag.extract.pipeline.extract_book`, `bookrag.eval` (`run_eval`,
+  `summarize`), `bookrag.providers.registry.get_provider`, `bookrag.query`
+  (`facts_as_of`, `format_context`)
 - External: `statistics` (stdlib)
 
 ## Open Questions / TODOs
 - No `list`/`show` subcommands yet to inspect what's already in the library —
   only `ingest`.
+- The non-fiction taxonomy (`--content-type nonfiction`, see
+  `providers/prompts.py`/`providers/parsing.py`) has only been validated
+  via a `bookrag eval` checkpoint (3 chapters of a real consolidated Atomic
+  Habits), not a full real extraction run - see `pipeline.py`'s context
+  doc and the `nonfiction_extraction_support` project memory.
 - `chat`'s interactive loop re-answers every question against the same
   fixed `context` string built once at startup - there's no multi-turn
   conversation memory (the provider never sees earlier Q&A in the session),

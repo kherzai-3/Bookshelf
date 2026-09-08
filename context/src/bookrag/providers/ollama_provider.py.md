@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/ollama_provider.py
-last_synced: 2026-09-03T00:00:00Z
-source_hash: 8c200b3637ef8bcaddf6ad598d713524b11848ee
+last_synced: 2026-09-08T00:00:00Z
+source_hash: dd84ef415adbcc5b713909101e92713dcccfc65f
 ---
 
 ## Purpose
@@ -18,17 +18,22 @@ confirmed. Verified against a real, locally-running `llama3.2:3b` model.
   `DEFAULT_TIMEOUT_SECONDS = 900`. The env-var path is what makes switching
   to a bigger model on a different (e.g. GPU-equipped) machine a one-line
   `.env` change rather than a code edit - see README's "LLM provider setup".
-- `OllamaProvider.extract_facts(chapter_text, known_entities) ->
+- `OllamaProvider.extract_facts(chapter_text, known_entities, content_type="fiction") ->
   list[ExtractedFact]` — raises `RuntimeError` (not `ExtractionParseError`)
   if Ollama itself isn't reachable, doesn't respond within `timeout`, or a
   request that started responding stalls past `timeout` mid-read (both
   `urllib.error.URLError` and a bare `TimeoutError` are caught and
-  re-raised the same way - see Key Decisions).
-- `OllamaProvider.answer_question(question, context) -> str` — shares the
-  `_chat` helper with `extract_facts`, but with no `response_format`/
-  `temperature` override, since a conversational answer is free text, not
-  a structured fact list, and benefits from Ollama's normal sampling
-  defaults.
+  re-raised the same way - see Key Decisions). `content_type` selects
+  which schema/prompt pair (`EXTRACTION_SYSTEM_PROMPTS[content_type]`,
+  `extraction_response_schema(content_type)`) and which `parse_facts`
+  taxonomy get used.
+- `OllamaProvider.answer_question(question, context, content_type="fiction") -> str`
+  — shares the `_chat` helper with `extract_facts`, but with no
+  `response_format`/`temperature` override, since a conversational answer
+  is free text, not a structured fact list, and benefits from Ollama's
+  normal sampling defaults. `content_type` only selects which prompt
+  (`ANSWER_SYSTEM_PROMPTS[content_type]`) is used - the mechanism is
+  identical either way.
 
 ## Key Decisions
 - Sends a real JSON Schema (`parsing.extraction_response_schema()`) as
@@ -81,8 +86,10 @@ confirmed. Verified against a real, locally-running `llama3.2:3b` model.
   low temperature for `extract_facts`, neither for `answer_question`.
 
 ## Dependencies
-- Internal: `bookrag.providers.parsing.parse_facts`,
-  `bookrag.providers.prompts` (`EXTRACTION_SYSTEM_PROMPT`, `build_user_message`)
+- Internal: `bookrag.providers.parsing` (`parse_facts`,
+  `extraction_response_schema`), `bookrag.providers.prompts`
+  (`EXTRACTION_SYSTEM_PROMPTS`, `ANSWER_SYSTEM_PROMPTS`, `build_user_message`,
+  `build_answer_user_message`)
 - External: none beyond stdlib (`urllib`); requires Ollama itself running
   locally with the target model pulled (`ollama pull llama3.2:3b`)
 

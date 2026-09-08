@@ -1,7 +1,14 @@
 import pytest
 
 from bookrag.providers.base import ExtractionParseError
-from bookrag.providers.parsing import ALLOWED_CATEGORIES, ALLOWED_ENTITY_TYPES, extraction_response_schema, parse_facts
+from bookrag.providers.parsing import (
+    ALLOWED_CATEGORIES,
+    ALLOWED_CATEGORIES_NONFICTION,
+    ALLOWED_ENTITY_TYPES,
+    ALLOWED_ENTITY_TYPES_NONFICTION,
+    extraction_response_schema,
+    parse_facts,
+)
 
 _FACT = '{"entity_name": "Ishmael", "entity_type": "character", "category": "development", "statement": "went to sea"}'
 
@@ -161,3 +168,54 @@ def test_extraction_response_schema_enumerates_allowed_types_and_categories() ->
     assert set(fact_schema["properties"]["category"]["enum"]) == ALLOWED_CATEGORIES
     assert fact_schema["required"] == ["entity_name", "entity_type", "category", "statement"]
     assert schema["required"] == ["facts"]
+
+
+def test_extraction_response_schema_caps_facts_array_length() -> None:
+    """Real observed failure with no cap: a request generated 8,490+ output
+    tokens (normal chapters produce 500-1500) over 14m43s before Ollama's
+    own server gave up and restarted - a runaway generation loop under
+    grammar-constrained decoding, which has no structural reason to ever
+    close an open-ended array. maxItems makes that impossible, not just
+    unlikely."""
+    schema = extraction_response_schema()
+
+    assert schema["properties"]["facts"]["maxItems"] == 25
+
+
+def test_extraction_response_schema_of_nonfiction_uses_the_nonfiction_taxonomy() -> None:
+    schema = extraction_response_schema(content_type="nonfiction")
+
+    fact_schema = schema["properties"]["facts"]["items"]
+    assert set(fact_schema["properties"]["entity_type"]["enum"]) == ALLOWED_ENTITY_TYPES_NONFICTION
+    assert set(fact_schema["properties"]["category"]["enum"]) == ALLOWED_CATEGORIES_NONFICTION
+
+
+def test_parse_facts_of_nonfiction_accepts_a_nonfiction_category_and_type() -> None:
+    fact = (
+        '{"entity_name": "Habit Stacking", "entity_type": "concept", "category": "technique", '
+        '"statement": "pair a new habit with an existing one"}'
+    )
+
+    facts = parse_facts(f"[{fact}]", content_type="nonfiction")
+
+    assert facts[0].entity_type == "concept"
+    assert facts[0].category == "technique"
+
+
+def test_parse_facts_of_nonfiction_rejects_a_fiction_only_entity_type() -> None:
+    """"setting" is deliberately dropped for nonfiction - real observed
+    failure without this: generic illustrative nouns ("desk", "phone",
+    "bedroom") got cataloged as if they were meaningful recurring story
+    settings, when they were just examples in a discussion of habit cues."""
+    fact = '{"entity_name": "the kitchen counter", "entity_type": "setting", "category": "example", "statement": "x"}'
+
+    with pytest.raises(ExtractionParseError):
+        parse_facts(f"[{fact}]", content_type="nonfiction")
+
+
+def test_parse_facts_of_nonfiction_normalizes_an_unrecognized_category_leniently() -> None:
+    fact = '{"entity_name": "Habits", "entity_type": "theme", "category": "location", "statement": "x"}'
+
+    facts = parse_facts(f"[{fact}]", content_type="nonfiction")
+
+    assert facts[0].category == "description"

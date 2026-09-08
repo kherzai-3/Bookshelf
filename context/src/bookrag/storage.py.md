@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/storage.py
-last_synced: 2026-09-02T00:00:00Z
-source_hash: 4f7fb0d23652d71c98b7a2ffa681268b2d403eb9
+last_synced: 2026-09-08T00:00:00Z
+source_hash: d82d860caef4e7cd8abf62ea0832e3cf1427090d
 ---
 
 ## Purpose
@@ -24,11 +24,20 @@ listing/grouping books without ever merging their chapter numbering.
   `-2`, `-3`, ... suffix appended until it doesn't collide with an existing
   directory under `root`.
 - `save_book(source_path, chapters, *, title, author=None, series_name=None,
-  series_position=None, root=None) -> str` — copies the source file, writes
-  `metadata.json` and `chapters.jsonl`, updates `index.json`, returns the new
-  `book_id`.
+  series_position=None, content_type="fiction", root=None) -> str` —
+  copies the source file, writes `metadata.json` and `chapters.jsonl`,
+  updates `index.json`, returns the new `book_id`. `content_type` (added
+  for non-fiction support) is just persisted here - `save_book` itself
+  doesn't interpret it, only stores it for `extract.pipeline`/`eval.py`/
+  `cli._chat` to pick up later via `load_metadata`.
 - `load_chapters(book_id, root=None) -> list[Chapter]` — reads a book's
   `chapters.jsonl` back into `Chapter` objects (used by extraction/eval).
+- `load_metadata(book_id, root=None) -> dict` — reads a book's
+  `metadata.json` back. Added alongside `content_type` - nothing read
+  `metadata.json` back before this (only wrote it); every consumer of
+  `content_type` uses `.get("content_type", "fiction")` rather than direct
+  indexing, since a book ingested before this field existed has no such
+  key.
 - `load_index(root=None) -> dict` — the raw `index.json` (`{"books": []}` if
   it doesn't exist yet).
 - `series_reading_order(book_id, root=None) -> list[str]` — ordered
@@ -67,7 +76,11 @@ listing/grouping books without ever merging their chapter numbering.
 
 ## Data Contracts
 - `metadata.json`: `{book_id, title, author, series: {name, position} | null,
-  source_format, source_filename, ingested_at, chapter_count}`
+  content_type: "fiction" | "nonfiction", source_format, source_filename,
+  ingested_at, chapter_count}`. `content_type` selects which extraction
+  category/entity-type taxonomy and prompt pair a book uses (see
+  `providers/prompts.py`/`providers/parsing.py`) - a book saved before this
+  field existed simply has no key; every reader defaults it to `"fiction"`.
 - `chapters.jsonl`: one `{index, title, text}` object per line, in the same
   order and shape as the `Chapter` dataclass.
 - `index.json`: `{"books": [{book_id, title, author, series}, ...]}` — one
@@ -76,5 +89,10 @@ listing/grouping books without ever merging their chapter numbering.
 ## Open Questions / TODOs
 - No de-duplication across ingests of the *same* underlying book (re-running
   `ingest` on the same file creates a second `book_id` via the collision
-  suffix, e.g. `the-hobbit-2`) — acceptable for now since there's no
-  extraction/query layer yet to make that confusing.
+  suffix, e.g. `the-hobbit-2`). Originally deprioritized on the reasoning
+  that there was no extraction/query layer yet to make a duplicate
+  confusing - both now exist (`extract_book`, `bookrag chat`), and a real
+  extraction run takes on the order of 2+ hours (see `ollama_provider.py`'s
+  context doc), so an accidental duplicate silently wasting a full run
+  against the wrong copy is a real cost now, not a hypothetical one. Worth
+  revisiting.

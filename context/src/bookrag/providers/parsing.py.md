@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/parsing.py
-last_synced: 2026-09-03T00:00:00Z
-source_hash: 7e421c3fb17554f7a8d4e6862bc8d5c988d8642a
+last_synced: 2026-09-08T00:00:00Z
+source_hash: de4bbd364f7fa6d76332e3b8cf5dac34bbf5f0f3
 ---
 
 ## Purpose
@@ -14,34 +14,48 @@ parsing quirks. Also owns `extraction_response_schema()`, the JSON Schema
 schema can't drift from what this file's own normalization actually accepts.
 
 ## Public Interface
-- `parse_facts(raw_text: str) -> list[ExtractedFact]` — strips markdown
-  code fences, then parses JSON. An empty dict (`{}`) returns `[]` - the
-  model correctly reporting nothing to extract, not a malformed fact (see
-  Key Decisions). Otherwise, if the top-level value is a dict, unwraps a
-  list found under `"facts"`/`"results"`/`"data"`/`"items"`, or treats the
-  dict itself as a single fact object. Raises `ExtractionParseError` on
-  invalid JSON, a non-list/dict top level, a fact object missing a
-  required key, or an `entity_type` outside `ALLOWED_ENTITY_TYPES` and not
-  a known alias. Silently drops (not raises) an individual fact whose
-  `statement` is implausibly long or contains a suspicious embedded
-  substring (see Key Decisions) or whose `category` isn't recognized (fed
-  through `_normalize_category` instead of dropped).
-- `ALLOWED_ENTITY_TYPES = {"character", "setting", "theme"}` — the fixed
+- `parse_facts(raw_text: str, content_type: str = "fiction") -> list[ExtractedFact]`
+  — strips markdown code fences, then parses JSON. An empty dict (`{}`)
+  returns `[]` - the model correctly reporting nothing to extract, not a
+  malformed fact (see Key Decisions). Otherwise, if the top-level value is
+  a dict, unwraps a list found under `"facts"`/`"results"`/`"data"`/
+  `"items"`, or treats the dict itself as a single fact object. Raises
+  `ExtractionParseError` on invalid JSON, a non-list/dict top level, a fact
+  object missing a required key, or an `entity_type` outside the allowed
+  set for `content_type` and not a known alias. Silently drops (not
+  raises) an individual fact whose `statement` is implausibly long or
+  contains a suspicious embedded substring (see Key Decisions) or whose
+  `category` isn't recognized (fed through `_normalize_category` instead
+  of dropped).
+- `ALLOWED_ENTITY_TYPES = {"character", "setting", "theme"}` — the fiction
   catalog entity kinds, matching the original brief.
-- `_normalize_entity_type(raw_type: str) -> str` — case-insensitive; an
-  allowed value passes through, a known alias (`_ENTITY_TYPE_ALIASES`)
-  maps to its real type, anything else raises `ExtractionParseError`.
+- `ALLOWED_ENTITY_TYPES_NONFICTION = {"character", "concept", "theme"}` —
+  drops `setting` entirely, adds `concept` (a named, citable framework/
+  technique the book teaches as a discrete unit).
+- `_normalize_entity_type(raw_type: str, content_type: str = "fiction") -> str`
+  — case-insensitive; an allowed value (for the given `content_type`)
+  passes through, a known alias (`_ENTITY_TYPE_ALIASES`/
+  `_ENTITY_TYPE_ALIASES_NONFICTION`, selected the same way) maps to its
+  real type, anything else raises `ExtractionParseError`.
 - `ALLOWED_CATEGORIES = {"personality", "appearance", "relationship",
-  "status", "description", "development"}` — the six categories the
-  extraction prompt asks for.
-- `_normalize_category(raw_category: str) -> str` — case-insensitive; an
-  allowed value passes through, anything else is folded into
-  `"description"` rather than raising (see Key Decisions for why this is
-  lenient where `_normalize_entity_type` is strict).
-- `extraction_response_schema() -> dict` — the JSON Schema for Ollama's
-  `format` field: `{"facts": [{"entity_name": str, "entity_type": enum,
-  "category": enum, "statement": str (maxLength 300)}]}`, built from
-  `ALLOWED_ENTITY_TYPES`/`ALLOWED_CATEGORIES`.
+  "status", "description", "development"}` — the six fiction categories
+  the extraction prompt asks for.
+- `ALLOWED_CATEGORIES_NONFICTION = {"definition", "claim", "technique",
+  "example", "relationship", "description"}` — a parallel, not shared,
+  taxonomy (see Key Decisions for why a shared/parameterized one wasn't
+  used).
+- `_normalize_category(raw_category: str, content_type: str = "fiction") -> str`
+  — case-insensitive; an allowed value (for the given `content_type`)
+  passes through, anything else is folded into `"description"` rather than
+  raising (see Key Decisions for why this is lenient where
+  `_normalize_entity_type` is strict). `"description"` is a member of both
+  taxonomies, so the fallback is always valid regardless of `content_type`.
+- `extraction_response_schema(content_type: str = "fiction") -> dict` — the
+  JSON Schema for Ollama's `format` field: `{"facts": [{"entity_name": str,
+  "entity_type": enum, "category": enum, "statement": str (maxLength
+  300)}]}` (`facts` itself capped at `maxItems: 25`), built from the
+  `ALLOWED_ENTITY_TYPES*`/`ALLOWED_CATEGORIES*` pair selected by
+  `content_type`.
 
 ## Key Decisions
 - **`{}` means zero facts, not one malformed fact.** Found while comparing
@@ -100,6 +114,52 @@ schema can't drift from what this file's own normalization actually accepts.
   can't grow past that length, so it can't swallow subsequent facts); the
   drop-check above is a secondary net for providers/paths that don't use
   the schema (or if it's ever bypassed).
+- **`facts`'s `maxItems: 25` fixes a real runaway-generation failure, not a
+  hypothetical one.** Diagnosed via Ollama's own `server.log`: one real
+  extraction request generated 8,490+ output tokens (normal chapters
+  produce 500-1500) over 14m43s, running with the *correct* `n_ctx_slot =
+  8192` the whole time (ruling out a context-size misconfiguration as the
+  cause), before Ollama's internal server hit its own limit, returned a
+  500, and restarted the model subprocess. From the client side this
+  looked like a hang (near-zero CPU over a short sample window - misleading,
+  since ~9.7 tokens/sec of real generation is easy to miss in an 8-second
+  sample), but it was actually still working the entire time, just never
+  satisfying the grammar's condition to close the array. An open-ended
+  array under grammar-constrained decoding has no structural reason to
+  ever terminate if the model doesn't confidently choose to - `maxItems`
+  makes "keep going forever" impossible rather than merely unlikely.
+  Verified empirically that Ollama's grammar conversion actually honors
+  `maxItems` (tested with a deliberately open-ended prompt against a
+  `maxItems: 3` schema - the model was forced to stop at exactly 3 items),
+  and re-verified the production schema against the real chapter that had
+  previously been the highest-volume one seen (32 facts uncapped) - it now
+  completes in ~90s with a natural `done_reason: stop`, not truncation.
+  25 was chosen from real observed data (the richest chapter seen produced
+  32, itself an outlier) - generous enough to preserve the extraction
+  quality gains, a hard enough ceiling to make the runaway case structurally
+  impossible.
+- **The nonfiction taxonomy is a separate set, not a parameterized version
+  of the fiction one** - confirmed necessary, not just theoretically
+  different, by a real checkpoint run (`bookrag eval` against consolidated
+  Atomic Habits chapters, see `extract/pipeline.py`'s context doc for how
+  `content_type` gets there): the fiction categories collapsed almost
+  everything into `"description"` (a real named thing, "Habits Academy",
+  got the exact same generic treatment as an abstract idea), and
+  `"setting"` produced outright nonsense - "desk", "phone", "bedroom",
+  "coffee shop" all filed as cataloged story settings, when they were just
+  illustrative examples in a discussion of habit cues. `setting` is
+  dropped entirely for nonfiction for this reason; `"technique"` (a
+  concrete, actionable instruction) is the one category with no fiction
+  analog - it's what lets a reader later ask "what techniques does this
+  book recommend?" separately from "what does it claim?". `"relationship"`
+  is reused but redefined: concept-to-concept (builds on/is a component
+  of), not person-to-person. No aliases seeded for
+  `_ENTITY_TYPE_ALIASES_NONFICTION` (unlike fiction's monster/creature) -
+  grown from real observed drift if/when it happens, not guessed upfront.
+  `definition` vs `claim` has acknowledged soft edges for a small model
+  (the same *kind* of risk as the fiction category drift above) -
+  deliberately not resolved further until more real extraction data shows
+  how bad it actually is.
 
 ## Open Questions / TODOs
 - The corrupted-statement drop has no visible count the way

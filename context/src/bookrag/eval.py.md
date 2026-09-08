@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/eval.py
-last_synced: 2026-09-02T00:00:00Z
-source_hash: 760e5d9a26b50bc5a8e75982ffc8327bca0a2a2c
+last_synced: 2026-09-08T00:00:00Z
+source_hash: b53747cc16dc77f87556ac5615c7d96d1d9c5ad0
 ---
 
 ## Purpose
@@ -14,7 +14,13 @@ safe to run against production data without disturbing it.
 - `run_eval(book_id, chapter_indices, providers: dict[str, Provider], root=None)
   -> list[ProviderChapterResult]` — runs each provider independently per
   chapter (no shared `known_entities`, unlike the real pipeline - this is
-  deliberately isolated per chapter for a fair comparison).
+  deliberately isolated per chapter for a fair comparison). Looks up the
+  book's `content_type` via `storage.load_metadata(...).get("content_type",
+  "fiction")` once, passed to every `extract_facts` call - real use: the
+  checkpoint that validated the nonfiction taxonomy design was exactly a
+  `run_eval` call (via `bookrag eval`) against consolidated Atomic Habits
+  chapters, using the *then-current* fiction taxonomy to surface how badly
+  it misfit before the nonfiction one was built.
 - `groundedness_score(chapter_text: str, fact: ExtractedFact) -> float` —
   cheap lexical check in `[0.0, 1.0]`: fraction of the statement's
   significant (>3 char) words that literally appear in the chapter text.
@@ -37,4 +43,4 @@ safe to run against production data without disturbing it.
 
 ## Dependencies
 - Internal: `bookrag.ingest.chapter.Chapter`, `bookrag.providers.base`,
-  `bookrag.storage` (`library_root`, `load_chapters`)
+  `bookrag.storage` (`library_root`, `load_chapters`, `load_metadata`)

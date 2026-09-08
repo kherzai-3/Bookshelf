@@ -18,7 +18,9 @@ class _FixedResponseProvider:
         self._facts = facts
         self.call_count = 0
 
-    def extract_facts(self, chapter_text: str, known_entities: list[str]) -> list[ExtractedFact]:
+    def extract_facts(
+        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+    ) -> list[ExtractedFact]:
         self.call_count += 1
         return list(self._facts)
 
@@ -34,12 +36,60 @@ class _FailsOnNthCall:
         self._delegate = FakeProvider()
         self._call_count = 0
 
-    def extract_facts(self, chapter_text: str, known_entities: list[str]) -> list[ExtractedFact]:
+    def extract_facts(
+        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+    ) -> list[ExtractedFact]:
         call_index = self._call_count
         self._call_count += 1
         if call_index == self._failing_call_index:
             raise ExtractionParseError("simulated malformed output")
-        return self._delegate.extract_facts(chapter_text, known_entities)
+        return self._delegate.extract_facts(chapter_text, known_entities, content_type)
+
+
+def test_extract_book_passes_content_type_from_metadata_to_the_provider(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [Chapter(0, "One", f"Will looked up at Halt and nodded. {NARRATIVE_PADDING}")]
+    book_id = save_book(source, chapters, title="Test Novel", content_type="nonfiction", root=root)
+
+    seen_content_types: list[str] = []
+
+    class _RecordingProvider:
+        def extract_facts(self, chapter_text, known_entities, content_type="fiction"):
+            seen_content_types.append(content_type)
+            return []
+
+    extract_book(book_id, _RecordingProvider(), root=root)
+
+    assert seen_content_types == ["nonfiction"]
+
+
+def test_extract_book_defaults_to_fiction_when_metadata_predates_content_type(tmp_path: Path) -> None:
+    """A book ingested before content_type existed has no such key in its
+    metadata.json - must default to the taxonomy every book used before
+    this was introduced, not crash on a missing key."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [Chapter(0, "One", f"Will looked up at Halt and nodded. {NARRATIVE_PADDING}")]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+
+    metadata_path = root / book_id / "metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    del metadata["content_type"]
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    seen_content_types: list[str] = []
+
+    class _RecordingProvider:
+        def extract_facts(self, chapter_text, known_entities, content_type="fiction"):
+            seen_content_types.append(content_type)
+            return []
+
+    extract_book(book_id, _RecordingProvider(), root=root)
+
+    assert seen_content_types == ["fiction"]
 
 
 def test_extract_book_writes_facts_and_updates_entities(tmp_path: Path) -> None:

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from bookrag.extract.resolve import load_entities, resolve_entity, save_entities
 from bookrag.providers.base import ExtractionParseError, Provider
-from bookrag.storage import library_root, load_chapters, series_reading_order
+from bookrag.storage import library_root, load_chapters, load_metadata, series_reading_order
 
 OnChapterDone = Callable[[int, int], None]
 
@@ -49,6 +49,10 @@ def extract_book(
     chapters = load_chapters(book_id, root)
     entities = load_entities(root)
     entities_before = len(entities["entities"])
+    # .get(..., "fiction"): a book ingested before content_type existed has
+    # no such key in its metadata.json - defaults to the taxonomy every book
+    # used before this was introduced.
+    content_type = load_metadata(book_id, root).get("content_type", "fiction")
 
     prior_book_ids = series_reading_order(book_id, root)[:-1]
     known_names = _entity_names_for_books(prior_book_ids, entities)
@@ -73,7 +77,7 @@ def extract_book(
                     # retrying every remaining chapter against a dead provider is
                     # pointless.
                     try:
-                        raw_facts = provider.extract_facts(chapter.text, known_names)
+                        raw_facts = provider.extract_facts(chapter.text, known_names, content_type)
                     except ExtractionParseError:
                         parse_failure_count += 1
                         raw_facts = []

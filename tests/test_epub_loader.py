@@ -85,6 +85,42 @@ def test_load_chapters_handles_text_html_media_type(tmp_path: Path) -> None:
     assert "hero arrives" in chapters[0].text
 
 
+def test_load_chapters_does_not_leak_head_title_into_chapter_text(tmp_path: Path) -> None:
+    """Real bug: a page-scanned, Internet-Archive-produced epub declares its
+    spine items as media_type="text/html" (see the test above), so ebooklib
+    treats them as raw-passthrough EpubItem rather than EpubHtml - the
+    latter rebuilds <head> empty, masking this everywhere else, but a raw
+    EpubItem keeps its original <head><title>Page N</title> intact. Before
+    _split_by_headings scoped to <body>, tree.text_content() on the whole
+    document leaked that invisible title text in as the literal first line
+    of every such chapter's extracted text (observed: "Page 142" prefixing
+    real content, across all 286 chapters of a real ingested book)."""
+    book = epub.EpubBook()
+    book.set_identifier("title-leak-id")
+    book.set_title("Title Leak Book")
+    book.set_language("en")
+
+    page = epub.EpubItem(
+        uid="page1",
+        file_name="page1.html",
+        media_type="text/html",
+        content=b"<html><head><title>Page 142</title></head><body><p>The hero arrives.</p></body></html>",
+    )
+    book.add_item(page)
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", page]
+
+    epub_path = tmp_path / "title_leak.epub"
+    epub.write_epub(str(epub_path), book)
+
+    chapters = load_chapters(epub_path)
+
+    assert len(chapters) == 1
+    assert "Page 142" not in chapters[0].text
+    assert "hero arrives" in chapters[0].text
+
+
 def test_extract_metadata_reads_title_and_author(tmp_path: Path) -> None:
     epub_path = tmp_path / "sample.epub"
     build_sample_epub(epub_path)

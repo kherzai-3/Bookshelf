@@ -41,8 +41,23 @@ def _split_by_headings(tree: lxml.html.HtmlElement) -> list[tuple[str | None, st
     than one - some epub generators (e.g. Project Gutenberg) bundle many real
     chapters into few spine files, with actual chapter breaks marked only by
     an internal heading, not by the spine structure. A document with 0 or 1
-    heading is returned whole, unchanged from the pre-split behavior."""
-    headings = tree.xpath("//h1 | //h2 | //h3")
+    heading is returned whole, unchanged from the pre-split behavior.
+
+    Scoped to <body> (real, observed bug otherwise): a spine item that's a
+    raw-passthrough EpubItem rather than ebooklib's EpubHtml (real case: an
+    Internet-Archive-produced, page-scanned epub whose items declare
+    media_type="text/html") keeps its original <head><title> intact, and
+    tree.text_content() on the whole document would leak that invisible
+    title text ("Page 142") in as the first line of the extracted chapter.
+    ebooklib's EpubHtml rebuilds <head> empty, which is why this was never
+    visible before. The xpath below must stay relative (".//h1", not
+    "//h1") - lxml's "//" is absolute from the document root regardless of
+    which element .xpath() is called on, so switching `tree` to the <body>
+    element alone would silently do nothing without this too."""
+    body = tree.find(".//body")
+    if body is not None:
+        tree = body
+    headings = tree.xpath(".//h1 | .//h2 | .//h3")
     if len(headings) <= 1:
         return [(_extract_title(tree), tree.text_content().strip())]
 

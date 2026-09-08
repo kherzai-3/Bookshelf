@@ -11,9 +11,10 @@ from bookrag.eval import run_eval, summarize
 from bookrag.extract.pipeline import extract_book
 from bookrag.ingest import epub_loader, pdf_loader
 from bookrag.ingest.chapter import Chapter
+from bookrag.ingest.consolidate import consolidate_fragments, should_consolidate
 from bookrag.providers.registry import get_provider
 from bookrag.query import facts_as_of, format_context
-from bookrag.storage import incoming_root, library_root, load_chapters, save_book
+from bookrag.storage import incoming_root, library_root, load_chapters, load_metadata, save_book
 from bookrag.titles import guess_title_author
 
 LOADERS = {
@@ -32,6 +33,12 @@ def main(argv: list[str] | None = None) -> int:
     ingest.add_argument("--author")
     ingest.add_argument("--series", help="Series name, for grouping books that share continuity")
     ingest.add_argument("--series-position", type=int, help="1-indexed position within --series")
+    ingest.add_argument(
+        "--content-type",
+        choices=["fiction", "nonfiction"],
+        default="fiction",
+        help="Selects the extraction category/entity taxonomy used later by 'extract' - not auto-detected",
+    )
 
     extract = subparsers.add_parser("extract", help="Extract character/setting/theme facts for a book")
     extract.add_argument("book_id")
@@ -102,6 +109,14 @@ def _ingest(args: argparse.Namespace) -> int:
         print(f"Failed to parse {args.path}: {exc}")
         return 1
 
+    raw_chapter_count = len(chapters)
+    if should_consolidate(chapters):
+        chapters = consolidate_fragments(chapters)
+        print(
+            f"  consolidated {raw_chapter_count} raw fragments into {len(chapters)} chapters"
+            " (they were too small to extract well independently)"
+        )
+
     guessed_title, guessed_author = guess_title_author(args.path.stem)
     title = args.title or metadata.get("title") or guessed_title
     author = args.author or metadata.get("author") or guessed_author
@@ -119,6 +134,7 @@ def _ingest(args: argparse.Namespace) -> int:
             author=author,
             series_name=args.series,
             series_position=args.series_position,
+            content_type=args.content_type,
         )
     except Exception as exc:
         # save_book rolls back its own partial book_dir on failure - nothing
@@ -132,7 +148,9 @@ def _ingest(args: argparse.Namespace) -> int:
     for line in sanity_summary(chapters):
         print(line)
 
-    report_path = write_ingestion_report(book_id, chapters)
+    report_path = write_ingestion_report(
+        book_id, chapters, raw_chapter_count=raw_chapter_count if raw_chapter_count != len(chapters) else None
+    )
     print(f"  wrote {report_path}")
 
     _remove_if_from_incoming(args.path)
@@ -224,6 +242,7 @@ def _chat(args: argparse.Namespace) -> int:
 
     try:
         chapter_count = len(load_chapters(args.book_id))
+        content_type = load_metadata(args.book_id).get("content_type", "fiction")
     except Exception as exc:
         print(f"Could not load '{args.book_id}': {exc}")
         return 1
@@ -235,7 +254,7 @@ def _chat(args: argparse.Namespace) -> int:
     context = format_context(facts)
 
     if args.question is not None:
-        print(provider.answer_question(args.question, context))
+        print(provider.answer_question(args.question, context, content_type))
         return 0
 
     print(
@@ -250,7 +269,7 @@ def _chat(args: argparse.Namespace) -> int:
             return 0
         if not question:
             continue
-        print(provider.answer_question(question, context))
+        print(provider.answer_question(question, context, content_type))
 
 
 def sanity_summary(chapters: list[Chapter], edge_count: int = 3) -> list[str]:
@@ -319,14 +338,23 @@ def classify_ingestion(chapters: list[Chapter]) -> str:
     return "chapter-bound" if titled / len(chapters) > 0.5 else "text-bound"
 
 
-def write_ingestion_report(book_id: str, chapters: list[Chapter], root: Path | None = None) -> Path:
+def write_ingestion_report(
+    book_id: str, chapters: list[Chapter], root: Path | None = None, raw_chapter_count: int | None = None
+) -> Path:
     """Persists the same information sanity_summary prints, plus a
     chapter-bound/text-bound classification, to data/library/<book_id>/
     ingestion_report.txt - so this is reviewable later, not just visible in
-    the terminal at ingest time."""
+    the terminal at ingest time. `raw_chapter_count`, when given, is the
+    fragment count *before* consolidate.consolidate_fragments ran - printed
+    here too so this is visible on later review, not just at ingest time."""
     root = root or library_root()
     classification = classify_ingestion(chapters)
     lines = [f"book_id: {book_id}", f"classification: {classification}", *sanity_summary(chapters)]
+    if raw_chapter_count is not None:
+        lines.append(
+            f"  consolidated {raw_chapter_count} raw fragments into {len(chapters)} chapters"
+            " (they were too small to extract well independently)"
+        )
     if classification == "text-bound":
         lines.append(
             "  note: no reliable chapter/heading structure was found, so the"

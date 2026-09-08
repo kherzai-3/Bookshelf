@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/pipeline.py
-last_synced: 2026-09-03T00:00:00Z
-source_hash: 0c7835347edacab129acccac022df20f42f71a4e
+last_synced: 2026-09-08T00:00:00Z
+source_hash: c4a29b4fc25a7566bdaa71ba2bb5bb0ed62d6b0e
 ---
 
 ## Purpose
@@ -18,7 +18,11 @@ entity-resolved, chapter-scoped).
   updates `data/library/entities.json`. `on_chapter_done`, if given, is called as
   `on_chapter_done(position, total)` after every chapter (1-indexed
   `position`, including skipped/failed ones) - `cli.py` uses this to print
-  progress with an ETA, but `pipeline.py` itself does no printing.
+  progress with an ETA, but `pipeline.py` itself does no printing. Looks up
+  the book's `content_type` via `storage.load_metadata(book_id, root).get(
+  "content_type", "fiction")` once at the top and passes it to every
+  `provider.extract_facts` call - not a per-chapter lookup, since a single
+  book's content type doesn't change chapter to chapter.
 - `OnChapterDone = Callable[[int, int], None]` — the callback type alias.
 - `MIN_NARRATIVE_WORDS = 20` — a chapter whose text is shorter than this is
   skipped without ever calling the provider (see Key Decisions).
@@ -93,7 +97,7 @@ isolation (7.9s, not a hang) after the file appeared frozen.
 ## Dependencies
 - Internal: `bookrag.extract.resolve` (entity load/save/resolve),
   `bookrag.providers.base.Provider`, `bookrag.storage` (`library_root`,
-  `load_chapters`, `series_reading_order`)
+  `load_chapters`, `load_metadata`, `series_reading_order`)
 
 ## Open Questions / TODOs
 - Not yet run against real chapters with `AnthropicProvider` - only
@@ -119,16 +123,22 @@ isolation (7.9s, not a hang) after the file appeared frozen.
   chapters already present in `facts.jsonl` unless forced) would directly
   address this, but wasn't built - it's a distinct feature, not something
   the current fix needed, and no one has asked for it yet.
-- **No cap exists on facts-per-chapter or total facts-per-book.** The
-  extraction prompt rewrite (see `prompts.py`'s context doc) made the model
-  far more thorough - a real isolated run registered 31 entities by chapter
-  10 alone versus 18 *total* across the whole book under the old prompt,
-  and `ollama_provider.DEFAULT_TIMEOUT_SECONDS` was raised (300s→900s) to
-  absorb the resulting longer per-chapter calls rather than capping output
-  volume. That's a reasonable tradeoff at this book's scale, but if a
-  future book (or a further prompt change) pushes extraction volume up
-  further, the same growth could just push the timeout again rather than
-  actually bounding it. If that happens, revisit a hard cap - e.g. "report
-  at most N facts per chapter" in the prompt, or a code-side truncation in
-  the per-chapter loop here - as the more robust fix, instead of continuing
-  to raise the timeout indefinitely.
+- ~~No cap exists on facts-per-chapter or total facts-per-book.~~
+  **Resolved**: this was actually the root cause of a real runaway-
+  generation bug (a request generating 8,490+ output tokens over 14m43s
+  before Ollama's own server gave up and restarted), not just a throughput
+  concern - see `providers/parsing.py`'s context doc for the full
+  diagnosis. Fixed with `maxItems: 25` on `extraction_response_schema()`'s
+  `facts` array, verified against a full real 75-chapter run with zero
+  hangs. `DEFAULT_TIMEOUT_SECONDS` (300s→900s) remains raised as a
+  separate, still-valid accommodation for the extraction prompt's
+  legitimately higher output volume per chapter (not runaway, just more
+  thorough) - see `ollama_provider.py`'s context doc.
+- The non-fiction taxonomy (`content_type="nonfiction"`) has only been
+  validated via a `bookrag eval` checkpoint (3 chapters), not a full real
+  extraction run the way fiction has (`ranger-s-apprentice-1-2-bindup`,
+  75 chapters). Worth a full run once there's a reason to (e.g. actually
+  wanting Atomic Habits' complete catalog), to see whether the same
+  quality/throughput tradeoffs observed for fiction (see above) recur here
+  too - `MIN_NARRATIVE_WORDS`/`maxItems`/the timeout are all genre-agnostic
+  and apply unchanged.
