@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 .claude/context_state/dirty.txt
+.claude/context_state/commit_reminder_ack.txt
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 data/

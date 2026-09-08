@@ -78,10 +78,43 @@ data/incoming/       suggested (not enforced) staging spot for books not yet ing
 data/library/        ingested books live here: <book_id>/{source.*, metadata.json,
                      chapters.jsonl} + index.json. Gitignored - not source, not
                      context-hook-tracked.
-.claude/hooks/       the three enforcement scripts (bash - no Python/Node/jq on
-                     this machine when they were written, so they stay bash even
+.claude/hooks/       the enforcement scripts (bash - no Python/Node/jq on this
+                     machine when they were written, so they stay bash even
                      though the package itself now uses Python)
 ```
+
+## Git workflow convention
+
+Work happens on the `development` branch. Commit a completed piece of work —
+a bug fix, a rewrite of an existing file, a new feature — at its **logical
+conclusion**: once its context docs are synced (see above) and the test suite
+passes. Don't commit mid-implementation, and don't wait to batch up multiple
+unrelated changes into one commit either — one commit per completed change,
+with a message that explains why, not just what.
+
+**Never merge `development` into `master`, and never push to any remote,
+without the user explicitly instructing it in that specific instance.** A
+past approval of one merge/push does not carry forward to the next one — this
+matches the project's general "confirm before hard-to-reverse or shared-state
+actions" policy, applied specifically to this repo's branch model. `master`
+is the user's checkpoint of record; only they decide when `development`'s
+state is ready to become it.
+
+**Partially hook-enforced, the same way the context-doc convention is:**
+- A `Stop` hook (`.claude/hooks/check_pending_commit.sh`) notices when
+  `git status` shows uncommitted changes and reminds about this convention —
+  but only once per distinct change-set (it hashes `git status --porcelain`
+  and acks it immediately, so re-running Stop for the same still-in-progress
+  change never blocks twice). It deliberately cannot judge "is this actually
+  done" or "did tests pass" — that judgment call stays mine to make; the hook
+  only guarantees the reminder surfaces at least once per real change.
+- It stays silent while `.claude/context_state/dirty.txt` is non-empty —
+  no point suggesting a commit before `check_dirty.sh`'s own concern
+  (context docs out of sync) is resolved.
+- There is deliberately no hook that blocks a `master` merge or a push - a
+  hook can't distinguish "the user just asked for this" from "the model
+  decided to do this on its own," so that distinction has to stay a judgment
+  call too, governed by this section rather than mechanically enforced.
 
 ## Series / chapter identity
 Chapters are always addressed as `(book_id, chapter_index)`, never a bare
