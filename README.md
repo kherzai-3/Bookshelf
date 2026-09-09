@@ -88,6 +88,14 @@ Three providers, chosen via `--provider`/`--providers` or `$BOOKRAG_PROVIDER`:
     full-book run: `bookrag eval <book-id> --chapters N --model <candidate>`
     is fast (one chapter, not the whole book) and read-only, never touching
     `facts.jsonl`/`entities.json`.
+  - **If fact *completeness* matters more than speed**, a bigger model is
+    also the most direct lever, separate from the hallucination point
+    above: a real check against `llama3.2:3b`'s output found it reliably
+    captures a character's more obvious traits but inconsistently misses
+    incidental details mentioned in passing (e.g. a physical description
+    woven into an action sentence rather than given its own descriptive
+    paragraph) - the same category of thing a larger model is generally
+    better at noticing consistently, not just phrasing more confidently.
   - Override the Ollama host similarly via `$OLLAMA_BASE_URL` (e.g. to
     point at Ollama running on a different machine on the network instead
     of switching hardware at all).
@@ -383,10 +391,13 @@ pytest tests/ -v
   500-1500) over nearly 15 minutes before Ollama's own server gave up and
   restarted - traced via Ollama's own logs to a fact array with no upper
   bound, which gives the model no structural reason to ever stop adding
-  items if it doesn't confidently choose to. Fixed with `maxItems: 25` on
-  the schema's `facts` array (chosen from real observed data - the
-  richest real chapter seen produced 32, itself an outlier). This is also
-  why `bookrag extract` on a real book now takes meaningfully longer than
+  items if it doesn't confidently choose to. Fixed with a hard `maxItems`
+  cap on the schema's `facts` array - originally 25 (chosen from real
+  observed data, the richest chapter seen at the time produced 32, itself
+  thought to be an outlier), raised to 40 once a full real 75-chapter run
+  showed the cap itself routinely binding in the book's back half. This is
+  also why `bookrag extract` on a real book now takes meaningfully longer
+  than
   it used to (see "This machine" above) - both because more thorough
   extraction naturally produces more output, and because the request
   timeout (`OllamaProvider.DEFAULT_TIMEOUT_SECONDS`) was raised to 900s to

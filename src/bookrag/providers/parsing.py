@@ -120,10 +120,15 @@ def extraction_response_schema(content_type: str = "fiction") -> dict:
                 # array under grammar-constrained decoding has no structural
                 # reason to ever close if the model doesn't confidently
                 # choose to - maxItems makes "keep going forever" impossible
-                # rather than just unlikely. 25 comfortably covers the
-                # richest real chapter observed (32 facts, itself an
-                # outlier) while still being a hard, finite ceiling.
-                "maxItems": 25,
+                # rather than just unlikely. Originally set to 25 (the
+                # richest real chapter observed at the time, 32 facts, was
+                # treated as an outlier); raised to 40 after a full real
+                # 75-chapter extraction showed the opposite problem - 12 of
+                # the last ~20 chapters landed at exactly 25, real evidence
+                # the model wanted to report more and was being truncated,
+                # not just capped defensively. Still a hard, finite ceiling,
+                # not a return to uncapped.
+                "maxItems": 40,
                 "items": {
                     "type": "object",
                     "properties": {

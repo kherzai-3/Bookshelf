@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: e418e34e46b5ec10aaa0d607c1b48ae04d247b80
+source_hash: 351e72efbac6deb2a33f26d69f31d6328862f2ab
 ---
 
 ## Purpose
@@ -107,11 +107,12 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   provider being unreachable prints a clean one-line message and returns 1
   instead of a raw traceback.
 - `_extract` prints `result.parse_failure_count`,
-  `result.ungrounded_entity_count`, and `result.skipped_chapter_count` when
-  non-zero, so a chapter `extract_book` had to skip (malformed output, a
-  likely-hallucinated new entity, or too short to plausibly be narrative -
-  see `pipeline.py`), is visible in the CLI output rather than silently
-  absorbed.
+  `result.ungrounded_entity_count`, `result.skipped_chapter_count`, and
+  `result.duplicate_fact_count` when non-zero, so anything `extract_book`
+  had to skip or drop (malformed output, a likely-hallucinated new entity,
+  too short to plausibly be narrative, or an exact-duplicate fact within a
+  chapter - see `pipeline.py`) is visible in the CLI output rather than
+  silently absorbed.
 - `_chat` validates `--chapter` against the book's actual chapter count
   (via `load_chapters`) before calling `facts_as_of` - `facts_as_of` itself
   doesn't range-check (an out-of-range chapter would just silently include

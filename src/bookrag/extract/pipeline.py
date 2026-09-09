@@ -37,6 +37,7 @@ class ExtractionResult:
     parse_failure_count: int
     ungrounded_entity_count: int
     skipped_chapter_count: int
+    duplicate_fact_count: int = 0
     # Both new: added for resumable extraction. resumed_from_chapter is the
     # chapter index this call started at (None for a fresh/from-scratch
     # run); already_complete means this call did nothing because a prior
@@ -137,6 +138,7 @@ def extract_book(
     parse_failure_count = 0
     ungrounded_entity_count = 0
     skipped_chapter_count = 0
+    duplicate_fact_count = 0
     facts_path = root / book_id / "facts.jsonl"
     file_mode = "a" if start_index > 0 else "w"
     try:
@@ -158,6 +160,28 @@ def extract_book(
                     except ExtractionParseError:
                         parse_failure_count += 1
                         raw_facts = []
+
+                # A small local model asked to fill a generous maxItems
+                # budget sometimes pads it by repeating a fact it already
+                # reported (real, observed: the same status sentence
+                # verbatim 20+ times in one chapter) rather than stopping
+                # once it runs out of genuinely distinct content - an
+                # explicit "don't repeat yourself" prompt instruction did
+                # not reliably stop this, so it's caught here instead,
+                # code-side, not left to the model's own compliance.
+                # Case-insensitive on (entity_name, statement) - exact
+                # repeats only, never a near-duplicate rephrasing, which
+                # could legitimately be two distinct observations.
+                deduped_facts = []
+                seen_this_chapter = set()
+                for raw in raw_facts:
+                    key = (raw.entity_name.strip().lower(), raw.statement.strip().lower())
+                    if key in seen_this_chapter:
+                        duplicate_fact_count += 1
+                        continue
+                    seen_this_chapter.add(key)
+                    deduped_facts.append(raw)
+                raw_facts = deduped_facts
 
                 for raw in raw_facts:
                     is_new = raw.entity_name not in known_names
@@ -216,6 +240,7 @@ def extract_book(
         parse_failure_count=parse_failure_count,
         ungrounded_entity_count=ungrounded_entity_count,
         skipped_chapter_count=skipped_chapter_count,
+        duplicate_fact_count=duplicate_fact_count,
         resumed_from_chapter=resumed_from_chapter,
     )
 

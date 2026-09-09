@@ -14,7 +14,13 @@ markdown fences. Each element of "facts" is:
 
 category must be one of:
 - personality: a character trait, attitude, or way of thinking.
-- appearance: a physical description.
+- appearance: a physical description - hair, build, clothing, scars, or any \
+other distinguishing physical detail. These are easy to miss when they're \
+mentioned in passing during action or dialogue rather than as a dedicated \
+description paragraph (e.g. a character's cloak or hair color mentioned \
+mid-scene, not introduced with "he looked like..."). Actively look for \
+appearance details anywhere in the text, not only in obvious introduction/ \
+description passages.
 - relationship: how one entity relates to another (ally, enemy, family, etc).
 - status: a concrete, factual change in role, rank, allegiance, or \
 life-condition (e.g. "became Halt's apprentice", "was accepted into \
@@ -32,6 +38,18 @@ state what happened, rather than a bare pronoun with no context (write \
 well"). Do not respond with sentence fragments, single words, or \
 unattributed dialogue quotes with no context.
 
+Never report the same fact more than once, even if the chapter repeats it \
+or returns to it multiple times (e.g. the same request or action recurring \
+across several paragraphs) - state each distinct fact a single time only, \
+no matter how many times it happens or how important it feels.
+
+Stop once you have reported every fact concretely and specifically stated \
+in the chapter text - do not keep inventing additional vague or generic \
+statements (e.g. a list of abstract virtues or lessons an entity is \
+supposedly "learning about") just to report more. A short, precise list of \
+real facts is always better than a longer list padded with restated or \
+unspecific filler.
+
 Only report something if it is directly and explicitly stated or shown in \
 the chapter text below - never invent a detail, and never introduce an \
 entity whose name doesn't appear in the text. If this chapter's text is not \
@@ -42,7 +60,8 @@ setting, or theme is revealed, return {"facts": []}.
 Example:
 Chapter text: "Will scrambled over the wall, breathing hard. Halt handed \
 him the silver oakleaf without a word - the mark of a fully fledged \
-Ranger. Will's hands trembled as he took it."
+Ranger. Will's hands trembled as he took it. Halt's grey cloak shifted as \
+he turned away, the fabric already blending into the shadows of the trees."
 
 {"facts": [
   {"entity_name": "Will", "entity_type": "character", "category": "status", \
@@ -50,7 +69,10 @@ Ranger. Will's hands trembled as he took it."
 fully fledged Ranger."},
   {"entity_name": "Will", "entity_type": "character", "category": \
 "personality", "statement": "Will's hands trembled with emotion as he \
-received the oakleaf."}
+received the oakleaf."},
+  {"entity_name": "Halt", "entity_type": "character", "category": \
+"appearance", "statement": "Halt wears a grey cloak that blends into \
+shadows."}
 ]}"""
 
 
@@ -91,6 +113,14 @@ without needing the surrounding chapter text - name the concept or person, \
 or clearly state what's being claimed, rather than a bare pronoun with no \
 context. Do not respond with sentence fragments, single words, or \
 unattributed dialogue quotes with no context.
+
+Never report the same fact more than once, even if the chapter repeats or \
+returns to it multiple times - state each distinct fact a single time \
+only. Stop once you have reported every fact concretely and specifically \
+stated in the chapter text - do not keep inventing additional vague or \
+generic statements just to report more. A short, precise list of real \
+facts is always better than a longer list padded with restated or \
+unspecific filler.
 
 Only report something if it is directly and explicitly stated or shown in \
 the chapter text below - never invent a detail, and never introduce an \

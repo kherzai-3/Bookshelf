@@ -1,7 +1,7 @@
 ---
 source: tests/test_extraction_pipeline.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: ec33e23a3bc312f29a0152a5121125c2187cee21
+source_hash: 79632a6b5e5d55cf6eda7aa4fee01aa567008ac2
 ---
 
 ## Purpose
@@ -29,3 +29,12 @@ this is the specific bug class this feature could have reintroduced if
 `restart=True` ignores saved progress; a `chapter_count` mismatch (book was
 re-ingested) is treated as stale and ignored; and an already-fully-extracted
 book is a no-op (provider never called) unless `restart=True`.
+
+Also covers the exact-duplicate-fact filter
+(`test_extract_book_drops_exact_duplicate_facts_within_a_chapter`): a
+`_FixedResponseProvider` response containing the same `(entity_name,
+statement)` pair twice (once case-varied) is deduped to one fact before
+being written, with `duplicate_fact_count` reporting how many were
+dropped - the code-side guardrail added after a real chapter's real
+extraction was found padding toward a raised `maxItems` cap by repeating
+the same fact verbatim.

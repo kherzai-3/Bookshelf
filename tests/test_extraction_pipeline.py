@@ -294,6 +294,34 @@ def test_extract_book_skips_a_chapter_with_malformed_provider_output(tmp_path: P
     assert names == {"Ishmael", "Ahab"}
 
 
+def test_extract_book_drops_exact_duplicate_facts_within_a_chapter(tmp_path: Path) -> None:
+    """Real observed case: a small local model, given a generous maxItems
+    budget, padded a chapter's response by repeating the same status fact
+    verbatim 20+ times rather than stopping once it ran out of genuinely
+    distinct content - an explicit prompt instruction not to repeat itself
+    didn't reliably stop this, so it's caught here in code instead."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [Chapter(0, "One", f"Will looked up at Halt and nodded. {NARRATIVE_PADDING}")]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+
+    facts = [
+        ExtractedFact("Will", "character", "status", "Will is trying to understand the news."),
+        ExtractedFact("Will", "character", "status", "Will is trying to understand the news."),
+        ExtractedFact("Will", "character", "status", "WILL IS TRYING TO UNDERSTAND THE NEWS."),  # case-insensitive
+        ExtractedFact("Halt", "character", "appearance", "Halt wears a grey cloak."),
+    ]
+    result = extract_book(book_id, _FixedResponseProvider(facts), root=root)
+
+    assert result.fact_count == 2  # one Will fact (deduped), one Halt fact
+    assert result.duplicate_fact_count == 2
+
+    facts_path = root / book_id / "facts.jsonl"
+    statements = [json.loads(line)["statement"] for line in facts_path.read_text(encoding="utf-8").splitlines()]
+    assert statements == ["Will is trying to understand the news.", "Halt wears a grey cloak."]
+
+
 def test_extract_book_skips_very_short_chapters_without_calling_the_provider(tmp_path: Path) -> None:
     """Real observed cases a small local model hallucinated facts for
     instead of recognizing as non-narrative: a 2-word chapter fragment, a

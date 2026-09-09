@@ -246,6 +246,11 @@ def _extract(args: argparse.Namespace) -> int:
             f"  {result.skipped_chapter_count} chapter(s) were too short to plausibly"
             " contain narrative content and were skipped without calling the provider"
         )
+    if result.duplicate_fact_count:
+        print(
+            f"  {result.duplicate_fact_count} fact(s) exactly repeated an earlier fact"
+            " in the same chapter and were dropped"
+        )
     return 0
 
 

@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/parsing.py
-last_synced: 2026-09-08T00:00:00Z
-source_hash: de4bbd364f7fa6d76332e3b8cf5dac34bbf5f0f3
+last_synced: 2026-09-09T00:00:00Z
+source_hash: 35e08a7c3563fff3a25e7f2489ef1f45ddf72bee
 ---
 
 ## Purpose
@@ -53,7 +53,7 @@ schema can't drift from what this file's own normalization actually accepts.
 - `extraction_response_schema(content_type: str = "fiction") -> dict` — the
   JSON Schema for Ollama's `format` field: `{"facts": [{"entity_name": str,
   "entity_type": enum, "category": enum, "statement": str (maxLength
-  300)}]}` (`facts` itself capped at `maxItems: 25`), built from the
+  300)}]}` (`facts` itself capped at `maxItems: 40`), built from the
   `ALLOWED_ENTITY_TYPES*`/`ALLOWED_CATEGORIES*` pair selected by
   `content_type`.
 
@@ -134,10 +134,13 @@ schema can't drift from what this file's own normalization actually accepts.
   and re-verified the production schema against the real chapter that had
   previously been the highest-volume one seen (32 facts uncapped) - it now
   completes in ~90s with a natural `done_reason: stop`, not truncation.
-  25 was chosen from real observed data (the richest chapter seen produced
-  32, itself an outlier) - generous enough to preserve the extraction
-  quality gains, a hard enough ceiling to make the runaway case structurally
-  impossible.
+  Originally set to 25 from real observed data (the richest chapter seen at
+  the time produced 32, itself thought to be an outlier). **Raised to 40**
+  after a full real 75-chapter extraction (Ranger's Apprentice) showed the
+  opposite problem: 12 of the last ~20 chapters landed at exactly 25 total
+  facts - real evidence the cap was routinely binding, not just guarding
+  against an outlier. Still a hard, finite ceiling, not a return to
+  uncapped.
 - **The nonfiction taxonomy is a separate set, not a parameterized version
   of the fiction one** - confirmed necessary, not just theoretically
   different, by a real checkpoint run (`bookrag eval` against consolidated

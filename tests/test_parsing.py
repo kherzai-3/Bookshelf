@@ -179,7 +179,7 @@ def test_extraction_response_schema_caps_facts_array_length() -> None:
     unlikely."""
     schema = extraction_response_schema()
 
-    assert schema["properties"]["facts"]["maxItems"] == 25
+    assert schema["properties"]["facts"]["maxItems"] == 40
 
 
 def test_extraction_response_schema_of_nonfiction_uses_the_nonfiction_taxonomy() -> None:

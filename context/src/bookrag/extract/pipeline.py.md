@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/pipeline.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: c3228edbb58767e660ffc24ca628278dae01e6a3
+source_hash: f730b8ff158cabe9a6384a4c8099aef01bda7d2f
 ---
 
 ## Purpose
@@ -13,11 +13,15 @@ entity-resolved, chapter-scoped).
 ## Public Interface
 - `ExtractionResult(book_id, chapter_count, fact_count, new_entity_count,
   parse_failure_count, ungrounded_entity_count, skipped_chapter_count,
-  resumed_from_chapter=None, already_complete=False)` — the last two are
-  new (resumable extraction, see Key Decisions): `resumed_from_chapter` is
-  the chapter index this call started at (`None` for a from-scratch run),
-  `already_complete` means this call did nothing because a prior run
-  already reached the end.
+  duplicate_fact_count=0, resumed_from_chapter=None, already_complete=False)`
+  — `resumed_from_chapter`/`already_complete` are for resumable extraction
+  (see Key Decisions): `resumed_from_chapter` is the chapter index this
+  call started at (`None` for a from-scratch run), `already_complete`
+  means this call did nothing because a prior run already reached the end.
+  `duplicate_fact_count` is how many raw facts this call dropped for being
+  an exact repeat of an earlier fact in the same chapter (see Key
+  Decisions) - `cli.py` surfaces it like the other counts here when
+  nonzero.
 - `extract_book(book_id, provider, root=None, on_chapter_done=None,
   restart=False) -> ExtractionResult` — appends to (or, for a from-scratch
   run, overwrites) `data/library/<book_id>/facts.jsonl` and updates
@@ -56,6 +60,19 @@ almost certainly progressing normally). Diagnosed by testing chapter 0 in
 isolation (7.9s, not a hang) after the file appeared frozen.
 
 ## Key Decisions
+- **Exact-duplicate facts within one chapter's raw response are dropped in
+  code, before grounding/resolution** - not relied on the extraction
+  prompt's own "don't repeat yourself" instruction to prevent (see
+  `prompts.py`'s context doc for that instruction and why it alone wasn't
+  reliable). Real observed case: after `providers/parsing.py`'s `maxItems`
+  was raised from 25 to 40 to stop cutting off real late-chapter content,
+  a real chapter's real extraction padded toward the new cap by repeating
+  the exact same status sentence 20+ times rather than stopping once
+  genuinely distinct content ran out. Matching is on `(entity_name,
+  statement)` case-insensitively - an exact repeat only, never a
+  near-duplicate rephrasing (which could legitimately be two separate
+  observations of the same fact). Counted in `duplicate_fact_count`,
+  surfaced by `cli.py` like the other counts here, not silently dropped.
 - Chapters are processed **sequentially, never in parallel** - each
   chapter's `known_entities` list grows as facts are resolved, so chapter 5
   sees entities introduced in chapters 0-4. Parallelizing would break this
@@ -179,12 +196,15 @@ isolation (7.9s, not a hang) after the file appeared frozen.
   generation bug (a request generating 8,490+ output tokens over 14m43s
   before Ollama's own server gave up and restarted), not just a throughput
   concern - see `providers/parsing.py`'s context doc for the full
-  diagnosis. Fixed with `maxItems: 25` on `extraction_response_schema()`'s
-  `facts` array, verified against a full real 75-chapter run with zero
-  hangs. `DEFAULT_TIMEOUT_SECONDS` (300s→900s) remains raised as a
-  separate, still-valid accommodation for the extraction prompt's
-  legitimately higher output volume per chapter (not runaway, just more
-  thorough) - see `ollama_provider.py`'s context doc.
+  diagnosis. Fixed with a hard `maxItems` cap on `extraction_response_schema()`'s
+  `facts` array (originally 25, raised to 40 once that same full real
+  75-chapter run showed the cap itself was routinely binding in the book's
+  back half - see `providers/parsing.py`'s context doc), verified against a
+  full real 75-chapter run with zero hangs. `DEFAULT_TIMEOUT_SECONDS`
+  (300s→900s) remains raised as a separate, still-valid accommodation for
+  the extraction prompt's legitimately higher output volume per chapter
+  (not runaway, just more thorough) - see `ollama_provider.py`'s context
+  doc.
 - ~~The non-fiction taxonomy has only been validated via a `bookrag eval`
   checkpoint~~ **Updated (2026-09-09)**: since resolved by full real runs -
   Atomic Habits (36 chapters, 370 facts) and Finite and Infinite Games (18

@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/prompts.py
-last_synced: 2026-09-08T00:00:00Z
-source_hash: 66cb54c90e63504327c2ba2ad80b48854c8caf3c
+last_synced: 2026-09-09T00:00:00Z
+source_hash: f88c5146f62090af1d0b2d1f84e61dc24f238017
 ---
 
 ## Purpose
@@ -90,6 +90,43 @@ book's `content_type` (see `storage.py`/`extract/pipeline.py`).
   catalog itself never dedupes or discards facts (see `query.py`'s context
   doc for why), so recency resolution has to happen here, in how the model
   is told to read the context it's given.
+- **`appearance`'s definition explicitly calls out incidental/passing
+  mentions, not just dedicated description paragraphs.** Real bug found
+  chasing a user-reported "what does Halt look like?" chat failure: the
+  real chapter text described Halt's grey-flecked hair and how "the grey
+  cloak had concealed a lot about Halt," but only "slim and not at all
+  tall" was ever extracted - `appearance` already existed as a category
+  and wasn't schema/cap-blocked in that chapter, so this was inconsistent
+  model salience, not a missing instruction slot. The worked example was
+  updated to match: it now includes an appearance detail mentioned
+  mid-action ("Halt's grey cloak shifted... blending into the shadows"),
+  not just a dedicated description sentence, since that's the exact shape
+  of detail being missed.
+- **Two more instructions added together, and needed together**: "never
+  report the same fact twice" and "stop once every concretely-stated fact
+  is reported - don't invent generic/vague filler just to report more."
+  Both found while validating the `appearance` fix above, after
+  `parsing.py`'s `maxItems` was raised from 25 to 40 (see that file's
+  context doc) to stop cutting off real late-chapter content: with more
+  headroom, the same real chapter's real extraction padded out toward the
+  new cap two different ways in two separate tests - first the exact same
+  status sentence repeated 20+ times verbatim, then (after the
+  anti-repetition instruction alone) a run of ~25 technically-distinct but
+  vacuous "Will is learning about the importance of being diligent/
+  resourceful/adaptable..." statements not grounded in anything specific
+  the text actually says. Confirmed both instructions are needed together,
+  not just one: only after adding *both*, a real re-run of the same
+  chapter naturally stopped at 26 facts (well under the 40 cap) with zero
+  padding of either kind, while still fully capturing Halt's appearance
+  facts. `extract.pipeline` also added a code-side exact-duplicate filter
+  as a second layer, not relying on prompt compliance alone (a small local
+  model's instruction-following isn't fully reliable) - see that file's
+  context doc for `duplicate_fact_count`. The same anti-repetition/
+  anti-filler instructions were added to `EXTRACTION_SYSTEM_PROMPT_NONFICTION`
+  too - this is a general small-model generation-behavior issue, not
+  specific to fiction content, so nonfiction extraction (Atomic Habits,
+  Finite and Infinite Games) is equally exposed to it even though the bug
+  that surfaced it was found via a fiction book.
 - **Nonfiction gets full parallel prompts, not a parameterized shared
   template.** Considered and rejected: the fiction prompt is fiction-
   specific well beyond its category list ("a single chapter of a novel,"
