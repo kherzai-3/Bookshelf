@@ -63,8 +63,13 @@ DEFAULT_NUM_CTX = 16384
 DEFAULT_TIMEOUT_SECONDS = 900
 # Lower than Ollama's own default (~0.8) - extraction is a structured task,
 # not a creative one, and a lower temperature produces more consistent,
-# schema-conformant output. Not applied to answer_question, which is a
-# conversational answer and benefits from Ollama's normal default instead.
+# schema-conformant output. Not applied to answer_question - tried and
+# reverted (see ollama_provider.py.md's context doc, Open Questions): an
+# initial small sample (n=6) at temperature 0.4 looked like a real fix for
+# an answer-consistency bug, but a larger, fairer sample (n=10 at 0.4 vs
+# n=10 at the default) showed no real difference (6/10 vs 7/10) - the
+# initial result was a lucky draw, not a genuine effect, so the change
+# was reverted rather than shipped on unconfirmed evidence.
 DEFAULT_EXTRACTION_TEMPERATURE = 0.2
 
 
@@ -112,7 +117,9 @@ class OllamaProvider:
     def answer_question(self, question: str, context: str, content_type: str = "fiction") -> str:
         # No response_format/temperature override here - a chat answer is
         # free text, not a structured fact list, and benefits from Ollama's
-        # normal conversational sampling defaults.
+        # normal conversational sampling defaults. A temperature override
+        # was tried and reverted - see DEFAULT_EXTRACTION_TEMPERATURE's
+        # comment.
         return self._chat(
             ANSWER_SYSTEM_PROMPTS[content_type],
             build_answer_user_message(question, context),

@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/ollama_provider.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 711e922f744289b3430bcfc1e3c1df2644e493c2
+source_hash: 57dc5686a23d77ef2791bceadcb0b97c93699927
 ---
 
 ## Purpose
@@ -39,11 +39,12 @@ locally-running `llama3.2:3b` and `qwen2.5:7b-instruct` models.
   — shares the `_chat` helper with `extract_facts`, but with no
   `response_format`/`temperature` override, since a conversational answer
   is free text, not a structured fact list, and benefits from Ollama's
-  normal sampling defaults (see Open Questions - this also means its
-  output is not fully reproducible run-to-run, unlike extraction).
-  `content_type` only selects which prompt (`ANSWER_SYSTEM_PROMPTS[content_type]`)
-  is used. Uses `self._answer_model`, passed explicitly to `_chat` (which
-  now takes a `model` keyword, defaulting to `self._model` when omitted -
+  normal sampling defaults (a temperature override was tried and reverted -
+  see Key Decisions/Open Questions - so this output is still not fully
+  reproducible run-to-run, unlike extraction). `content_type` only selects
+  which prompt (`ANSWER_SYSTEM_PROMPTS[content_type]`) is used. Uses
+  `self._answer_model`, passed explicitly to `_chat` (which now takes a
+  `model` keyword, defaulting to `self._model` when omitted -
   `extract_facts`'s call doesn't pass it and gets `self._model` as before).
 
 ## Key Decisions
@@ -100,6 +101,21 @@ locally-running `llama3.2:3b` and `qwen2.5:7b-instruct` models.
   extraction is a structured task that benefits from more deterministic
   sampling; `answer_question` leaves it unset, since a conversational
   answer benefits from the normal default instead.
+- **A `temperature` override for `answer_question` was tried and reverted
+  - a real cautionary tale about small-sample verification, not just a
+  dead end.** Motivation was real: the answer prompt's cross-category
+  instruction (see `prompts.py`'s context doc - reading a fact filed under
+  the "wrong" category, like a beard mention filed under `personality`, to
+  answer an appearance question) only worked some of the time against the
+  real, unmodified `ranger-s-apprentice-1-2-bindup` facts.jsonl. An initial
+  small sample (n=6 identical real questions) at temperature 0.4 landed
+  6/6, versus roughly half at 0.0, 0.2, 0.6, and the default - looked like
+  a real, if non-monotonic, effect. But re-running the same comparison
+  with a larger, fairer sample (n=10 each) found 0.4 at 6/10 and the
+  default at 7/10 - statistically indistinguishable, meaning the original
+  6/6 was a lucky draw, not a genuine effect. Reverted rather than shipped
+  on the strength of the small sample - see Open Questions for what this
+  means for actually fixing the underlying inconsistency.
 - `timeout` defaults to 900s (up from 300s, itself up from an initial 120s).
   Direct timing against a single real chapter (2000-2400 words) with the
   schema-constrained request measured 50-70s, comparable to the old
@@ -123,9 +139,14 @@ locally-running `llama3.2:3b` and `qwen2.5:7b-instruct` models.
   `AnthropicProvider` - same reasoning as noted there.
 - No streaming (`"stream": False`) - simpler response handling; extraction
   isn't interactive/latency-sensitive enough to need it.
-- `_chat` takes `response_format`/`temperature` keywords (replacing the
-  earlier boolean `json_format`) so it can back both methods: a schema +
-  low temperature for `extract_facts`, neither for `answer_question`.
+- `_chat` takes `model`/`response_format`/`temperature` keywords (the
+  latter two replacing the earlier boolean `json_format`) so it can back
+  both methods with their own independent choices: a schema + 0.2
+  temperature + extraction model for `extract_facts`, no schema + the
+  default temperature + answer model for `answer_question` (the
+  `temperature` keyword exists for `answer_question` to use too, but
+  nothing currently passes one for it - see Key Decisions' reverted
+  attempt).
 
 ## Dependencies
 - Internal: `bookrag.providers.parsing` (`parse_facts`,
@@ -136,15 +157,32 @@ locally-running `llama3.2:3b` and `qwen2.5:7b-instruct` models.
   locally with the target model pulled (`ollama pull qwen2.5:7b-instruct`)
 
 ## Open Questions / TODOs
-- `answer_question` has no temperature override, so its output is subject
-  to Ollama's default (higher, conversational) sampling variance - a real
-  test found the answer prompt's new cross-category instruction (see
-  `prompts.py`'s context doc) only surfaced a miscategorized detail in 1 of
-  3 identical real attempts against the same unmodified facts.jsonl. Not
-  addressed in this pass (out of scope for the approved plan that
-  introduced the instruction) - a lower, more consistent temperature for
-  `answer_question` specifically is the most direct next lever if this
-  needs to be more reliable, but wasn't requested/decided yet.
+- The underlying inconsistency that motivated the reverted temperature
+  experiment (see Key Decisions) is still real and still unfixed:
+  `answer_question`'s cross-category recall (see `prompts.py`'s context
+  doc) succeeds roughly half the time against the real, unmodified
+  `ranger-s-apprentice-1-2-bindup` facts.jsonl, regardless of temperature
+  in the 0.0-0.8 range tested (0.0 was the one clear exception - worse,
+  not better). Temperature isn't the lever for this specific behavior;
+  candidates not yet tried: self-consistency (ask the same question
+  N times, e.g. via majority vote or having the model reconcile multiple
+  draws - real added latency/cost per question, though still cheap in
+  absolute terms given how fast one answer call is), or restructuring
+  `query.format_context`'s rendering to surface loosely-related facts from
+  other categories more saliently instead of leaving cross-referencing
+  entirely to the model's own initiative.
+- A genuinely new, unrelated problem surfaced while spot-checking 0.4 for
+  answer coherence (not caused by this change, and not fixed here): the
+  answer prompt's "trust the later chapter" conflict-resolution rule
+  misapplied across two *different real events*, not just an updated
+  status for the same event - asked "what happened to Halt during the
+  fight with the Kalkara?" (a real ch.33-36 event), the model pulled in an
+  unrelated ch.66 fact ("killed in the attempt to stop the Skandians" - a
+  separate battle entirely) and concluded Halt died fighting the Kalkara,
+  which isn't what happened. The rule currently has no way to tell "this
+  status changed" apart from "this is a completely different occurrence
+  that happens to share a category and entity." Not investigated further
+  or fixed - flagged here for a future pass.
 - CPU-only inference on this hardware (no NVIDIA GPU) measured at roughly
   8-15s per chapter for short chapters; longer chapters (~2000-4000 words)
   take proportionally longer, and now more so than before the extraction
