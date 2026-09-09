@@ -160,3 +160,19 @@ def _update_index(root: Path, metadata: dict) -> None:
     )
     index["books"] = books
     index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
+
+
+def remove_from_index(book_id: str, root: Path | None = None) -> bool:
+    """Removes book_id's entry from index.json, if present. Returns whether
+    an entry was actually found and removed - used by library.remove_book to
+    report a no-op distinctly from a real removal, and to let it clean up a
+    stale index entry whose directory is already gone (the orphaned-index-
+    entry case bookrag doctor detects)."""
+    root = root or library_root()
+    index = load_index(root)
+    remaining = [b for b in index["books"] if b["book_id"] != book_id]
+    if len(remaining) == len(index["books"]):
+        return False
+    index["books"] = remaining
+    (root / "index.json").write_text(json.dumps(index, indent=2), encoding="utf-8")
+    return True

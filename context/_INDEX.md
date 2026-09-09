@@ -12,7 +12,8 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/storage.py](src/bookrag/storage.py.md) — persists a book (source + chapters + metadata incl. `content_type`) to `data/library/<book_id>/`; series-aware index + reading-order helper.
 - [src/bookrag/query.py](src/bookrag/query.py.md) — `facts_as_of`: the spoiler-safety filter primitive; `format_context` renders facts for a provider.
 - [src/bookrag/eval.py](src/bookrag/eval.py.md) — read-only provider comparison: side-by-side report + groundedness score.
-- [src/bookrag/cli.py](src/bookrag/cli.py.md) — `bookrag ingest|extract|eval|chat` CLI entry point.
+- [src/bookrag/cli.py](src/bookrag/cli.py.md) — `bookrag ingest|extract|eval|chat|list|show|remove|doctor` CLI entry point.
+- [src/bookrag/library.py](src/bookrag/library.py.md) — library-wide list/show/remove/doctor: extraction-status summaries and index/entities.json consistency cleanup.
 - [src/bookrag/titles.py](src/bookrag/titles.py.md) — last-resort title/author guess from a filename.
 - [src/bookrag/providers/__init__.py](src/bookrag/providers/__init__.py.md) — `providers` subpackage marker.
 - [src/bookrag/providers/base.py](src/bookrag/providers/base.py.md) — `ExtractedFact`, `Provider` Protocol (`extract_facts` + `answer_question`), `ExtractionParseError`.
@@ -31,7 +32,8 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [tests/test_pdf_loader.py](../tests/test_pdf_loader.py.md) — covers `pdf_loader` (chapters + metadata), TOC and no-TOC fallback paths.
 - [tests/test_storage.py](../tests/test_storage.py.md) — covers `storage.py`, including the series/chapter-2-collision guarantee.
 - [tests/test_storage_series_reading_order.py](../tests/test_storage_series_reading_order.py.md) — covers `series_reading_order`.
-- [tests/test_cli.py](../tests/test_cli.py.md) — end-to-end `bookrag ingest|extract|eval` coverage.
+- [tests/test_cli.py](../tests/test_cli.py.md) — end-to-end `bookrag ingest|extract|eval` coverage, plus CLI-plumbing coverage of `list|show|remove|doctor`.
+- [tests/test_library.py](../tests/test_library.py.md) — covers `library.py`'s list/show/remove/doctor logic in depth.
 - [tests/test_titles.py](../tests/test_titles.py.md) — covers `titles.guess_title_author`, including the real `Finite-and-Infinite-Games-by-James-Carse` case.
 - [tests/test_resolve.py](../tests/test_resolve.py.md) — covers entity resolution (exact/alias match, type separation).
 - [tests/test_fake_provider.py](../tests/test_fake_provider.py.md) — covers `FakeProvider`'s deterministic extraction.

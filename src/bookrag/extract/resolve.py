@@ -53,3 +53,22 @@ def resolve_entity(name: str, entity_type: str, book_id: str, entities: dict) ->
         }
     )
     return entity_id
+
+
+def prune_book_from_entities(entities: dict, book_id: str) -> tuple[int, int]:
+    """Removes book_id from every entity's book_ids (mutates entities in
+    place), dropping any entity whose book_ids becomes empty as a result -
+    nothing else could ever reference it again once its only book is gone.
+    Returns (entities_pruned, entities_deleted). Used by library.remove_book
+    and bookrag doctor's orphaned-entity cleanup."""
+    pruned = 0
+    kept = []
+    for entity in entities["entities"]:
+        if book_id in entity["book_ids"]:
+            entity["book_ids"].remove(book_id)
+            pruned += 1
+        if entity["book_ids"]:
+            kept.append(entity)
+    deleted = len(entities["entities"]) - len(kept)
+    entities["entities"] = kept
+    return pruned, deleted

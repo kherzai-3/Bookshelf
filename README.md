@@ -250,6 +250,36 @@ work the same as `extract`. There's no multi-turn memory yet (each question
 in an interactive session is answered independently) and no way to bump
 `--chapter` mid-session - restart with a new `--chapter` value instead.
 
+### Managing your library
+
+```bash
+bookrag list                    # every book: chapters, content type, extraction status, series
+bookrag show <book-id>          # full detail for one book, including entity count
+
+bookrag remove <book-id>        # asks for confirmation, then deletes the book + its facts
+bookrag remove <book-id> --yes  # skip the confirmation prompt
+
+bookrag doctor                  # read-only consistency check
+bookrag doctor --fix            # apply the safe, obvious cleanups it finds
+```
+
+`list`/`show` report extraction status as *how far the run reached*, not
+just "has any facts" - a chapter that genuinely has zero facts (front
+matter, a too-short interstitial `extract.pipeline` skipped) doesn't make an
+otherwise-complete book look partial. A real sample extraction (fewer
+chapters attempted than the book has) shows as `N (partial: M/total ch)`.
+
+`remove` deletes a book's library directory, its entry in `index.json`, and
+prunes it from every entity's `book_ids` in the shared `entities.json`
+registry - an entity left with no books after that is deleted outright.
+
+`doctor` checks for the kind of drift that accumulates from hand-editing
+library files directly (something this project's own development has done
+more than once): an `index.json` entry whose directory is gone, an entity
+still listing a `book_id` that no longer exists, and an entity with zero
+facts referencing it in any book that's still around. It's read-only unless
+you pass `--fix`.
+
 ### Where books end up
 
 ```
@@ -383,6 +413,17 @@ data/library/entities.json    # global entity registry: entity_id -> canonical
   the same thing. Consolidating duplicates and adding semantic/similarity
   search over facts (e.g. finding "the choosing ceremony" when the catalog
   calls it "the Choosing Day") is planned future work, not yet started.
+- **Entity resolution is scoped to the whole library, not to a series.**
+  `resolve_entity` matches purely on `(name, entity_type)`, with no check
+  that the books involved are actually related - intentional for the series
+  case (a character's facts should accumulate across sequential books), but
+  it applies globally: two entirely unrelated books that each introduce a
+  same-named, same-typed entity would silently share one `entity_id` in
+  `entities.json`. Each book's own `facts.jsonl` stays correctly scoped
+  regardless (this isn't a spoiler-safety issue), but the shared entity
+  registry would conflate two different identities. Not yet observed in
+  practice (no two books in the current library share a character name);
+  noted here so it isn't rediscovered from scratch if one ever does.
 - **No resumable extraction, and now a bigger deal than when this was
   first written.** `bookrag extract` always starts from chapter 0 and
   overwrites `facts.jsonl` from scratch - killing/interrupting a long run

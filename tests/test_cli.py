@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -291,3 +292,121 @@ def test_chat_unknown_book_id(tmp_path: Path, _library_root: Path) -> None:
     exit_code = main(["chat", "no-such-book", "--chapter", "0", "--provider", "fake", "--question", "anything"])
 
     assert exit_code == 1
+
+
+def test_list_command_reports_no_books_on_an_empty_library(_library_root: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = main(["list"])
+
+    assert exit_code == 0
+    assert "No books in the library yet" in capsys.readouterr().out
+
+
+def test_list_command_prints_a_row_per_book(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+
+    exit_code = main(["list"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "book_id" in output  # header row
+    assert book_dir.name in output
+    assert "Test Book" in output
+
+
+def test_show_command_for_an_unextracted_book(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+
+    exit_code = main(["show", book_dir.name])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "not yet extracted" in output
+
+
+def test_show_command_unknown_book_id(_library_root: Path) -> None:
+    exit_code = main(["show", "no-such-book"])
+
+    assert exit_code == 1
+
+
+def test_remove_command_with_yes_flag_deletes_the_book(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+
+    exit_code = main(["remove", book_dir.name, "--yes"])
+
+    assert exit_code == 0
+    assert not book_dir.exists()
+    assert "Removed" in capsys.readouterr().out
+
+
+def test_remove_command_without_confirmation_aborts(
+    tmp_path: Path, _library_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+    exit_code = main(["remove", book_dir.name])
+
+    assert exit_code == 1
+    assert book_dir.exists()  # nothing removed
+
+
+def test_remove_command_unknown_book_id(_library_root: Path) -> None:
+    exit_code = main(["remove", "no-such-book", "--yes"])
+
+    assert exit_code == 1
+
+
+def test_doctor_command_reports_a_clean_library(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+
+    exit_code = main(["doctor"])
+
+    assert exit_code == 0
+    assert "consistent" in capsys.readouterr().out
+
+
+def test_doctor_command_detects_and_fixes_an_orphaned_index_entry(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    shutil.rmtree(book_dir)  # simulate a directory deleted outside the CLI
+
+    report_exit_code = main(["doctor"])
+    report_output = capsys.readouterr().out
+
+    fix_exit_code = main(["doctor", "--fix"])
+    capsys.readouterr()
+    recheck_exit_code = main(["doctor"])
+    recheck_output = capsys.readouterr().out
+
+    assert report_exit_code == 0
+    assert book_dir.name in report_output
+    assert fix_exit_code == 0
+    assert recheck_exit_code == 0
+    assert "consistent" in recheck_output

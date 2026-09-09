@@ -1,14 +1,17 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-08T00:00:00Z
-source_hash: f60176dfe952bd17ddbe3a1f8629275ab344ca55
+last_synced: 2026-09-09T00:00:00Z
+source_hash: 26180a5211d7f44cb7670cede3bdfbbfede2d375
 ---
 
 ## Purpose
 The `bookrag` command-line entry point (registered via `[project.scripts]` in
-`pyproject.toml`). Four subcommands: `ingest` (file → library),
+`pyproject.toml`). Eight subcommands: `ingest` (file → library),
 `extract` (library book → chapter-scoped facts), `eval` (compare providers,
-read-only), `chat` (spoiler-safe Q&A against a book, up to a given chapter).
+read-only), `chat` (spoiler-safe Q&A against a book, up to a given chapter),
+and four library-management commands - `list`, `show`, `remove`, `doctor` -
+that are thin argparse/print wrappers around `bookrag.library`'s actual logic
+(see that file's context doc for the real behavior).
 
 ## Public Interface
 - `main(argv: list[str] | None = None) -> int` — argparse-based entry point;
@@ -44,6 +47,27 @@ read-only), `chat` (spoiler-safe Q&A against a book, up to a given chapter).
   answers once and exits (exit 1 if the book or chapter is invalid, same
   posture as `extract`/`eval`); without it, starts an interactive
   `> `-prompt loop, one answer per line, until EOF/Ctrl+C.
+- CLI: `bookrag list` — table of every book in the library: id, title,
+  author, chapter count, content type, extraction status (fact count, or
+  `N (partial: M/total ch)` when the run hasn't reached the end yet, or `-`
+  if never extracted), series. An orphaned index entry (see `library.py`)
+  prints as a distinct `ORPHANED` row rather than crashing.
+- CLI: `bookrag show <book-id>` — the same per-book detail `list` summarizes,
+  spelled out (entity count included, which the table omits for space).
+  Exit 1 for an unknown `book_id` or an orphaned one (points at
+  `bookrag doctor --fix` instead of failing silently).
+- CLI: `bookrag remove <book-id> [--yes]` — deletes the book's library
+  directory, its `index.json` entry, and prunes it from every entity's
+  `book_ids` in `entities.json` (see `library.remove_book`). Prompts for
+  confirmation (`input()`, same interactive pattern as `chat`'s loop) unless
+  `--yes` is given; an unconfirmable prompt (EOF, e.g. non-interactive
+  stdin) aborts rather than silently proceeding. Works even on a
+  directory-only-orphaned or index-only-orphaned book.
+- CLI: `bookrag doctor [--fix]` — reports (or, with `--fix`, also repairs)
+  three kinds of library drift: orphaned `index.json` entries, stale
+  `entity_id -> book_id` references, and entities with zero facts
+  referencing them in any book that still exists. Read-only by default -
+  see `library.run_doctor` for exactly what `--fix` changes.
 
 ## Key Decisions
 - Loader is selected by file extension (`.epub` → `epub_loader`, `.pdf` →
@@ -139,12 +163,11 @@ read-only), `chat` (spoiler-safe Q&A against a book, up to a given chapter).
   `incoming_root`), `bookrag.titles.guess_title_author`,
   `bookrag.extract.pipeline.extract_book`, `bookrag.eval` (`run_eval`,
   `summarize`), `bookrag.providers.registry.get_provider`, `bookrag.query`
-  (`facts_as_of`, `format_context`)
+  (`facts_as_of`, `format_context`), `bookrag.library` (`list_books`,
+  `show_book`, `remove_book`, `run_doctor`)
 - External: `statistics` (stdlib)
 
 ## Open Questions / TODOs
-- No `list`/`show` subcommands yet to inspect what's already in the library —
-  only `ingest`.
 - The non-fiction taxonomy (`--content-type nonfiction`, see
   `providers/prompts.py`/`providers/parsing.py`) has only been validated
   via a `bookrag eval` checkpoint (3 chapters of a real consolidated Atomic

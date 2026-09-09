@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/storage.py
-last_synced: 2026-09-08T00:00:00Z
-source_hash: d82d860caef4e7cd8abf62ea0832e3cf1427090d
+last_synced: 2026-09-09T00:00:00Z
+source_hash: 4f92efc240add5df9b03e33b2d80301c488d59ab
 ---
 
 ## Purpose
@@ -40,6 +40,13 @@ listing/grouping books without ever merging their chapter numbering.
   key.
 - `load_index(root=None) -> dict` — the raw `index.json` (`{"books": []}` if
   it doesn't exist yet).
+- `remove_from_index(book_id, root=None) -> bool` — removes `book_id`'s
+  entry from `index.json` if present; returns whether an entry was actually
+  found and removed. The inverse of `_update_index`'s upsert, made public
+  (unlike `_update_index`) since `library.remove_book`/`bookrag doctor`
+  are legitimate external callers, not just `save_book` internals. Works
+  even when the entry is already orphaned (directory gone) - it only
+  touches `index.json`.
 - `series_reading_order(book_id, root=None) -> list[str]` — ordered
   `book_ids` leading up to and including `book_id`: `[book_id]` if
   standalone, otherwise every earlier book in the same series (by

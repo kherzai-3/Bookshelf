@@ -1,4 +1,4 @@
-"""Command-line entry point: `bookrag ingest <path>`."""
+"""Command-line entry point: `bookrag {ingest,extract,eval,chat,list,show,remove,doctor}`."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from bookrag.extract.pipeline import extract_book
 from bookrag.ingest import epub_loader, pdf_loader
 from bookrag.ingest.chapter import Chapter
 from bookrag.ingest.consolidate import consolidate_fragments, should_consolidate
+from bookrag.library import list_books, remove_book, run_doctor, show_book
 from bookrag.providers.registry import get_provider
 from bookrag.query import facts_as_of, format_context
 from bookrag.storage import incoming_root, library_root, load_chapters, load_metadata, save_book
@@ -75,6 +76,18 @@ def main(argv: list[str] | None = None) -> int:
         "--question", default=None, help="Ask a single question and exit, instead of starting an interactive session"
     )
 
+    subparsers.add_parser("list", help="List every book in the library and its extraction status")
+
+    show = subparsers.add_parser("show", help="Show details for one book in the library")
+    show.add_argument("book_id")
+
+    remove = subparsers.add_parser("remove", help="Delete a book from the library (and its entity references)")
+    remove.add_argument("book_id")
+    remove.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+
+    doctor = subparsers.add_parser("doctor", help="Check the library for consistency issues (read-only by default)")
+    doctor.add_argument("--fix", action="store_true", help="Apply the safe, obvious cleanups instead of just reporting")
+
     args = parser.parse_args(argv)
 
     if args.command == "ingest":
@@ -85,6 +98,14 @@ def main(argv: list[str] | None = None) -> int:
         return _eval(args)
     if args.command == "chat":
         return _chat(args)
+    if args.command == "list":
+        return _list(args)
+    if args.command == "show":
+        return _show(args)
+    if args.command == "remove":
+        return _remove(args)
+    if args.command == "doctor":
+        return _doctor(args)
     return 1
 
 
@@ -270,6 +291,132 @@ def _chat(args: argparse.Namespace) -> int:
         if not question:
             continue
         print(provider.answer_question(question, context, content_type))
+
+
+def _list(args: argparse.Namespace) -> int:
+    books = list_books()
+    if not books:
+        print("No books in the library yet - use `bookrag ingest <path>` to add one.")
+        return 0
+
+    headers = ["book_id", "title", "author", "chapters", "type", "facts", "series"]
+    rows = []
+    for b in books:
+        if b.orphaned:
+            rows.append([b.book_id, b.title, b.author or "-", "?", "?", "ORPHANED (see `bookrag doctor`)", "-"])
+            continue
+        facts_col = "-"
+        if b.fact_count is not None:
+            facts_col = str(b.fact_count)
+            if b.partial:
+                facts_col += f" (partial: {b.chapters_extracted}/{b.chapter_count} ch)"
+        series_col = f"{b.series['name']} #{b.series['position']}" if b.series else "-"
+        rows.append(
+            [b.book_id, b.title, b.author or "-", str(b.chapter_count), b.content_type, facts_col, series_col]
+        )
+
+    widths = [max(len(headers[i]), *(len(row[i]) for row in rows)) for i in range(len(headers))]
+
+    def fmt(cells: list[str]) -> str:
+        return "  ".join(cell.ljust(w) for cell, w in zip(cells, widths))
+
+    print(fmt(headers))
+    print(fmt(["-" * w for w in widths]))
+    for row in rows:
+        print(fmt(row))
+    return 0
+
+
+def _show(args: argparse.Namespace) -> int:
+    try:
+        b = show_book(args.book_id)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+
+    if b.orphaned:
+        print(f"'{b.book_id}' is listed in the library index but its directory is missing or incomplete.")
+        print("Run `bookrag doctor --fix` to clean up the stale index entry.")
+        return 1
+
+    print(b.title + (f" by {b.author}" if b.author else ""))
+    print(f"  book_id: {b.book_id}")
+    print(f"  content_type: {b.content_type}")
+    print(f"  chapters: {b.chapter_count}")
+    if b.series:
+        print(f"  series: {b.series['name']} #{b.series['position']}")
+    if b.fact_count is None:
+        print(f"  extraction: not yet extracted (bookrag extract {b.book_id})")
+    else:
+        status = (
+            f"partially extracted ({b.chapters_extracted}/{b.chapter_count} chapters)"
+            if b.partial
+            else "fully extracted"
+        )
+        print(f"  extraction: {status} - {b.fact_count} facts, {b.entity_count} entities")
+    return 0
+
+
+def _remove(args: argparse.Namespace) -> int:
+    try:
+        label = show_book(args.book_id).title
+    except ValueError:
+        if not (library_root() / args.book_id).exists():
+            print(f"no such book in the library: {args.book_id!r}")
+            return 1
+        label = args.book_id
+
+    if not args.yes:
+        try:
+            answer = input(
+                f"Remove '{label}' ({args.book_id}) from the library? This deletes its chapters/facts"
+                " permanently. [y/N] "
+            ).strip().lower()
+        except EOFError:
+            print("Aborted (no confirmation available - pass --yes to remove non-interactively).")
+            return 1
+        if answer != "y":
+            print("Aborted.")
+            return 1
+
+    result = remove_book(args.book_id)
+    print(f"Removed '{args.book_id}' from the library.")
+    if result.entities_pruned:
+        note = f"  pruned {args.book_id} from {result.entities_pruned} entit{'y' if result.entities_pruned == 1 else 'ies'}"
+        if result.entities_deleted:
+            note += f", deleted {result.entities_deleted} that became fully orphaned"
+        print(note)
+    return 0
+
+
+def _doctor(args: argparse.Namespace) -> int:
+    report = run_doctor(fix=args.fix)
+
+    if not report.orphaned_index_entries and not report.stale_entity_book_refs and not report.orphaned_entities:
+        print("Library is consistent - no issues found.")
+        return 0
+
+    if report.orphaned_index_entries:
+        n = len(report.orphaned_index_entries)
+        print(f"{n} orphaned index entr{'y' if n == 1 else 'ies'} (directory missing):")
+        for book_id in report.orphaned_index_entries:
+            print(f"  - {book_id}")
+    if report.stale_entity_book_refs:
+        n = len(report.stale_entity_book_refs)
+        print(f"{n} stale entity->book reference(s) (book no longer exists):")
+        for entity_id, book_id in report.stale_entity_book_refs:
+            print(f"  - {entity_id} -> {book_id}")
+    if report.orphaned_entities:
+        n = len(report.orphaned_entities)
+        print(f"{n} orphaned entit{'y' if n == 1 else 'ies'} (zero facts reference them in any existing book):")
+        for entity_id in report.orphaned_entities:
+            print(f"  - {entity_id}")
+
+    if args.fix:
+        print("Applied fixes: removed orphaned index entries, pruned stale book references, deleted fully orphaned entities.")
+    else:
+        print("Run `bookrag doctor --fix` to apply these cleanups.")
+    return 0
 
 
 def sanity_summary(chapters: list[Chapter], edge_count: int = 3) -> list[str]:
