@@ -548,6 +548,22 @@ pytest tests/ -v
   this is a meaningfully bigger lift (an embedding step that needs to stay
   incremental/resumable alongside extraction, a similarity-search code
   path, cache invalidation when facts change).
+- **A timeline construct tracking major events, biased toward ones that
+  involve the cast** - raised as a real fix for the cross-event conflation
+  bug above (see Known limitations), not just a nice-to-have. Root cause of
+  that bug: today's facts attribute each statement to exactly one entity
+  and one category, with no first-class notion of "a distinct event" - so
+  two unrelated occurrences that happen to share a category and entity
+  (Halt wounded by the Kalkara in ch.34; a different, unrelated death
+  reported in ch.66) look identical to a "trust the later chapter" recency
+  rule. A timeline would need multi-entity association per event (the
+  current single-`entity_name`-per-fact schema can't represent "Halt was
+  struck by the Kalkara" as one event involving both), either as a new
+  event construct or a separate `timeline.jsonl` alongside the existing
+  per-entity facts. Not self-contained to extraction alone -
+  `select_relevant_facts`/the answer prompt would also need to become
+  timeline-aware to actually pick the right event for a question rather
+  than just the facts. Needs its own planning pass before building.
 
 ## For future development sessions (Claude or human)
 
