@@ -6,7 +6,7 @@ import pytest
 
 from bookrag.extract.resolve import load_entities, save_entities
 from bookrag.ingest.chapter import Chapter
-from bookrag.library import list_books, remove_book, run_doctor, show_book
+from bookrag.library import detect_duplicate_entities, list_books, merge_entities, remove_book, run_doctor, show_book
 from bookrag.storage import load_index, save_book
 
 
@@ -229,3 +229,168 @@ def test_run_doctor_fix_applies_all_cleanups(tmp_path: Path) -> None:
     assert "character-aaa" not in entity_ids  # fully orphaned - deleted
     remaining = next(e for e in entities if e["entity_id"] == "character-bbb")
     assert remaining["book_ids"] == [good_book]  # stale "deleted-book" ref pruned, real one kept
+
+
+def test_detect_duplicate_entities_finds_a_real_shaped_cluster(tmp_path: Path) -> None:
+    """Mirrors the real confirmed bug: one creature ("Wargal(s)") split
+    across 2 name spellings and multiple entity_types because resolution
+    is type-scoped and only exact-matches (before match_key normalization).
+    Detection deliberately ignores type - that's the whole point, it's
+    meant to surface exactly this kind of cross-type fragmentation."""
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Fantasy Book")
+    save_entities(
+        {
+            "entities": [
+                {"entity_id": "character-a", "canonical_name": "Wargals", "type": "character", "aliases": [], "book_ids": [book_id]},
+                {"entity_id": "setting-b", "canonical_name": "Wargals", "type": "setting", "aliases": [], "book_ids": [book_id]},
+                {"entity_id": "theme-c", "canonical_name": "The Wargals", "type": "theme", "aliases": [], "book_ids": [book_id]},
+                {"entity_id": "character-d", "canonical_name": "Halt", "type": "character", "aliases": [], "book_ids": [book_id]},
+            ]
+        },
+        root,
+    )
+    _write_facts(
+        root,
+        book_id,
+        [
+            {"entity_id": "character-a", "chapter_index": 0, "category": "development", "statement": "..."},
+            {"entity_id": "setting-b", "chapter_index": 1, "category": "description", "statement": "..."},
+            {"entity_id": "setting-b", "chapter_index": 2, "category": "description", "statement": "..."},
+        ],
+    )
+
+    clusters = detect_duplicate_entities(root=root)
+
+    assert len(clusters) == 1  # Halt is unique, not clustered with anything
+    cluster_ids = {e.entity_id for e in clusters[0]}
+    assert cluster_ids == {"character-a", "setting-b", "theme-c"}
+    fact_counts = {e.entity_id: e.fact_count for e in clusters[0]}
+    assert fact_counts == {"character-a": 1, "setting-b": 2, "theme-c": 0}
+
+
+def test_detect_duplicate_entities_no_false_positive_on_different_names(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    save_entities(
+        {
+            "entities": [
+                {"entity_id": "character-a", "canonical_name": "Will", "type": "character", "aliases": [], "book_ids": []},
+                {"entity_id": "character-b", "canonical_name": "Halt", "type": "character", "aliases": [], "book_ids": []},
+            ]
+        },
+        root,
+    )
+
+    assert detect_duplicate_entities(root=root) == []
+
+
+def test_run_doctor_reports_duplicates_but_fix_does_not_merge_them(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Fantasy Book")
+    save_entities(
+        {
+            "entities": [
+                {"entity_id": "character-a", "canonical_name": "Wargals", "type": "character", "aliases": [], "book_ids": [book_id]},
+                {"entity_id": "setting-b", "canonical_name": "Wargals", "type": "setting", "aliases": [], "book_ids": [book_id]},
+            ]
+        },
+        root,
+    )
+    _write_facts(
+        root,
+        book_id,
+        [
+            {"entity_id": "character-a", "chapter_index": 0, "category": "development", "statement": "..."},
+            {"entity_id": "setting-b", "chapter_index": 1, "category": "description", "statement": "..."},
+        ],
+    )
+
+    report = run_doctor(root=root, fix=True)
+
+    assert len(report.duplicate_entity_groups) == 1
+    entity_ids = {e["entity_id"] for e in load_entities(root)["entities"]}
+    assert entity_ids == {"character-a", "setting-b"}  # untouched by --fix
+
+
+def test_merge_entities_rewrites_facts_and_populates_aliases(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Fantasy Book")
+    save_entities(
+        {
+            "entities": [
+                {"entity_id": "setting-dominant", "canonical_name": "Wargals", "type": "character", "aliases": [], "book_ids": [book_id]},
+                {"entity_id": "theme-straggler", "canonical_name": "The Wargals", "type": "character", "aliases": [], "book_ids": [book_id]},
+            ]
+        },
+        root,
+    )
+    _write_facts(
+        root,
+        book_id,
+        [
+            {"entity_id": "setting-dominant", "chapter_index": 0, "category": "description", "statement": "a"},
+            {"entity_id": "setting-dominant", "chapter_index": 1, "category": "description", "statement": "b"},
+            {"entity_id": "theme-straggler", "chapter_index": 2, "category": "description", "statement": "c"},
+        ],
+    )
+
+    result = merge_entities(["setting-dominant", "theme-straggler"], root=root)
+
+    assert result.kept_entity_id == "setting-dominant"  # defaulted to the entity with more facts
+    assert result.merged_entity_ids == ["theme-straggler"]
+    assert result.facts_rewritten == 1
+
+    facts = [json.loads(line) for line in (root / book_id / "facts.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert {f["entity_id"] for f in facts} == {"setting-dominant"}  # all 3 facts now point at the kept entity
+
+    (remaining,) = load_entities(root)["entities"]
+    assert remaining["entity_id"] == "setting-dominant"
+    assert remaining["aliases"] == ["The Wargals"]  # the dead alias field, finally populated
+
+
+def test_merge_entities_unions_book_ids_across_multiple_books(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    book_a = _make_book(tmp_path, root, "Book A")
+    book_b = _make_book(tmp_path, root, "Book B")
+    save_entities(
+        {
+            "entities": [
+                {"entity_id": "character-a", "canonical_name": "Wargal", "type": "character", "aliases": [], "book_ids": [book_a]},
+                {"entity_id": "character-b", "canonical_name": "Wargals", "type": "character", "aliases": [], "book_ids": [book_b]},
+            ]
+        },
+        root,
+    )
+
+    result = merge_entities(["character-a", "character-b"], keep="character-a", root=root)
+
+    assert result.kept_entity_id == "character-a"
+    (remaining,) = load_entities(root)["entities"]
+    assert sorted(remaining["book_ids"]) == sorted([book_a, book_b])
+
+
+def test_merge_entities_raises_for_fewer_than_two_valid_ids(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    save_entities(
+        {"entities": [{"entity_id": "character-a", "canonical_name": "Will", "type": "character", "aliases": [], "book_ids": []}]},
+        root,
+    )
+
+    with pytest.raises(ValueError):
+        merge_entities(["character-a", "no-such-entity"], root=root)
+
+
+def test_merge_entities_raises_when_keep_is_not_in_the_group(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    save_entities(
+        {
+            "entities": [
+                {"entity_id": "character-a", "canonical_name": "Wargal", "type": "character", "aliases": [], "book_ids": []},
+                {"entity_id": "character-b", "canonical_name": "Wargals", "type": "character", "aliases": [], "book_ids": []},
+            ]
+        },
+        root,
+    )
+
+    with pytest.raises(ValueError):
+        merge_entities(["character-a", "character-b"], keep="character-c", root=root)

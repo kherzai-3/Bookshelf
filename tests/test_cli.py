@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from bookrag.cli import main
+from bookrag.extract.resolve import load_entities, save_entities
 from bookrag.storage import load_chapters
 from tests.helpers import build_fragmented_epub, build_narrative_epub, build_sample_epub
 
@@ -470,3 +471,78 @@ def test_doctor_command_detects_and_fixes_an_orphaned_index_entry(
     assert fix_exit_code == 0
     assert recheck_exit_code == 0
     assert "consistent" in recheck_output
+
+
+def _seed_duplicate_wargal_cluster(library_root: Path, book_id: str) -> None:
+    entities = load_entities(library_root)
+    entities["entities"].extend(
+        [
+            {"entity_id": "character-a", "canonical_name": "Wargals", "type": "character", "aliases": [], "book_ids": [book_id]},
+            {"entity_id": "setting-b", "canonical_name": "The Wargals", "type": "setting", "aliases": [], "book_ids": [book_id]},
+        ]
+    )
+    save_entities(entities, library_root)
+    facts_path = library_root / book_id / "facts.jsonl"
+    with facts_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"entity_id": "character-a", "chapter_index": 0, "category": "development", "statement": "a"}) + "\n")
+        f.write(json.dumps({"entity_id": "setting-b", "chapter_index": 0, "category": "description", "statement": "b"}) + "\n")
+
+
+def test_doctor_command_reports_a_duplicate_entity_cluster(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    main(["extract", book_dir.name, "--provider", "fake"])
+    _seed_duplicate_wargal_cluster(_library_root, book_dir.name)
+    capsys.readouterr()
+
+    exit_code = main(["doctor"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "duplicate entity cluster" in output
+    assert "Wargals" in output
+
+
+def test_doctor_merge_duplicates_with_yes_merges_without_prompting(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    main(["extract", book_dir.name, "--provider", "fake"])
+    _seed_duplicate_wargal_cluster(_library_root, book_dir.name)
+    capsys.readouterr()
+
+    exit_code = main(["doctor", "--merge-duplicates", "--yes"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Merged" in output
+    remaining_ids = {e["entity_id"] for e in load_entities(_library_root)["entities"]}
+    assert len(remaining_ids & {"character-a", "setting-b"}) == 1  # exactly one of the two survives
+
+
+def test_doctor_merge_duplicates_without_yes_aborts_on_no_confirmation(
+    tmp_path: Path, _library_root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    main(["extract", book_dir.name, "--provider", "fake"])
+    _seed_duplicate_wargal_cluster(_library_root, book_dir.name)
+    capsys.readouterr()
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+    exit_code = main(["doctor", "--merge-duplicates"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Skipped" in output
+    remaining_ids = {e["entity_id"] for e in load_entities(_library_root)["entities"]}
+    assert {"character-a", "setting-b"} <= remaining_ids  # nothing merged

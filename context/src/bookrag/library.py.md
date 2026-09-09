@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/library.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 572d0846aa48b61a669a3cf26cf51356402e5170
+source_hash: a32bbd2e7828db01687007b3bd7e4c2a627352da
 ---
 
 ## Purpose
@@ -32,13 +32,59 @@ module's functions.
   this leaves with none). Raises `ValueError` only if `book_id` is unknown
   to *both* the index and the filesystem - otherwise cleans up whichever
   parts of it actually exist (handles the orphaned-index-entry case too).
+- `DuplicateEntity` (dataclass) — `entity_id, canonical_name, type,
+  book_ids, fact_count` - one member of a possible-duplicate cluster.
+- `detect_duplicate_entities(root=None) -> list[list[DuplicateEntity]]` —
+  groups entities by `extract.resolve.match_key(canonical_name)`,
+  **regardless of `entity_type`** (unlike `resolve_entity`'s own matching -
+  see Key Decisions), returns only groups with more than one entity.
+- `MergeResult` (dataclass) — `kept_entity_id, merged_entity_ids: list[str],
+  facts_rewritten: int`.
+- `merge_entities(entity_ids, keep=None, root=None) -> MergeResult` —
+  merges 2+ existing entities into one (see Key Decisions for exactly
+  what it rewrites). Raises `ValueError` if fewer than two of
+  `entity_ids` actually exist, or if `keep` isn't one of them.
 - `DoctorReport` (dataclass) — `orphaned_index_entries: list[str],
   stale_entity_book_refs: list[tuple[entity_id, book_id]],
-  orphaned_entities: list[str], fixed: bool`.
+  orphaned_entities: list[str], duplicate_entity_groups:
+  list[list[DuplicateEntity]], fixed: bool`.
 - `run_doctor(root=None, fix=False) -> DoctorReport` — read-only by default;
-  `fix=True` also applies the cleanup (see Key Decisions for exactly what).
+  `fix=True` also applies the cleanup (see Key Decisions for exactly what -
+  `duplicate_entity_groups` is never included in what `fix` touches).
 
 ## Key Decisions
+- **`detect_duplicate_entities` deliberately ignores `entity_type` when
+  grouping**, unlike `resolve_entity`'s own type-scoped matching. Real
+  motivating case: one creature ("Wargal(s)") had fragmented into 5
+  catalog entities across *both* name spelling and `entity_type`
+  (`character`/`setting`/`theme`) - a type-scoped detector would only ever
+  find same-type duplicates and miss most of that real cluster. A real
+  full-library `bookrag doctor` run found 12 such clusters, several
+  type-crossing (a publisher name typed as both `setting` and
+  `character`; "Skandians" split three ways) and at least one that was
+  pure name-variant with **no** type drift at all ("Implementation
+  Intention"/"Implementation Intentions", both already `concept`) -
+  confirming `match_key` normalization has real value independent of the
+  type-drift fix in `extract/pipeline.py`.
+- **Detection only - `bookrag doctor --fix` never auto-merges duplicate
+  clusters**, unlike its other three checks (which are all safe,
+  reversible-in-spirit cleanups of clearly-dead data). Merging picks a
+  winner and permanently rewrites fact ownership - a real, consequential
+  judgment call that needs a human to confirm, not a blind default action.
+  `merge_entities` is exposed separately (`bookrag doctor
+  --merge-duplicates`, confirmed per cluster unless `--yes`).
+- **`merge_entities` picks the most-facts entity as `keep` by default** -
+  matches the real, lopsided pattern already observed (one real cluster's
+  dominant entity held 73% of the group's facts). Every merged-away
+  entity's `canonical_name` and its own `aliases` become aliases of the
+  kept entity - gated only on an exact (case-insensitive) match to the
+  kept entity's own name, **not** on `match_key` equality, since two
+  surface forms sharing a `match_key` (e.g. "Wargals"/"The Wargals") are
+  still two real, distinct strings worth recording once merged - this is
+  what finally populates `aliases`, a field nothing else in the codebase
+  ever writes to (see `extract/resolve.py`'s context doc). Facts are
+  rewritten in every book directory any merged entity referenced, not just
+  one - a real entity can span multiple books via `book_ids`.
 - **"How far extraction reached" is `max(chapter_index) + 1` from
   `facts.jsonl`, not a count of chapters that have at least one fact.**
   These genuinely differ on real data: a fully successful `extract_book` run

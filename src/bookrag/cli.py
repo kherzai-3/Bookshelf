@@ -12,7 +12,7 @@ from bookrag.extract.pipeline import extract_book, resume_start_index
 from bookrag.ingest import epub_loader, pdf_loader
 from bookrag.ingest.chapter import Chapter
 from bookrag.ingest.consolidate import consolidate_fragments, should_consolidate
-from bookrag.library import list_books, remove_book, run_doctor, show_book
+from bookrag.library import detect_duplicate_entities, list_books, merge_entities, remove_book, run_doctor, show_book
 from bookrag.providers.registry import get_provider
 from bookrag.query import facts_as_of, format_context
 from bookrag.storage import incoming_root, library_root, load_chapters, load_metadata, save_book
@@ -92,6 +92,14 @@ def main(argv: list[str] | None = None) -> int:
 
     doctor = subparsers.add_parser("doctor", help="Check the library for consistency issues (read-only by default)")
     doctor.add_argument("--fix", action="store_true", help="Apply the safe, obvious cleanups instead of just reporting")
+    doctor.add_argument(
+        "--merge-duplicates",
+        action="store_true",
+        help="Interactively merge detected duplicate-entity clusters (not applied by --fix - see README)",
+    )
+    doctor.add_argument(
+        "--yes", action="store_true", help="With --merge-duplicates, skip confirmation (keeps the most-facts entity)"
+    )
 
     args = parser.parse_args(argv)
 
@@ -418,7 +426,13 @@ def _remove(args: argparse.Namespace) -> int:
 def _doctor(args: argparse.Namespace) -> int:
     report = run_doctor(fix=args.fix)
 
-    if not report.orphaned_index_entries and not report.stale_entity_book_refs and not report.orphaned_entities:
+    nothing_found = (
+        not report.orphaned_index_entries
+        and not report.stale_entity_book_refs
+        and not report.orphaned_entities
+        and not report.duplicate_entity_groups
+    )
+    if nothing_found:
         print("Library is consistent - no issues found.")
         return 0
 
@@ -437,11 +451,47 @@ def _doctor(args: argparse.Namespace) -> int:
         print(f"{n} orphaned entit{'y' if n == 1 else 'ies'} (zero facts reference them in any existing book):")
         for entity_id in report.orphaned_entities:
             print(f"  - {entity_id}")
+    if report.duplicate_entity_groups:
+        n = len(report.duplicate_entity_groups)
+        print(f"{n} possible duplicate entity cluster(s) (same name, resolved as separate entities):")
+        for group in report.duplicate_entity_groups:
+            label = ", ".join(f"{e.canonical_name} ({e.type}, {e.fact_count} facts)" for e in group)
+            print(f"  - {label}")
 
     if args.fix:
         print("Applied fixes: removed orphaned index entries, pruned stale book references, deleted fully orphaned entities.")
-    else:
-        print("Run `bookrag doctor --fix` to apply these cleanups.")
+    elif not args.merge_duplicates:
+        print(
+            "Run `bookrag doctor --fix` to apply the safe cleanups above, or "
+            "`bookrag doctor --merge-duplicates` to merge duplicate entity clusters."
+        )
+
+    if args.merge_duplicates:
+        for group in report.duplicate_entity_groups:
+            default_keep = max(group, key=lambda e: e.fact_count)
+            label = ", ".join(f"{e.canonical_name} ({e.type}, {e.fact_count} facts)" for e in group)
+            if not args.yes:
+                try:
+                    answer = (
+                        input(
+                            f"Merge [{label}] into '{default_keep.canonical_name}' "
+                            f"({default_keep.type}, {default_keep.fact_count} facts)? [y/N] "
+                        )
+                        .strip()
+                        .lower()
+                    )
+                except EOFError:
+                    print("Aborted (no confirmation available - pass --yes to merge non-interactively).")
+                    return 1
+                if answer != "y":
+                    print(f"Skipped: {label}")
+                    continue
+            result = merge_entities([e.entity_id for e in group], keep=default_keep.entity_id)
+            n = len(result.merged_entity_ids)
+            print(
+                f"Merged {n} entit{'y' if n == 1 else 'ies'} into '{default_keep.canonical_name}'"
+                f" ({result.facts_rewritten} fact(s) rewritten)"
+            )
     return 0
 
 

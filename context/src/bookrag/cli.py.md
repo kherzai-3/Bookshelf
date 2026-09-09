@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 351e72efbac6deb2a33f26d69f31d6328862f2ab
+source_hash: 427a90b24e375cab06b7c1b423e3f3bf9b5c4918
 ---
 
 ## Purpose
@@ -73,11 +73,17 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   `--yes` is given; an unconfirmable prompt (EOF, e.g. non-interactive
   stdin) aborts rather than silently proceeding. Works even on a
   directory-only-orphaned or index-only-orphaned book.
-- CLI: `bookrag doctor [--fix]` — reports (or, with `--fix`, also repairs)
-  three kinds of library drift: orphaned `index.json` entries, stale
-  `entity_id -> book_id` references, and entities with zero facts
-  referencing them in any book that still exists. Read-only by default -
-  see `library.run_doctor` for exactly what `--fix` changes.
+- CLI: `bookrag doctor [--fix] [--merge-duplicates] [--yes]` — reports (or,
+  with `--fix`, also repairs) three kinds of library drift: orphaned
+  `index.json` entries, stale `entity_id -> book_id` references, and
+  entities with zero facts referencing them in any book that still exists.
+  Also always reports possible-duplicate entity clusters (same name across
+  types/spellings - see `library.detect_duplicate_entities`), but `--fix`
+  never touches them - that needs the separate `--merge-duplicates` flag,
+  which confirms per cluster (`[y/N]`, same pattern as `bookrag remove`)
+  unless `--yes` is given, defaulting to the most-facts entity in each
+  cluster as the one kept. Read-only by default - see `library.run_doctor`/
+  `library.merge_entities` for exactly what each flag changes.
 
 ## Key Decisions
 - Loader is selected by file extension (`.epub` → `epub_loader`, `.pdf` →
@@ -175,7 +181,8 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   `bookrag.extract.pipeline` (`extract_book`, `resume_start_index`), `bookrag.eval` (`run_eval`,
   `summarize`), `bookrag.providers.registry.get_provider`, `bookrag.query`
   (`facts_as_of`, `format_context`), `bookrag.library` (`list_books`,
-  `show_book`, `remove_book`, `run_doctor`)
+  `show_book`, `remove_book`, `run_doctor`, `detect_duplicate_entities`,
+  `merge_entities`)
 - External: `statistics` (stdlib)
 
 ## Open Questions / TODOs

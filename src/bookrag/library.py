@@ -13,7 +13,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from bookrag.extract.resolve import load_entities, prune_book_from_entities, save_entities
+from bookrag.extract.resolve import load_entities, match_key, prune_book_from_entities, save_entities
 from bookrag.storage import library_root, load_index, load_metadata, remove_from_index
 
 
@@ -81,6 +81,24 @@ def _extraction_stats(root: Path, book_id: str) -> tuple[int, int] | None:
             fact_count += 1
             max_index = max(max_index, json.loads(line)["chapter_index"])
     return fact_count, max_index + 1
+
+
+def _fact_count_for_entity(root: Path, entity: dict) -> int:
+    """Counts facts naming this exact entity_id, across every book it's
+    linked to - used to pick a sensible default "keep this one" candidate
+    when merging duplicates (see merge_entities) and to show cluster sizes
+    in bookrag doctor's report."""
+    count = 0
+    for book_id in entity["book_ids"]:
+        facts_path = root / book_id / "facts.jsonl"
+        if not facts_path.exists():
+            continue
+        with facts_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and json.loads(line)["entity_id"] == entity["entity_id"]:
+                    count += 1
+    return count
 
 
 def _summarize(entry: dict, root: Path, entities: dict) -> BookSummary:
@@ -170,10 +188,134 @@ def remove_book(book_id: str, root: Path | None = None) -> RemoveResult:
 
 
 @dataclass
+class DuplicateEntity:
+    entity_id: str
+    canonical_name: str
+    type: str
+    book_ids: list[str]
+    fact_count: int
+
+
+def _duplicate_clusters(entities: dict, root: Path) -> list[list[DuplicateEntity]]:
+    groups: dict[str, list[dict]] = {}
+    for entity in entities["entities"]:
+        groups.setdefault(match_key(entity["canonical_name"]), []).append(entity)
+
+    clusters = []
+    for group in groups.values():
+        if len(group) > 1:
+            clusters.append(
+                [
+                    DuplicateEntity(
+                        entity_id=e["entity_id"],
+                        canonical_name=e["canonical_name"],
+                        type=e["type"],
+                        book_ids=e["book_ids"],
+                        fact_count=_fact_count_for_entity(root, e),
+                    )
+                    for e in group
+                ]
+            )
+    return clusters
+
+
+def detect_duplicate_entities(root: Path | None = None) -> list[list[DuplicateEntity]]:
+    """Groups entities whose canonical_name normalizes to the same
+    extract.resolve.match_key - deliberately regardless of entity_type,
+    unlike resolve_entity's own type-scoped matching. Type drift across
+    chapters is exactly one of the two ways a real duplicate cluster forms
+    (see extract/pipeline.py's known_entity_types for the fix that
+    prevents *new* drift going forward; this is what finds clusters that
+    already exist). Detection only, on purpose - bookrag doctor's --fix
+    never auto-merges these, unlike its other three checks, since merging
+    is a much higher-stakes, harder-to-reverse action than deleting an
+    orphan."""
+    root = root or library_root()
+    return _duplicate_clusters(load_entities(root), root)
+
+
+@dataclass
+class MergeResult:
+    kept_entity_id: str
+    merged_entity_ids: list[str]
+    facts_rewritten: int
+
+
+def merge_entities(entity_ids: list[str], keep: str | None = None, root: Path | None = None) -> MergeResult:
+    """Merges 2+ existing entities into one: rewrites every fact record's
+    entity_id (in every book directory any of them reference) to point at
+    the kept entity, unions book_ids, folds the merged-away entities'
+    canonical names/aliases into the kept entity's aliases (this is what
+    finally populates that otherwise-dead field - see resolve.py's context
+    doc), and deletes the merged-away entity records. `keep` defaults to
+    whichever entity has the most facts, matching the real dominant-entity
+    pattern already observed in a real duplicate cluster (one entity held
+    73% of the group's facts)."""
+    root = root or library_root()
+    entities = load_entities(root)
+    by_id = {e["entity_id"]: e for e in entities["entities"]}
+
+    group = [by_id[eid] for eid in entity_ids if eid in by_id]
+    if len(group) < 2:
+        raise ValueError("merge_entities needs at least two existing entity_ids")
+
+    if keep is None:
+        keep = max(group, key=lambda e: _fact_count_for_entity(root, e))["entity_id"]
+    if keep not in by_id or keep not in entity_ids:
+        raise ValueError(f"keep={keep!r} must be one of the entity_ids being merged")
+
+    kept = by_id[keep]
+    merged_away = [e for e in group if e["entity_id"] != keep]
+
+    facts_rewritten = 0
+    all_book_ids = list(kept["book_ids"])
+    for entity in merged_away:
+        for book_id in entity["book_ids"]:
+            if book_id not in all_book_ids:
+                all_book_ids.append(book_id)
+            facts_path = root / book_id / "facts.jsonl"
+            if not facts_path.exists():
+                continue
+            lines = facts_path.read_text(encoding="utf-8").splitlines()
+            rewritten_lines = []
+            for line in lines:
+                record = json.loads(line)
+                if record["entity_id"] == entity["entity_id"]:
+                    record["entity_id"] = keep
+                    facts_rewritten += 1
+                rewritten_lines.append(json.dumps(record))
+            facts_path.write_text("\n".join(rewritten_lines) + "\n", encoding="utf-8")
+
+        # Every distinct surface form the merged-away entity carried
+        # becomes an alias of the kept entity - not gated on match_key,
+        # which only decides *merge-worthiness*, not string identity: "The
+        # Wargals" and "Wargals" share a match_key but are still two real,
+        # useful surface forms worth recording once merged. Only an exact
+        # (case-insensitive) match to the kept entity's own canonical_name
+        # is skipped, to avoid a pointless self-alias.
+        if (
+            entity["canonical_name"].lower() != kept["canonical_name"].lower()
+            and entity["canonical_name"] not in kept["aliases"]
+        ):
+            kept["aliases"].append(entity["canonical_name"])
+        for alias in entity["aliases"]:
+            if alias.lower() != kept["canonical_name"].lower() and alias not in kept["aliases"]:
+                kept["aliases"].append(alias)
+
+    kept["book_ids"] = all_book_ids
+    merged_ids = {e["entity_id"] for e in merged_away}
+    entities["entities"] = [e for e in entities["entities"] if e["entity_id"] not in merged_ids]
+    save_entities(entities, root)
+
+    return MergeResult(kept_entity_id=keep, merged_entity_ids=sorted(merged_ids), facts_rewritten=facts_rewritten)
+
+
+@dataclass
 class DoctorReport:
     orphaned_index_entries: list[str]  # book_id: in index.json, no directory/metadata on disk
     stale_entity_book_refs: list[tuple[str, str]]  # (entity_id, book_id) book_id no longer exists
     orphaned_entities: list[str]  # entity_id: zero facts reference it in any book that still exists
+    duplicate_entity_groups: list[list[DuplicateEntity]]  # entities that look like the same real thing
     fixed: bool = False
 
 
@@ -201,8 +343,10 @@ def run_doctor(root: Path | None = None, fix: bool = False) -> DoctorReport:
         )
     ]
 
+    duplicate_groups = _duplicate_clusters(entities, root)
+
     if not fix:
-        return DoctorReport(orphaned_index_entries, stale_refs, orphaned_entities, fixed=False)
+        return DoctorReport(orphaned_index_entries, stale_refs, orphaned_entities, duplicate_groups, fixed=False)
 
     for book_id in orphaned_index_entries:
         remove_from_index(book_id, root)
@@ -216,4 +360,4 @@ def run_doctor(root: Path | None = None, fix: bool = False) -> DoctorReport:
     entities["entities"] = kept
     save_entities(entities, root)
 
-    return DoctorReport(orphaned_index_entries, stale_refs, orphaned_entities, fixed=True)
+    return DoctorReport(orphaned_index_entries, stale_refs, orphaned_entities, duplicate_groups, fixed=True)

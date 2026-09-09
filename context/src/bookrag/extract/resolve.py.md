@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/resolve.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 1aa924ed7b2a27776b3132c9ed3fd0713a5fa5a5
+source_hash: 0c3dd8a6047d73b8ecd693cc37d7b65c9d67335f
 ---
 
 ## Purpose
@@ -17,7 +17,7 @@ registry's load/save.
 - `resolve_entity(name: str, entity_type: str, book_id: str, entities: dict)
   -> str` — **mutates `entities` in place** (adds a new entry, or records
   `book_id` against an existing match) and returns the resolved
-  `entity_id`. Matches via `_match_key` (see Key Decisions), not raw
+  `entity_id`. Matches via `match_key` (see Key Decisions), not raw
   string equality.
 - `prune_book_from_entities(entities: dict, book_id: str) -> tuple[int, int]`
   — **mutates `entities` in place**: removes `book_id` from every entity's
@@ -33,7 +33,7 @@ registry's load/save.
   the epub/pdf ingestion heuristics: ship something reasonable, make the
   gap visible, improve iteratively. Aliases can be added to
   `entities.json` by hand today.
-- **`_match_key(name)` adds light, comparison-only normalization** (strip a
+- **`match_key(name)` adds light, comparison-only normalization** (strip a
   leading "the ", strip a trailing "s") on top of the case-insensitive
   exact match, used for both `canonical_name` and every alias.
   Deliberately narrow, not real fuzzy matching (no edit-distance/

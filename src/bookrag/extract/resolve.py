@@ -2,7 +2,7 @@
 global entity registry in data/library/entities.json. Matching is
 case-insensitive against a canonical name or a known alias, with light
 normalization (a leading "the ", a trailing "s") so simple spelling/plural
-variants of the same entity_type unify - see _match_key. No real fuzzy/
+variants of the same entity_type unify - see match_key. No real fuzzy/
 semantic similarity matching or cross-type merging; anything else becomes
 a brand new entity."""
 
@@ -32,7 +32,7 @@ def save_entities(entities: dict, root: Path | None = None) -> None:
     path.write_text(json.dumps(entities, indent=2), encoding="utf-8")
 
 
-def _match_key(name: str) -> str:
+def match_key(name: str) -> str:
     """Normalizes a name for *matching only* - never mutates a stored
     canonical_name/alias, only what resolve_entity compares. Strips a
     leading "the " and a trailing "s" (comparison-only, naive plural
@@ -55,12 +55,12 @@ def _match_key(name: str) -> str:
 def resolve_entity(name: str, entity_type: str, book_id: str, entities: dict) -> str:
     """Mutates `entities` in place (adds a new entry, or records book_id
     against an existing match) and returns the resolved entity_id."""
-    name_key = _match_key(name)
+    name_key = match_key(name)
     for entity in entities["entities"]:
         if entity["type"] != entity_type:
             continue
-        if name_key == _match_key(entity["canonical_name"]) or any(
-            name_key == _match_key(alias) for alias in entity["aliases"]
+        if name_key == match_key(entity["canonical_name"]) or any(
+            name_key == match_key(alias) for alias in entity["aliases"]
         ):
             if book_id not in entity["book_ids"]:
                 entity["book_ids"].append(book_id)

@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 9f5c79a7879699dee0f46a23a0d0034bd1473ee2
+source_hash: 3298b2845305941021c258a89901a21360c62f94
 ---
 
 ## Purpose
@@ -26,6 +26,12 @@ book prints "already fully extracted" and exits 0 without re-running,
 `--restart` forces a real re-extraction anyway, and a book with
 hand-written `extraction_progress.json` state (simulating a real crash)
 prints "Resuming '<book_id>' from chapter N" before the run starts.
+
+Also covers `doctor --merge-duplicates`'s CLI-level confirmation flow
+(the actual detection/merge logic is `test_library.py`'s job): a seeded
+duplicate cluster is reported in plain `doctor` output, `--yes` merges it
+without prompting, and declining the `[y/N]` prompt (monkeypatching
+`builtins.input`) leaves both original entities untouched.
 
 ## Key Decisions
 - The `_library_root` autouse fixture points `BOOKRAG_LIBRARY_ROOT` at a
