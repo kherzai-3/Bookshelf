@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from bookrag.cli import main
+from bookrag.storage import load_chapters
 from tests.helpers import build_fragmented_epub, build_narrative_epub, build_sample_epub
 
 
@@ -218,6 +219,65 @@ def test_extract_prints_per_chapter_progress(
     assert "[1/2] chapter done - elapsed" in output
     assert "[2/2] chapter done - elapsed" in output
     assert "remaining" in output
+
+
+def test_extract_is_a_no_op_on_an_already_extracted_book(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    main(["extract", book_dir.name, "--provider", "fake"])
+    capsys.readouterr()  # discard the first run's output
+
+    exit_code = main(["extract", book_dir.name, "--provider", "fake"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "already fully extracted" in output
+    assert "--restart" in output
+
+
+def test_extract_restart_reextracts_an_already_extracted_book(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    main(["extract", book_dir.name, "--provider", "fake"])
+    capsys.readouterr()
+
+    exit_code = main(["extract", book_dir.name, "--provider", "fake", "--restart"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "already fully extracted" not in output
+    assert "Extracted" in output
+
+
+def test_extract_prints_a_resuming_message_after_an_interruption(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+
+    # Simulate a crash after chapter 0 by writing progress directly, the
+    # same state a real interrupted extract_book run would leave behind.
+    chapter_count = len(load_chapters(book_dir.name))
+    (book_dir / "extraction_progress.json").write_text(
+        json.dumps({"chapter_count": chapter_count, "next_chapter_index": 1}), encoding="utf-8"
+    )
+    (book_dir / "facts.jsonl").write_text("", encoding="utf-8")
+
+    exit_code = main(["extract", book_dir.name, "--provider", "fake"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert f"Resuming '{book_dir.name}' from chapter 1" in output
 
 
 def test_eval_with_fake_provider(tmp_path: Path, _library_root: Path) -> None:

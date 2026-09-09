@@ -204,7 +204,27 @@ bookrag extract <book-id>                             # uses $BOOKRAG_PROVIDER o
 bookrag extract <book-id> --provider anthropic        # if you have a real API key
 bookrag extract <book-id> --provider fake             # instant, deterministic, for trying the pipeline
 bookrag extract <book-id> --model qwen2.5:7b-instruct # one-off model override (see LLM provider setup)
+bookrag extract <book-id> --restart                   # ignore saved progress, re-extract from chapter 0
 ```
+
+**Resumable.** If a run gets interrupted - Ctrl+C, a dropped connection, a
+crash - the next `bookrag extract <book-id>` (same book, same command)
+picks up right after the last chapter that actually finished, instead of
+losing everything and starting over. Progress is saved after every
+chapter, so a long run on a slower model doesn't need to happen in one
+sitting - useful for selectively working through a long book over several
+shorter sessions rather than needing a single, potentially 50-hour one.
+Running `extract` again on an already-fully-extracted book is a no-op by
+default (prints a message and exits) rather than silently repeating a run
+that can take hours; pass `--restart` to force a genuine from-scratch
+re-extraction. This is scoped to the same book/same provider continuing
+an interrupted run - it does not track *which* provider/model produced
+the saved progress, so resuming with a different one than the interrupted
+run mixes both in the same `facts.jsonl`. Keeping multiple providers'/
+models' extractions side by side without overwriting each other (e.g. a
+fast local model now, a better model later, defaulting to the better
+one's facts) is a separate, bigger feature that needs its own design pass
+- not yet built (see Future ideas).
 
 For a series, extract books **in series order** — each book's extraction
 seeds its "already-known entities" context from every earlier book in the
@@ -424,14 +444,12 @@ data/library/entities.json    # global entity registry: entity_id -> canonical
   registry would conflate two different identities. Not yet observed in
   practice (no two books in the current library share a character name);
   noted here so it isn't rediscovered from scratch if one ever does.
-- **No resumable extraction, and now a bigger deal than when this was
-  first written.** `bookrag extract` always starts from chapter 0 and
-  overwrites `facts.jsonl` from scratch - killing/interrupting a long run
-  loses all progress, there's no "resume from the last completed chapter."
-  This was already known to be worth building; it's more pressing now that
-  a full real-book run takes on the order of 2+ hours (see "This machine"
-  above) rather than under an hour - an interruption near the end costs
-  much more than it used to.
+- ~~No resumable extraction~~ **Resolved (2026-09-09)** - see "Extracting
+  facts" above. Scoped narrowly to the same book/same provider continuing
+  an interrupted run; it doesn't validate that a resumed run uses the same
+  provider/model as the interrupted one, and it isn't a multi-version
+  system (running a bigger model later without discarding a smaller
+  model's results - see Future ideas).
 
 ## Future ideas (need a planning pass before building)
 
@@ -445,6 +463,21 @@ data/library/entities.json    # global entity registry: entity_id -> canonical
   - A self-hosted integration (e.g. Stable Diffusion), consistent with the
     project's "no API key required" local-first posture (`ollama` is the
     default LLM provider for the same reason).
+- **Multiple fact-library "versions" per book, keyed by which model
+  produced them.** Today, extracting a book a second time with a different
+  provider/model overwrites (`--restart`) or silently mixes with
+  (resuming) the first run's facts in the same `facts.jsonl` - there's no
+  way to run a fast local model now and a bigger/better model later
+  without losing the first result. The idea: keep both, default reads
+  (`bookrag chat`, `library.py`'s summaries) to whichever is considered
+  "best" (assumed to be the larger/better model), and eventually support
+  LLM-assisted comparison/consolidation between two models' takes on the
+  same chapter. Real design questions, not yet worked through: how
+  `facts.jsonl`/`entities.json` represent "which model produced this" (a
+  suffix per book_id? a field on each fact/entity? a subdirectory per
+  model?), whether `resolve_entity` needs to become model-scoped, and how
+  a user picks/overrides the default when they want to see the smaller
+  model's version instead. Needs its own planning pass before building.
 
 ## For future development sessions (Claude or human)
 

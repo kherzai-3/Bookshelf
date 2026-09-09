@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 9cb03b4bec122e036f2faff1c4cf804efa366458
+source_hash: 9f5c79a7879699dee0f46a23a0d0034bd1473ee2
 ---
 
 ## Purpose
@@ -19,6 +19,13 @@ logic in depth: `list`/`show` output shape and unknown-book-id handling,
 `remove`'s `--yes` bypass and its confirmation-prompt abort path
 (monkeypatching `builtins.input`), and `doctor`'s report-then-`--fix`-then-
 recheck round trip.
+
+Also covers `extract`'s CLI-level resumability behavior (the underlying
+logic is `test_extraction_pipeline.py`'s job): an already-fully-extracted
+book prints "already fully extracted" and exits 0 without re-running,
+`--restart` forces a real re-extraction anyway, and a book with
+hand-written `extraction_progress.json` state (simulating a real crash)
+prints "Resuming '<book_id>' from chapter N" before the run starts.
 
 ## Key Decisions
 - The `_library_root` autouse fixture points `BOOKRAG_LIBRARY_ROOT` at a

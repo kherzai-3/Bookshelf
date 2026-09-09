@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from bookrag.eval import run_eval, summarize
-from bookrag.extract.pipeline import extract_book
+from bookrag.extract.pipeline import extract_book, resume_start_index
 from bookrag.ingest import epub_loader, pdf_loader
 from bookrag.ingest.chapter import Chapter
 from bookrag.ingest.consolidate import consolidate_fragments, should_consolidate
@@ -55,6 +55,11 @@ def main(argv: list[str] | None = None) -> int:
             "(e.g. a bigger model on a GPU box), set $OLLAMA_MODEL / $ANTHROPIC_MODEL instead "
             "(a .env file works too). Ignored for --provider fake."
         ),
+    )
+    extract.add_argument(
+        "--restart",
+        action="store_true",
+        help="Ignore any saved progress and re-extract from chapter 0, overwriting facts.jsonl",
     )
 
     eval_cmd = subparsers.add_parser("eval", help="Compare provider(s) on the same chapters, read-only")
@@ -201,13 +206,29 @@ def _extract(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        result = extract_book(args.book_id, provider, on_chapter_done=_print_progress(time.monotonic()))
+        chapter_count = len(load_chapters(args.book_id))
+        start_index = resume_start_index(args.book_id, restart=args.restart, chapter_count=chapter_count)
+        if 0 < start_index < chapter_count:
+            print(f"Resuming '{args.book_id}' from chapter {start_index}")
+        result = extract_book(
+            args.book_id, provider, on_chapter_done=_print_progress(time.monotonic()), restart=args.restart
+        )
+    except KeyboardInterrupt:
+        print()
+        print("Interrupted - progress has been saved. Run this command again to resume from where it left off.")
+        return 1
     except Exception as exc:
         print(f"Extraction failed: {exc}")
         return 1
 
+    if result.already_complete:
+        print(f"'{result.book_id}' is already fully extracted ({result.chapter_count} chapters) - nothing to do.")
+        print("  pass --restart to re-extract from scratch")
+        return 0
+
+    chapters_this_run = result.chapter_count - (result.resumed_from_chapter or 0)
     print(
-        f"Extracted {result.fact_count} facts from {result.chapter_count} chapters "
+        f"Extracted {result.fact_count} facts from {chapters_this_run} chapters "
         f"of '{result.book_id}' ({result.new_entity_count} new entities)"
     )
     if result.parse_failure_count:

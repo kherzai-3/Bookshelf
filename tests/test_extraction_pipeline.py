@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
-from bookrag.extract.pipeline import MIN_NARRATIVE_WORDS, extract_book
+import pytest
+
+from bookrag.extract.pipeline import MIN_NARRATIVE_WORDS, extract_book, resume_start_index
 from bookrag.ingest.chapter import Chapter
 from bookrag.providers.base import ExtractedFact, ExtractionParseError
 from bookrag.providers.fake_provider import FakeProvider
@@ -23,6 +25,28 @@ class _FixedResponseProvider:
     ) -> list[ExtractedFact]:
         self.call_count += 1
         return list(self._facts)
+
+
+class _FailsAfterNChapters:
+    """Test double: succeeds normally (delegating to FakeProvider) for the
+    first n chapters, then raises RuntimeError - simulates a dropped
+    connection/crash partway through a run, to set up real "interrupted"
+    state for resumability tests. Unlike _FailsOnNthCall, this is a genuine
+    abort (not caught by extract_book's ExtractionParseError handling) -
+    the same category of failure a real network drop would produce."""
+
+    def __init__(self, n: int) -> None:
+        self._n = n
+        self._delegate = FakeProvider()
+        self._call_count = 0
+
+    def extract_facts(
+        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+    ) -> list[ExtractedFact]:
+        if self._call_count >= self._n:
+            raise RuntimeError("simulated crash")
+        self._call_count += 1
+        return self._delegate.extract_facts(chapter_text, known_entities, content_type)
 
 
 class _FailsOnNthCall:
@@ -299,3 +323,195 @@ def test_extract_book_skips_very_short_chapters_without_calling_the_provider(tmp
     facts_path = root / book_id / "facts.jsonl"
     records = [json.loads(line) for line in facts_path.read_text(encoding="utf-8").splitlines()]
     assert [r["chapter_index"] for r in records] == [1]
+
+
+def test_extract_book_saves_progress_and_resumes_after_a_crash(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [
+        Chapter(0, "One", f"Ishmael went to sea. {NARRATIVE_PADDING}"),
+        Chapter(1, "Two", f"Ahab commanded the ship. {NARRATIVE_PADDING}"),
+        Chapter(2, "Three", f"Starbuck watched the horizon. {NARRATIVE_PADDING}"),
+    ]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+
+    with pytest.raises(RuntimeError):
+        extract_book(book_id, _FailsAfterNChapters(2), root=root)
+
+    facts_path = root / book_id / "facts.jsonl"
+    records = [json.loads(line) for line in facts_path.read_text(encoding="utf-8").splitlines()]
+    assert {r["chapter_index"] for r in records} == {0, 1}  # chapter 2 never ran
+
+    progress = json.loads((root / book_id / "extraction_progress.json").read_text(encoding="utf-8"))
+    assert progress == {"chapter_count": 3, "next_chapter_index": 2}
+    assert resume_start_index(book_id, root=root) == 2
+
+    result = extract_book(book_id, FakeProvider(), root=root)
+
+    assert result.resumed_from_chapter == 2
+    assert result.chapter_count == 3
+    records = [json.loads(line) for line in facts_path.read_text(encoding="utf-8").splitlines()]
+    assert {r["chapter_index"] for r in records} == {0, 1, 2}  # chapters 0/1 not reprocessed
+
+
+def test_extract_book_propagates_keyboard_interrupt_but_still_saves_progress(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [
+        Chapter(0, "One", f"Ishmael went to sea. {NARRATIVE_PADDING}"),
+        Chapter(1, "Two", f"Ahab commanded the ship. {NARRATIVE_PADDING}"),
+    ]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+
+    class _InterruptedOnSecondCall:
+        def __init__(self) -> None:
+            self._delegate = FakeProvider()
+            self._call_count = 0
+
+        def extract_facts(self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"):
+            if self._call_count == 1:
+                raise KeyboardInterrupt()
+            self._call_count += 1
+            return self._delegate.extract_facts(chapter_text, known_entities, content_type)
+
+    with pytest.raises(KeyboardInterrupt):
+        extract_book(book_id, _InterruptedOnSecondCall(), root=root)
+
+    progress = json.loads((root / book_id / "extraction_progress.json").read_text(encoding="utf-8"))
+    assert progress["next_chapter_index"] == 1  # chapter 0 completed; chapter 1 was interrupted
+
+
+def test_extract_book_resume_reuses_entities_from_the_interrupted_portion(tmp_path: Path) -> None:
+    """If known_names doesn't carry the interrupted portion's own already-
+    resolved entities forward into a resumed run, a re-mention referred to
+    only by pronoun ("He") in the resumed chapter would be wrongly rejected
+    as an ungrounded brand-new entity - the same failure class as the real
+    Arthur Penhaligon case, but self-inflicted by resuming incorrectly."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [
+        Chapter(0, "One", f"Halt walked into the clearing. {NARRATIVE_PADDING}"),
+        Chapter(1, "Two", f"He sharpened his knife. {NARRATIVE_PADDING}"),
+    ]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+
+    class _FailsOnSecondCall:
+        def __init__(self) -> None:
+            self._call_count = 0
+
+        def extract_facts(self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"):
+            self._call_count += 1
+            if self._call_count == 1:
+                return [ExtractedFact("Halt", "character", "personality", "Halt walked into the clearing.")]
+            raise RuntimeError("simulated crash")
+
+    with pytest.raises(RuntimeError):
+        extract_book(book_id, _FailsOnSecondCall(), root=root)
+
+    entities_before_resume = json.loads((root / "entities.json").read_text(encoding="utf-8"))["entities"]
+    assert len(entities_before_resume) == 1
+    halt_id = entities_before_resume[0]["entity_id"]
+
+    provider = _FixedResponseProvider(
+        [ExtractedFact("Halt", "character", "personality", "He sharpened his knife.")]
+    )
+    result = extract_book(book_id, provider, root=root)
+
+    assert result.ungrounded_entity_count == 0
+    assert result.new_entity_count == 0  # Halt already existed from the interrupted portion
+    entities_after_resume = json.loads((root / "entities.json").read_text(encoding="utf-8"))["entities"]
+    assert len(entities_after_resume) == 1
+    assert entities_after_resume[0]["entity_id"] == halt_id
+
+
+def test_extract_book_restart_ignores_saved_progress(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [
+        Chapter(0, "One", f"Ishmael went to sea. {NARRATIVE_PADDING}"),
+        Chapter(1, "Two", f"Ahab commanded the ship. {NARRATIVE_PADDING}"),
+    ]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+
+    with pytest.raises(RuntimeError):
+        extract_book(book_id, _FailsAfterNChapters(1), root=root)
+
+    result = extract_book(book_id, FakeProvider(), root=root, restart=True)
+
+    assert result.resumed_from_chapter is None
+    facts_path = root / book_id / "facts.jsonl"
+    records = [json.loads(line) for line in facts_path.read_text(encoding="utf-8").splitlines()]
+    assert {r["chapter_index"] for r in records} == {0, 1}  # full fresh run, not just the un-run tail
+
+
+def test_extract_book_ignores_stale_progress_after_a_reingest(tmp_path: Path) -> None:
+    """A book re-ingested with different chapter boundaries invalidates any
+    saved progress - the old chapter indices don't mean the same thing
+    anymore, so resuming into them would silently mix up chapters."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [Chapter(0, "One", f"Ishmael went to sea. {NARRATIVE_PADDING}")]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+    (root / book_id / "extraction_progress.json").write_text(
+        json.dumps({"chapter_count": 999, "next_chapter_index": 500}), encoding="utf-8"
+    )
+
+    result = extract_book(book_id, FakeProvider(), root=root)
+
+    assert result.resumed_from_chapter is None
+    assert result.chapter_count == 1
+
+
+def test_extract_book_is_a_no_op_when_already_fully_extracted(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [Chapter(0, "One", f"Ishmael went to sea. {NARRATIVE_PADDING}")]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+    extract_book(book_id, FakeProvider(), root=root)
+
+    provider = _FixedResponseProvider([])
+    result = extract_book(book_id, provider, root=root)
+
+    assert result.already_complete is True
+    assert provider.call_count == 0  # short-circuited before ever calling the provider
+
+
+def test_extract_book_restart_reextracts_an_already_complete_book(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [Chapter(0, "One", f"Ishmael went to sea. {NARRATIVE_PADDING}")]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+    extract_book(book_id, FakeProvider(), root=root)
+
+    result = extract_book(book_id, FakeProvider(), root=root, restart=True)
+
+    assert result.already_complete is False
+    assert result.fact_count == 1  # Ishmael, re-extracted from scratch
+
+
+def test_resume_start_index_is_zero_with_no_saved_progress(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    book_id = save_book(source, [Chapter(0, "One", "text")], title="Test Novel", root=root)
+
+    assert resume_start_index(book_id, root=root) == 0
+
+
+def test_resume_start_index_restart_forces_zero_even_with_saved_progress(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    book_id = save_book(source, [Chapter(0, "One", "text")], title="Test Novel", root=root)
+    (root / book_id / "extraction_progress.json").write_text(
+        json.dumps({"chapter_count": 1, "next_chapter_index": 1}), encoding="utf-8"
+    )
+
+    assert resume_start_index(book_id, root=root, restart=True) == 0

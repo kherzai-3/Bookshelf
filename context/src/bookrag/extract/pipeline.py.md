@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/pipeline.py
-last_synced: 2026-09-08T00:00:00Z
-source_hash: c4a29b4fc25a7566bdaa71ba2bb5bb0ed62d6b0e
+last_synced: 2026-09-09T00:00:00Z
+source_hash: c3228edbb58767e660ffc24ca628278dae01e6a3
 ---
 
 ## Purpose
@@ -12,17 +12,34 @@ entity-resolved, chapter-scoped).
 
 ## Public Interface
 - `ExtractionResult(book_id, chapter_count, fact_count, new_entity_count,
-  parse_failure_count, ungrounded_entity_count, skipped_chapter_count)`
-- `extract_book(book_id, provider, root=None, on_chapter_done=None) ->
-  ExtractionResult` — overwrites `data/library/<book_id>/facts.jsonl` and
-  updates `data/library/entities.json`. `on_chapter_done`, if given, is called as
-  `on_chapter_done(position, total)` after every chapter (1-indexed
-  `position`, including skipped/failed ones) - `cli.py` uses this to print
-  progress with an ETA, but `pipeline.py` itself does no printing. Looks up
-  the book's `content_type` via `storage.load_metadata(book_id, root).get(
+  parse_failure_count, ungrounded_entity_count, skipped_chapter_count,
+  resumed_from_chapter=None, already_complete=False)` — the last two are
+  new (resumable extraction, see Key Decisions): `resumed_from_chapter` is
+  the chapter index this call started at (`None` for a from-scratch run),
+  `already_complete` means this call did nothing because a prior run
+  already reached the end.
+- `extract_book(book_id, provider, root=None, on_chapter_done=None,
+  restart=False) -> ExtractionResult` — appends to (or, for a from-scratch
+  run, overwrites) `data/library/<book_id>/facts.jsonl` and updates
+  `data/library/entities.json`. `on_chapter_done`, if given, is called as
+  `on_chapter_done(position, total)` after every chapter actually processed
+  this call (1-indexed by absolute chapter position in the book, including
+  skipped/failed ones - on a resumed run this correctly starts above 1, not
+  restarting the count) - `cli.py` uses this to print progress with an ETA,
+  but `pipeline.py` itself does no printing. Looks up the book's
+  `content_type` via `storage.load_metadata(book_id, root).get(
   "content_type", "fiction")` once at the top and passes it to every
   `provider.extract_facts` call - not a per-chapter lookup, since a single
-  book's content type doesn't change chapter to chapter.
+  book's content type doesn't change chapter to chapter. `restart=True`
+  ignores any saved progress/facts and starts over from chapter 0.
+- `resume_start_index(book_id, root=None, *, restart=False,
+  chapter_count=None) -> int` — read-only, cheap (no `facts.jsonl`/
+  `entities.json` access): the chapter index a call to `extract_book` would
+  start at right now. Factored out of `extract_book` so `cli.py` can preview
+  it *before* running anything, e.g. to print "Resuming from chapter N"
+  before the run actually starts rather than only in the final summary.
+  Pass `chapter_count` if the caller already has it (avoids a redundant
+  `load_chapters` call); otherwise it loads the chapters itself.
 - `OnChapterDone = Callable[[int, int], None]` — the callback type alias.
 - `MIN_NARRATIVE_WORDS = 20` — a chapter whose text is shorter than this is
   skipped without ever calling the provider (see Key Decisions).
@@ -44,12 +61,39 @@ isolation (7.9s, not a hang) after the file appeared frozen.
   sees entities introduced in chapters 0-4. Parallelizing would break this
   incremental context (and, for the real Claude provider, chapters would
   race to append to the same `entities` dict).
-- `known_entities` is seeded before chapter 0 from every **earlier** book in
-  the series (`series_reading_order(book_id)[:-1]`) - this is what lets book
-  2 of a series not re-introduce a character book 1 already established.
-- Re-running `extract_book` on the same `book_id` overwrites `facts.jsonl`
-  from scratch (`"w"` mode) rather than appending - re-extraction is meant
-  to be idempotent per book, not additive.
+- `known_entities` is seeded before the first chapter processed **this
+  call** from `series_reading_order(book_id)` **including `book_id`
+  itself** (changed from excluding it) - this is both what lets book 2 of a
+  series not re-introduce a character book 1 already established, *and*
+  what makes resuming correct: a resumed call needs to know about every
+  entity *this same book* already resolved in its own earlier (pre-
+  interruption) chapters, or the grounding check below would wrongly treat
+  an already-established entity as brand new the moment a run resumes. On a
+  genuinely fresh run this is a no-op (`book_id` has no entities yet), so
+  the change is safe for the non-resume case too.
+- **Resumable, not idempotent-by-overwrite.** `extraction_progress.json`
+  (`{chapter_count, next_chapter_index}`) is written after every chapter,
+  same per-chapter durability as `facts.jsonl`'s flush - whatever
+  interrupts a run (Ctrl+C, a dropped connection, a crash, or a genuine
+  provider error that isn't caught per-chapter), the *next* `extract_book`
+  call for the same `book_id` resumes right after the last chapter that
+  actually finished (`facts.jsonl` opened `"a"` instead of `"w"`), instead
+  of losing everything and restarting from chapter 0. A `chapter_count`
+  mismatch (the book was re-ingested with different chapter boundaries
+  since the progress was recorded) is treated as stale and ignored - the
+  old indices no longer mean the same thing. The progress file is
+  deliberately never deleted, including on full success -
+  `next_chapter_index == chapter_count` doubles as an "already fully
+  extracted" marker, so re-running `extract_book` on a completed book is a
+  cheap no-op (`already_complete=True`) rather than silently repeating a
+  run that can take hours. `restart=True` bypasses all of this and behaves
+  exactly like the old unconditional `"w"`-mode overwrite. Deliberately
+  scoped narrowly to "the same book, continuing an interrupted run" - it
+  does not track which provider/model produced the saved progress, so
+  resuming with a *different* provider/model than the interrupted run
+  silently mixes them in one `facts.jsonl` (not validated against). Keeping
+  multiple providers'/models' results side by side without this mixing is
+  a separate, deliberately not-yet-designed feature - see Open Questions.
 - **A brand-new entity must be named in the chapter that "introduces" it,
   or the fact is rejected** - real bug found running the full Ranger's
   Apprentice omnibus against `llama3.2:3b`: a real line about the
@@ -93,6 +137,11 @@ isolation (7.9s, not a hang) after the file appeared frozen.
 - Fact record written to `facts.jsonl`: `{entity_id, chapter_index,
   category, statement}` (`book_id` is implicit from the file's directory,
   same convention as `chapters.jsonl`).
+- `extraction_progress.json` (new): `{chapter_count: int, next_chapter_index:
+  int}` - `chapter_count` is a staleness guard (see Key Decisions),
+  `next_chapter_index` is where the next call resumes. Written after every
+  chapter; never deleted, including on full completion (see Key Decisions
+  for why that's deliberate).
 
 ## Dependencies
 - Internal: `bookrag.extract.resolve` (entity load/save/resolve),
@@ -113,16 +162,18 @@ isolation (7.9s, not a hang) after the file appeared frozen.
   but not a complete fix. A code-side heuristic to detect longer
   non-narrative fragments (vs. relying on prompt compliance) is a
   deliberately deferred follow-up, not attempted here.
-- **No resume-from-abort exists.** Confirmed directly today: a run that
-  times out or crashes partway (see `ollama_provider.py`'s timeout history)
-  has no recorded "last completed chapter" - the only way to continue is a
-  full re-run from chapter 0, via the same `"w"`-mode overwrite noted above
-  under Key Decisions. For a long book with slow per-chapter calls, an
-  aborted run near the end currently means redoing all the fast, already-
-  fine earlier chapters too. A checkpoint/resume mechanism (e.g. skip
-  chapters already present in `facts.jsonl` unless forced) would directly
-  address this, but wasn't built - it's a distinct feature, not something
-  the current fix needed, and no one has asked for it yet.
+- ~~No resume-from-abort exists.~~ **Resolved (2026-09-09)**: see the
+  resumability Key Decision above. Deliberately scoped to the single-book,
+  same-provider case only - the requested next step is a *multi-version*
+  library (e.g. extract with a small local model now, later extract again
+  with a bigger/better model without discarding the first, default to
+  reading the better model's facts, possibly LLM-assisted comparison/
+  consolidation between them later). That needs real design work (how
+  `facts.jsonl`/`entities.json` represent "which model produced this," how
+  `bookrag chat`/`library.py`'s summaries pick a default, whether
+  `resolve_entity` needs to be model-scoped) and hasn't been started -
+  flagged in project memory as a future planning-pass item, not attempted
+  as part of this narrower resumability fix.
 - ~~No cap exists on facts-per-chapter or total facts-per-book.~~
   **Resolved**: this was actually the root cause of a real runaway-
   generation bug (a request generating 8,490+ output tokens over 14m43s
@@ -134,11 +185,10 @@ isolation (7.9s, not a hang) after the file appeared frozen.
   separate, still-valid accommodation for the extraction prompt's
   legitimately higher output volume per chapter (not runaway, just more
   thorough) - see `ollama_provider.py`'s context doc.
-- The non-fiction taxonomy (`content_type="nonfiction"`) has only been
-  validated via a `bookrag eval` checkpoint (3 chapters), not a full real
-  extraction run the way fiction has (`ranger-s-apprentice-1-2-bindup`,
-  75 chapters). Worth a full run once there's a reason to (e.g. actually
-  wanting Atomic Habits' complete catalog), to see whether the same
-  quality/throughput tradeoffs observed for fiction (see above) recur here
-  too - `MIN_NARRATIVE_WORDS`/`maxItems`/the timeout are all genre-agnostic
-  and apply unchanged.
+- ~~The non-fiction taxonomy has only been validated via a `bookrag eval`
+  checkpoint~~ **Updated (2026-09-09)**: since resolved by full real runs -
+  Atomic Habits (36 chapters, 370 facts) and Finite and Infinite Games (18
+  chapters, 277 facts) have both been fully extracted with
+  `content_type="nonfiction"`, confirming the same quality/throughput
+  characteristics observed for fiction hold here too (`MIN_NARRATIVE_WORDS`/
+  `maxItems`/the timeout are genre-agnostic and needed no changes).

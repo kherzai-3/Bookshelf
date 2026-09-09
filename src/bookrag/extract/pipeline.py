@@ -37,6 +37,43 @@ class ExtractionResult:
     parse_failure_count: int
     ungrounded_entity_count: int
     skipped_chapter_count: int
+    # Both new: added for resumable extraction. resumed_from_chapter is the
+    # chapter index this call started at (None for a fresh/from-scratch
+    # run); already_complete means this call did nothing because a prior
+    # run already finished every chapter (see extraction_progress.json below).
+    resumed_from_chapter: int | None = None
+    already_complete: bool = False
+
+
+def resume_start_index(
+    book_id: str, root: Path | None = None, *, restart: bool = False, chapter_count: int | None = None
+) -> int:
+    """Reads extraction_progress.json (if any) and returns the chapter index
+    a call to extract_book would start at - 0 for a fresh/restarted run or a
+    book with no saved progress, chapter_count if already fully extracted.
+    Read-only and cheap (no facts.jsonl/entities.json access) - factored out
+    of extract_book so cli.py can preview this before running anything, e.g.
+    to print "Resuming from chapter N" before the run actually starts."""
+    root = root or library_root()
+    if restart:
+        return 0
+    if chapter_count is None:
+        chapter_count = len(load_chapters(book_id, root))
+
+    progress_path = root / book_id / "extraction_progress.json"
+    if not progress_path.exists():
+        return 0
+    try:
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return 0
+    # A chapter_count mismatch means the book was re-ingested since this
+    # progress was recorded (different chapter boundaries/consolidation) -
+    # the old chapter indices no longer mean the same thing, so treat it as
+    # stale and start fresh rather than resuming into the wrong chapters.
+    if progress.get("chapter_count") != chapter_count:
+        return 0
+    return min(max(int(progress.get("next_chapter_index", 0)), 0), chapter_count)
 
 
 def extract_book(
@@ -44,9 +81,44 @@ def extract_book(
     provider: Provider,
     root: Path | None = None,
     on_chapter_done: OnChapterDone | None = None,
+    restart: bool = False,
 ) -> ExtractionResult:
+    """Runs `provider` over book_id's chapters, in order, from wherever the
+    last call left off. Progress is persisted to extraction_progress.json
+    after every chapter (same per-chapter durability as facts.jsonl's flush)
+    so that a genuine interruption - Ctrl+C, a dropped connection, a crash -
+    can be resumed by simply calling this again with the same book_id,
+    rather than losing everything and restarting from chapter 0. This is
+    scoped narrowly to "the same book, the same provider/model, continuing
+    an interrupted run" - not a general checkpoint/versioning system (e.g.
+    running a bigger model later without discarding a smaller model's
+    results is a separate, not-yet-designed feature).
+
+    `restart=True` ignores any existing progress/facts and starts over from
+    chapter 0, same as this function's behavior before resumability existed.
+    """
     root = root or library_root()
     chapters = load_chapters(book_id, root)
+    progress_path = root / book_id / "extraction_progress.json"
+    start_index = resume_start_index(book_id, root, restart=restart, chapter_count=len(chapters))
+
+    # extraction_progress.json is deliberately never deleted, including on a
+    # fully successful run - next_chapter_index == len(chapters) doubles as
+    # an "already fully extracted" marker, so re-running this on a
+    # completed book is a cheap no-op instead of silently repeating a run
+    # that can take hours, unless the caller explicitly passes restart=True.
+    if chapters and start_index >= len(chapters):
+        return ExtractionResult(
+            book_id=book_id,
+            chapter_count=len(chapters),
+            fact_count=0,
+            new_entity_count=0,
+            parse_failure_count=0,
+            ungrounded_entity_count=0,
+            skipped_chapter_count=0,
+            already_complete=True,
+        )
+
     entities = load_entities(root)
     entities_before = len(entities["entities"])
     # .get(..., "fiction"): a book ingested before content_type existed has
@@ -54,17 +126,22 @@ def extract_book(
     # used before this was introduced.
     content_type = load_metadata(book_id, root).get("content_type", "fiction")
 
-    prior_book_ids = series_reading_order(book_id, root)[:-1]
-    known_names = _entity_names_for_books(prior_book_ids, entities)
+    # Includes book_id itself (not just earlier series books) so a resumed
+    # run knows about every entity this book has already resolved so far -
+    # otherwise the grounding check below would wrongly treat an
+    # already-established entity as brand new the moment a run resumes.
+    known_names = _entity_names_for_books(series_reading_order(book_id, root), entities)
+    resumed_from_chapter = start_index if start_index > 0 else None
 
     fact_count = 0
     parse_failure_count = 0
     ungrounded_entity_count = 0
     skipped_chapter_count = 0
     facts_path = root / book_id / "facts.jsonl"
+    file_mode = "a" if start_index > 0 else "w"
     try:
-        with facts_path.open("w", encoding="utf-8") as f:
-            for position, chapter in enumerate(chapters, start=1):
+        with facts_path.open(file_mode, encoding="utf-8") as f:
+            for position, chapter in enumerate(chapters[start_index:], start=start_index + 1):
                 if len(chapter.text.split()) < MIN_NARRATIVE_WORDS:
                     skipped_chapter_count += 1
                     raw_facts = []
@@ -114,6 +191,15 @@ def extract_book(
                 # default. Without this, facts.jsonl and any progress
                 # output look frozen even while genuinely making progress.
                 f.flush()
+                # Written after every chapter (not just at the end) for the
+                # same durability reason as the flush above - whatever
+                # interrupts this run (Ctrl+C, a dropped connection, a
+                # crash), the next call resumes right after the last
+                # chapter that actually finished, never re-processing it.
+                progress_path.write_text(
+                    json.dumps({"chapter_count": len(chapters), "next_chapter_index": chapter.index + 1}),
+                    encoding="utf-8",
+                )
                 if on_chapter_done is not None:
                     on_chapter_done(position, len(chapters))
     finally:
@@ -130,6 +216,7 @@ def extract_book(
         parse_failure_count=parse_failure_count,
         ungrounded_entity_count=ungrounded_entity_count,
         skipped_chapter_count=skipped_chapter_count,
+        resumed_from_chapter=resumed_from_chapter,
     )
 
 

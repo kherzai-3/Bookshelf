@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 26180a5211d7f44cb7670cede3bdfbbfede2d375
+source_hash: e418e34e46b5ec10aaa0d607c1b48ae04d247b80
 ---
 
 ## Purpose
@@ -25,14 +25,24 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   selects which extraction category/entity-type taxonomy and prompt pair
   `extract`/`eval`/`chat` use for this book - explicit, not auto-detected
   (matches this project's posture elsewhere, e.g. `--series-position`).
-- CLI: `bookrag extract <book-id> [--provider NAME] [--model NAME]` —
-  `--provider` is `"anthropic"`, `"ollama"`, or `"fake"`; defaults via
-  `providers.registry.get_provider` (`$BOOKRAG_PROVIDER` then
+- CLI: `bookrag extract <book-id> [--provider NAME] [--model NAME]
+  [--restart]` — `--provider` is `"anthropic"`, `"ollama"`, or `"fake"`;
+  defaults via `providers.registry.get_provider` (`$BOOKRAG_PROVIDER` then
   `registry.DEFAULT_PROVIDER`, currently `"ollama"`). `--model` is a
   one-off override of the provider's own model (e.g. `qwen2.5:7b-instruct`
   for ollama); for a persistent per-machine choice (picking a bigger model
   on a GPU box), `$OLLAMA_MODEL`/`$ANTHROPIC_MODEL` (or a `.env` entry) is
   the intended mechanism instead - `--model` is the one-off escape hatch.
+  Resumable (see `extract/pipeline.py`'s context doc): before calling
+  `extract_book`, `_extract` peeks `resume_start_index` and prints
+  `"Resuming '<book_id>' from chapter N"` up front if there's genuine
+  partial progress to continue; if the book is already fully extracted, it
+  prints that and returns 0 without calling the provider at all, unless
+  `--restart` is passed (which forces a full from-scratch re-extraction,
+  the old unconditional-overwrite behavior). A `KeyboardInterrupt` during
+  the run is caught specifically (progress is already saved by
+  `extract_book` itself by the time it propagates here) and printed as
+  "Interrupted - progress has been saved..." rather than a raw traceback.
 - CLI: `bookrag eval <book-id> --chapters 0,1,2 [--providers ollama,fake]
   [--model NAME]` — comma-separated chapter indices and provider names;
   malformed `--chapters` is rejected with exit code 1 before running
@@ -161,7 +171,7 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   (`should_consolidate`, `consolidate_fragments`), `bookrag.storage`
   (`save_book`, `load_chapters`, `load_metadata`, `library_root`,
   `incoming_root`), `bookrag.titles.guess_title_author`,
-  `bookrag.extract.pipeline.extract_book`, `bookrag.eval` (`run_eval`,
+  `bookrag.extract.pipeline` (`extract_book`, `resume_start_index`), `bookrag.eval` (`run_eval`,
   `summarize`), `bookrag.providers.registry.get_provider`, `bookrag.query`
   (`facts_as_of`, `format_context`), `bookrag.library` (`list_books`,
   `show_book`, `remove_book`, `run_doctor`)
