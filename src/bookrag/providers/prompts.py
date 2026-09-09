@@ -50,6 +50,13 @@ supposedly "learning about") just to report more. A short, precise list of \
 real facts is always better than a longer list padded with restated or \
 unspecific filler.
 
+If a single sentence or moment reveals more than one kind of fact, report \
+it as separate facts, one per relevant category, rather than filing it \
+under only one (e.g. "he stroked his grey-flecked beard thoughtfully" is \
+BOTH an appearance detail - he has a grey-flecked beard - AND a \
+personality/mood cue - he was being thoughtful; report both, don't pick \
+just one).
+
 Only report something if it is directly and explicitly stated or shown in \
 the chapter text below - never invent a detail, and never introduce an \
 entity whose name doesn't appear in the text. If this chapter's text is not \
@@ -60,8 +67,9 @@ setting, or theme is revealed, return {"facts": []}.
 Example:
 Chapter text: "Will scrambled over the wall, breathing hard. Halt handed \
 him the silver oakleaf without a word - the mark of a fully fledged \
-Ranger. Will's hands trembled as he took it. Halt's grey cloak shifted as \
-he turned away, the fabric already blending into the shadows of the trees."
+Ranger. Will's hands trembled as he took it. Halt stroked his grey-flecked \
+beard thoughtfully, his cloak already blending into the shadows of the \
+trees as he turned away."
 
 {"facts": [
   {"entity_name": "Will", "entity_type": "character", "category": "status", \
@@ -70,6 +78,10 @@ fully fledged Ranger."},
   {"entity_name": "Will", "entity_type": "character", "category": \
 "personality", "statement": "Will's hands trembled with emotion as he \
 received the oakleaf."},
+  {"entity_name": "Halt", "entity_type": "character", "category": \
+"appearance", "statement": "Halt has a grey-flecked beard."},
+  {"entity_name": "Halt", "entity_type": "character", "category": \
+"personality", "statement": "Halt stroked his beard thoughtfully."},
   {"entity_name": "Halt", "entity_type": "character", "category": \
 "appearance", "statement": "Halt wears a grey cloak that blends into \
 shadows."}
@@ -121,6 +133,12 @@ stated in the chapter text - do not keep inventing additional vague or \
 generic statements just to report more. A short, precise list of real \
 facts is always better than a longer list padded with restated or \
 unspecific filler.
+
+If a single sentence or passage reveals more than one kind of fact, report \
+it as separate facts, one per relevant category, rather than filing it \
+under only one (e.g. a sentence that both defines a concept AND gives a \
+concrete instruction for applying it is both a "definition" fact and a \
+"technique" fact; report both, don't pick just one).
 
 Only report something if it is directly and explicitly stated or shown in \
 the chapter text below - never invent a detail, and never introduce an \
@@ -186,6 +204,17 @@ about different specifics within a category, are NOT conflicts - treat them \
 as accumulated knowledge about that entity, not contradictions to pick \
 between.
 
+A question about a specific kind of detail is NOT limited to the category \
+whose label matches that topic - relevant details can appear under any \
+category. For example, a question about what someone looks like should be \
+answered using every visually-relevant detail you can find for that \
+entity, not only facts tagged "appearance" - a fact tagged "personality" or \
+"status" can still mention a physical feature, a gesture, or clothing (e.g. \
+"stroked his beard gravely" reveals he has a beard even though it's filed \
+under personality). Read across ALL of an entity's categories before \
+answering, rather than jumping straight to the one category whose name \
+happens to match the question.
+
 If the provided facts don't contain enough information to answer, say so \
 plainly (e.g. "I don't have enough information about that yet") rather than \
 guessing or inventing an answer."""
@@ -215,6 +244,15 @@ book), trust the fact from the LATER chapter as the current, most \
 complete version. Facts in different categories, or about different \
 specifics within a category, are NOT conflicts - treat them as \
 accumulated knowledge, not contradictions to pick between.
+
+A question about a specific kind of detail is NOT limited to the category \
+whose label matches that topic - relevant details can appear under any \
+category. For example, a question asking how to apply a concept should be \
+answered using every relevant detail you can find, not only facts tagged \
+"technique" - a fact tagged "definition" or "claim" can still describe how \
+something works in practice. Read across ALL of a concept's categories \
+before answering, rather than jumping straight to the one category whose \
+name happens to match the question.
 
 If the provided facts don't contain enough information to answer, say so \
 plainly (e.g. "I don't have enough information about that yet") rather than \

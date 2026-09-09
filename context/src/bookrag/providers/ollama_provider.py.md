@@ -1,26 +1,31 @@
 ---
 source: src/bookrag/providers/ollama_provider.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: cb9d7e4fd43982f7ec4e3cd51c101f7bdbe7199e
+source_hash: 711e922f744289b3430bcfc1e3c1df2644e493c2
 ---
 
 ## Purpose
 Local, no-API-key `Provider` implementation via Ollama's REST API - the
 practical default for this project, since it requires no
-`ANTHROPIC_API_KEY`/Bedrock/Vertex credential at all. Verified against a
-real, locally-running `llama3.2:3b` model.
+`ANTHROPIC_API_KEY`/Bedrock/Vertex credential at all. Verified against real,
+locally-running `llama3.2:3b` and `qwen2.5:7b-instruct` models.
 
 ## Public Interface
 - `OllamaProvider(model=None, base_url=None, num_ctx=None,
-  timeout=DEFAULT_TIMEOUT_SECONDS)` — `model` resolves as `model or
-  $OLLAMA_MODEL or DEFAULT_MODEL` ("llama3.2:3b"); `base_url` similarly via
+  timeout=DEFAULT_TIMEOUT_SECONDS)` — `model` resolves TWO independent
+  attributes, not one: `self._model` (extraction) as `model or $OLLAMA_MODEL
+  or DEFAULT_MODEL` ("qwen2.5:7b-instruct"), and `self._answer_model` (chat
+  answering) as `model or $OLLAMA_ANSWER_MODEL or DEFAULT_ANSWER_MODEL`
+  (also "qwen2.5:7b-instruct" today - see Key Decisions for why these are
+  separate constants despite the same current value). A single `model`
+  override feeds both, which is harmless in practice since no caller uses
+  both methods on the same instance. `base_url` similarly via
   `$OLLAMA_BASE_URL` then `"http://localhost:11434"`; `num_ctx` the same
   way via `$OLLAMA_NUM_CTX` then `DEFAULT_NUM_CTX` (16384 - see Key
   Decisions for why this was raised from 8192). `DEFAULT_TIMEOUT_SECONDS =
-  900`. The env-var path is what makes switching to a bigger model (or a
-  bigger context window) on a different (e.g. GPU-equipped) machine a
-  one-line `.env` change rather than a code edit - see README's "LLM
-  provider setup".
+  900`. The env-var path is what makes switching models (or context window
+  size) on a different machine a one-line `.env` change rather than a code
+  edit - see README's "LLM provider setup".
 - `OllamaProvider.extract_facts(chapter_text, known_entities, content_type="fiction",
   known_entity_types=None) -> list[ExtractedFact]` — raises `RuntimeError` (not `ExtractionParseError`)
   if Ollama itself isn't reachable, doesn't respond within `timeout`, or a
@@ -29,16 +34,37 @@ real, locally-running `llama3.2:3b` model.
   re-raised the same way - see Key Decisions). `content_type` selects
   which schema/prompt pair (`EXTRACTION_SYSTEM_PROMPTS[content_type]`,
   `extraction_response_schema(content_type)`) and which `parse_facts`
-  taxonomy get used.
+  taxonomy get used. Uses `self._model`.
 - `OllamaProvider.answer_question(question, context, content_type="fiction") -> str`
   — shares the `_chat` helper with `extract_facts`, but with no
   `response_format`/`temperature` override, since a conversational answer
   is free text, not a structured fact list, and benefits from Ollama's
-  normal sampling defaults. `content_type` only selects which prompt
-  (`ANSWER_SYSTEM_PROMPTS[content_type]`) is used - the mechanism is
-  identical either way.
+  normal sampling defaults (see Open Questions - this also means its
+  output is not fully reproducible run-to-run, unlike extraction).
+  `content_type` only selects which prompt (`ANSWER_SYSTEM_PROMPTS[content_type]`)
+  is used. Uses `self._answer_model`, passed explicitly to `_chat` (which
+  now takes a `model` keyword, defaulting to `self._model` when omitted -
+  `extract_facts`'s call doesn't pass it and gets `self._model` as before).
 
 ## Key Decisions
+- **`DEFAULT_MODEL` changed from `"llama3.2:3b"` to `"qwen2.5:7b-instruct"`,
+  and chat answering got its own independent `DEFAULT_ANSWER_MODEL`
+  constant (same value today, but not derived from `DEFAULT_MODEL`).** Real,
+  controlled comparison on this project's own data (same real chapter, same
+  machine): `llama3.2:3b` showed genuine run-to-run non-determinism at
+  `DEFAULT_EXTRACTION_TEMPERATURE` - one run on the chapter that reveals a
+  character's appearance produced zero facts about that character at all,
+  an identical second run produced a solid appearance fact for them.
+  `qwen2.5:7b-instruct` was consistently precise across repeated runs on
+  the same chapter AND was not slower (63s vs 78s measured) - it generates
+  fewer, more targeted facts rather than padding output, so wall-clock time
+  isn't simply proportional to parameter count. The two constants are kept
+  separate (not one shared default) because a chat answer is a single
+  cheap one-shot call (~1-2s measured either way) with none of extraction's
+  hours-long cost pressure, so there's no reason to force the same
+  size/speed tradeoff onto both - `$OLLAMA_ANSWER_MODEL`/`--model` on
+  `bookrag chat` can move independently of extraction's choice later
+  without any code change.
 - Sends a real JSON Schema (`parsing.extraction_response_schema()`) as
   `/api/chat`'s `format` field for extraction, not just the string `"json"`
   - verified empirically against this project's local Ollama (0.33.2) to
@@ -107,9 +133,18 @@ real, locally-running `llama3.2:3b` model.
   (`EXTRACTION_SYSTEM_PROMPTS`, `ANSWER_SYSTEM_PROMPTS`, `build_user_message`,
   `build_answer_user_message`)
 - External: none beyond stdlib (`urllib`); requires Ollama itself running
-  locally with the target model pulled (`ollama pull llama3.2:3b`)
+  locally with the target model pulled (`ollama pull qwen2.5:7b-instruct`)
 
 ## Open Questions / TODOs
+- `answer_question` has no temperature override, so its output is subject
+  to Ollama's default (higher, conversational) sampling variance - a real
+  test found the answer prompt's new cross-category instruction (see
+  `prompts.py`'s context doc) only surfaced a miscategorized detail in 1 of
+  3 identical real attempts against the same unmodified facts.jsonl. Not
+  addressed in this pass (out of scope for the approved plan that
+  introduced the instruction) - a lower, more consistent temperature for
+  `answer_question` specifically is the most direct next lever if this
+  needs to be more reliable, but wasn't requested/decided yet.
 - CPU-only inference on this hardware (no NVIDIA GPU) measured at roughly
   8-15s per chapter for short chapters; longer chapters (~2000-4000 words)
   take proportionally longer, and now more so than before the extraction

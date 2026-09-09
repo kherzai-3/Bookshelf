@@ -18,7 +18,25 @@ from bookrag.providers.prompts import (
     build_user_message,
 )
 
-DEFAULT_MODEL = "llama3.2:3b"
+# Raised from an initial llama3.2:3b after a real, controlled comparison
+# (same real chapter, same machine): llama3.2:3b showed genuine run-to-run
+# non-determinism at DEFAULT_EXTRACTION_TEMPERATURE - one run on chapter 11
+# of a real book produced zero facts about a character whose appearance is
+# revealed in that exact chapter, a second identical run produced a solid
+# appearance fact for the same character. qwen2.5:7b-instruct was
+# consistently precise across repeated runs on the same chapter AND was not
+# slower (63s vs 78s measured) - it generates fewer, more targeted facts
+# rather than padding output, so total wall-clock isn't simply
+# proportional to parameter count. Still overridable via `--model`/
+# `$OLLAMA_MODEL` for a smaller/faster model on constrained hardware.
+DEFAULT_MODEL = "qwen2.5:7b-instruct"
+# A separate knob from DEFAULT_MODEL, not derived from it - a chat answer is
+# one cheap one-shot call (~1-2s either way, measured), unlike a whole-book
+# extraction run, so there's no reason to couple its model choice to
+# extraction's. Both happen to default to the same model today, but
+# $OLLAMA_ANSWER_MODEL/DEFAULT_ANSWER_MODEL can move independently of
+# extraction's choice later without code changes.
+DEFAULT_ANSWER_MODEL = "qwen2.5:7b-instruct"
 DEFAULT_BASE_URL = "http://localhost:11434"
 # Raised from an initial 8192 after a real confirmed overflow: bookrag
 # chat's context (query.format_context) has no size cap of its own by
@@ -59,6 +77,13 @@ class OllamaProvider:
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
         self._model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
+        # A single `model` override (constructor arg or `--model`) applies to
+        # whichever attribute the caller actually uses - extract_facts only
+        # ever reads self._model, answer_question only ever reads
+        # self._answer_model, and no caller uses both on the same instance -
+        # so this is never ambiguous in practice despite one override
+        # feeding both.
+        self._answer_model = model or os.environ.get("OLLAMA_ANSWER_MODEL", DEFAULT_ANSWER_MODEL)
         self._base_url = (base_url or os.environ.get("OLLAMA_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
         self._num_ctx = num_ctx or int(os.environ.get("OLLAMA_NUM_CTX", DEFAULT_NUM_CTX))
         self._timeout = timeout
@@ -88,13 +113,18 @@ class OllamaProvider:
         # No response_format/temperature override here - a chat answer is
         # free text, not a structured fact list, and benefits from Ollama's
         # normal conversational sampling defaults.
-        return self._chat(ANSWER_SYSTEM_PROMPTS[content_type], build_answer_user_message(question, context))
+        return self._chat(
+            ANSWER_SYSTEM_PROMPTS[content_type],
+            build_answer_user_message(question, context),
+            model=self._answer_model,
+        )
 
     def _chat(
         self,
         system: str,
         user_message: str,
         *,
+        model: str | None = None,
         response_format: dict | None = None,
         temperature: float | None = None,
     ) -> str:
@@ -110,7 +140,7 @@ class OllamaProvider:
             options["temperature"] = temperature
 
         payload = {
-            "model": self._model,
+            "model": model or self._model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_message},

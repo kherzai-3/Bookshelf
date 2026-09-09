@@ -60,42 +60,51 @@ Three providers, chosen via `--provider`/`--providers` or `$BOOKRAG_PROVIDER`:
   on Linux), make sure it's running (it starts automatically after install;
   check with `curl http://localhost:11434/api/version`), then pull a model:
   ```bash
-  ollama pull llama3.2:3b
+  ollama pull qwen2.5:7b-instruct
   ```
 
   **Model selection is machine-specific, not hardcoded** - pick it via
   (in priority order) `bookrag extract --model NAME` (one-off), then
   `$OLLAMA_MODEL` (persistent, `.env` works), then `OllamaProvider.DEFAULT_MODEL`
-  (`"llama3.2:3b"`, the fallback if neither is set). This matters because
-  model size and inference speed trade off directly on CPU: every token
-  requires a full pass through *all* the model's weights, so a bigger
-  model isn't "smarter, therefore faster" - it does proportionally more
-  arithmetic (and streams proportionally more weight data out of RAM) for
-  every single token, with no shortcut. A GPU parallelizes that work, so it
-  costs much less wall-clock time there than the raw parameter ratio
-  suggests; on CPU-only inference, it doesn't get that break.
+  (`"qwen2.5:7b-instruct"`, the fallback if neither is set). Chat's
+  answering model is a separate, independently-overridable knob - `bookrag
+  chat --model NAME`, then `$OLLAMA_ANSWER_MODEL`, then
+  `OllamaProvider.DEFAULT_ANSWER_MODEL` - same value as extraction's
+  default today, but free to diverge later without any code changes.
 
-  - **CPU-only**: a 3B model (e.g. `llama3.2:3b`) is a reasonable default -
-    measured at roughly 20-90s/chapter depending on chapter length, i.e.
-    multiple hours for a full novel-length book. `bookrag extract` is
-    [resumable](#extracting-facts) specifically because of this - a long
-    run doesn't need to happen in one sitting.
-  - **With a GPU**: a meaningfully larger model (e.g. `qwen2.5:7b-instruct`
-    or bigger) is generally more reliable at both instruction-following
-    (respecting the fixed `entity_type` list) and reduced hallucination,
-    and a GPU absorbs most of the extra cost that makes this impractical on
-    CPU alone. Confirm the improvement empirically before committing to a
-    full-book run: `bookrag eval <book-id> --chapters N --model <candidate>`
-    is fast (one chapter, not the whole book) and read-only, never touching
+  Bigger isn't automatically slower: every token requires a full pass
+  through *all* the model's weights, so naively a bigger model does
+  proportionally more arithmetic per token - but a real, controlled
+  comparison on this project's own data found `qwen2.5:7b-instruct` was
+  *not* slower than `llama3.2:3b` on the same real chapter (63s vs 78s) - a
+  more selective model can generate fewer, more targeted output tokens and
+  come out ahead despite doing more work per token. A GPU also
+  parallelizes that per-token work, so a larger model costs much less
+  wall-clock time there than the raw parameter ratio suggests.
+
+  - **`qwen2.5:7b-instruct` (the default)** - the same real, controlled
+    test found it both more reliable (`llama3.2:3b` showed genuine
+    run-to-run variance - one run on a chapter produced zero facts about a
+    character whose appearance is revealed in that exact chapter, a second
+    identical run captured it well) and not slower. Still measured in the
+    tens-of-seconds-per-chapter range, i.e. multiple hours for a full
+    novel-length book, whether or not a GPU is available. `bookrag
+    extract` is [resumable](#extracting-facts) specifically because of
+    this - a long run doesn't need to happen in one sitting.
+  - **On more constrained hardware**, fall back to a smaller model (e.g.
+    `llama3.2:3b`) via `--model llama3.2:3b` / `$OLLAMA_MODEL` - faster per
+    chapter on a machine that can't spare the RAM/VRAM for a 7B model, at
+    the cost of the completeness/consistency found above. Confirm any
+    model choice empirically before committing to a full-book run:
+    `bookrag eval <book-id> --chapters N --model <candidate>` is fast (one
+    chapter, not the whole book) and read-only, never touching
     `facts.jsonl`/`entities.json`.
-  - **If fact *completeness* matters more than speed**, a bigger model is
-    also the most direct lever, separate from the hallucination point
-    above: a real check against `llama3.2:3b`'s output found it reliably
-    captures a character's more obvious traits but inconsistently misses
-    incidental details mentioned in passing (e.g. a physical description
-    woven into an action sentence rather than given its own descriptive
-    paragraph) - the same category of thing a larger model is generally
-    better at noticing consistently, not just phrasing more confidently.
+  - **Chat's answering model can be tuned independently of extraction's** -
+    a single question is one cheap one-shot call regardless of model size
+    (~1-2s measured either way), so there's little downside to keeping it
+    on the larger model even when extraction is pinned to something
+    smaller for speed. Override via `bookrag chat --model NAME` or
+    `$OLLAMA_ANSWER_MODEL`.
   - Override the Ollama host similarly via `$OLLAMA_BASE_URL` (e.g. to
     point at Ollama running on a different machine on the network instead
     of switching hardware at all).

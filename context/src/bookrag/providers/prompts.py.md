@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/prompts.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: c2a7c5d3de8e2059c4ca9b2f013fd73d034cb562
+source_hash: e4247babbfee0d5c2a0e61a18580b0baf5606bcd
 ---
 
 ## Purpose
@@ -159,3 +159,24 @@ book's `content_type` (see `storage.py`/`extract/pipeline.py`).
   design for habit formation filed "desk", "phone", "bedroom", "coffee
   shop" as cataloged story `setting`s - see `parsing.py`'s context doc for
   the taxonomy design this drove.
+- **Both extraction prompts now instruct splitting a multi-aspect
+  sentence/moment into separate, per-category facts rather than filing it
+  under only one; both answer prompts now instruct reading across ALL of
+  an entity's categories, not just the one whose name matches the
+  question's topic.** Real root cause found investigating the same "what
+  does Halt look like?" complaint a second time, after the appearance-
+  category fix above: a fact schema only allows one category per fact, so
+  a sentence like "Halt stroked his beard gravely" - both a personality/
+  mood cue AND a physical detail (he has a beard) - could only ever be
+  filed one way, silently starving the other question type. The
+  extraction-side fix (split into two facts, one worked example added to
+  each extraction prompt mirroring this exact real case) only benefits
+  future/re-extracted data. The answer-side fix (explicitly told to search
+  every category, not just the name-matching one) was verified to work
+  against the real, unmodified `ranger-s-apprentice-1-2-bindup` facts.jsonl
+  without any re-extraction - but only in 1 of 3 identical real attempts,
+  since `answer_question` has no temperature control (see
+  `ollama_provider.py`'s context doc, Open Questions) and Ollama's default
+  conversational sampling isn't consistent run to run. Both fixes are
+  real, verified improvements, but neither is a guarantee - they raise the
+  odds a given detail surfaces, not a hard fix.
