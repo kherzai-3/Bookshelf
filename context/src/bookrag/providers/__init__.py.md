@@ -1,13 +1,13 @@
 ---
 source: src/bookrag/providers/__init__.py
-last_synced: 2026-09-03T00:00:00Z
-source_hash: a4a81eaaa5ed3684720d9c9451c44ea6af30bebf
+last_synced: 2026-09-09T00:00:00Z
+source_hash: 4ec62ed79a733d7fe548d54c52f2686427f000fe
 ---
 
 ## Purpose
 Package marker for `bookrag.providers` - pluggable LLM backends for fact
-extraction (Claude, a local Ollama model, and a deterministic fake for
-tests).
+extraction (a local Ollama model by default, Claude via the Anthropic API
+as a swap-in, and a deterministic fake for tests).
 
 ## Key Decisions
 - Loads `.env` (via `python-dotenv`, best-effort) at package-import time,

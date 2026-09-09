@@ -182,7 +182,8 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   `providers/prompts.py`/`providers/parsing.py`) has only been validated
   via a `bookrag eval` checkpoint (3 chapters of a real consolidated Atomic
   Habits), not a full real extraction run - see `pipeline.py`'s context
-  doc and the `nonfiction_extraction_support` project memory.
+  doc; flagged here as needing a full real extraction run before it can be
+  considered fully validated.
 - `chat`'s interactive loop re-answers every question against the same
   fixed `context` string built once at startup - there's no multi-turn
   conversation memory (the provider never sees earlier Q&A in the session),

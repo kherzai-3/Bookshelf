@@ -13,17 +13,31 @@ actually read (via `bookrag.query.facts_as_of`).
 Requires Python 3.11+.
 
 ```bash
-# from the project root
-python -m venv .venv
+git clone https://github.com/kherzai-3/Bookshelf.git Book_RAG
+cd Book_RAG
 
-# Windows (Git Bash)
-./.venv/Scripts/python.exe -m pip install -r requirements.txt
-./.venv/Scripts/python.exe -m pip install -e .
+# Windows
+python -m venv .venv
+.venv\Scripts\activate
 
 # macOS/Linux
-./.venv/bin/python -m pip install -r requirements.txt
-./.venv/bin/python -m pip install -e .
+python3 -m venv .venv
+source .venv/bin/activate
 ```
+
+Once the venv is activated, install dependencies (same command both OSes,
+run from the project root):
+
+```bash
+pip install -r requirements.txt
+pip install -e .
+```
+
+From here on, every command in this README assumes the venv is activated,
+so `python`/`pip`/`bookrag` all resolve to the venv's own copies. If you'd
+rather not activate it, prefix each command with the venv's interpreter
+path instead (`.venv\Scripts\python.exe -m ...` on Windows,
+`.venv/bin/python -m ...` on macOS/Linux).
 
 `requirements.txt` is a flat, pinned lock (generated via `pip freeze`) for
 reproducible installs. `pyproject.toml` is the source of truth for dependency
@@ -31,24 +45,23 @@ reproducible installs. `pyproject.toml` is the source of truth for dependency
 depends on, edit `pyproject.toml` first, then regenerate the lock:
 
 ```bash
-./.venv/Scripts/python.exe -m pip install -e ".[core,providers,dev]"
-./.venv/Scripts/python.exe -m pip freeze | grep -v -i "book_rag\|Editable install" > requirements.txt
+pip install -e ".[core,providers,dev]"
+pip freeze --exclude-editable > requirements.txt
 ```
 
 ### LLM provider setup
 
 Three providers, chosen via `--provider`/`--providers` or `$BOOKRAG_PROVIDER`:
 
-- **`ollama` (the default)** — local, no API key. Install
-  [Ollama](https://ollama.com) (`winget install Ollama.Ollama` on Windows),
-  make sure it's running (it starts automatically after install; check with
-  `curl http://localhost:11434/api/version`), then pull a model:
+- **`ollama` (the default)** — local, no API key required, which is why
+  it's the default. Install [Ollama](https://ollama.com)
+  (`winget install Ollama.Ollama` on Windows; `brew install ollama` on
+  macOS, or the install script at [ollama.com/download](https://ollama.com/download)
+  on Linux), make sure it's running (it starts automatically after install;
+  check with `curl http://localhost:11434/api/version`), then pull a model:
   ```bash
   ollama pull llama3.2:3b
   ```
-  This is the practical default for this project - the only confirmed
-  Claude access here is an enterprise SSO seat, which doesn't provide a
-  standalone script with an API credential.
 
   **Model selection is machine-specific, not hardcoded** - pick it via
   (in priority order) `bookrag extract --model NAME` (one-off), then
@@ -58,57 +71,30 @@ Three providers, chosen via `--provider`/`--providers` or `$BOOKRAG_PROVIDER`:
   requires a full pass through *all* the model's weights, so a bigger
   model isn't "smarter, therefore faster" - it does proportionally more
   arithmetic (and streams proportionally more weight data out of RAM) for
-  every single token, with no shortcut. On a GPU that extra work is
-  massively parallelized, so it costs much less wall-clock time than the
-  raw parameter ratio suggests; on this machine's CPU-only AMD integrated
-  graphics (no NVIDIA GPU), it doesn't get that break.
+  every single token, with no shortcut. A GPU parallelizes that work, so it
+  costs much less wall-clock time there than the raw parameter ratio
+  suggests; on CPU-only inference, it doesn't get that break.
 
-  - **This machine**: `llama3.2:3b` (3B params) is the practical choice -
-    measured at roughly 20-90s/chapter depending on real chapter length and
-    how much a chapter turns out to contain, ~2-2.5 hours for a full
-    75-chapter novel (`data/library/ranger-s-apprentice-1-2-bindup`). This
-    is slower than an earlier measurement of this same book (~47 minutes) -
-    the extraction prompt was substantially reworked since then (explicit
-    per-category definitions, self-containment requirements, a worked
-    example) specifically to extract more thorough, better-categorized
-    facts per chapter, and generating more content per chapter costs more
-    wall-clock time. Confirmed worth it: `status`-category facts (milestone
-    role/rank/life-condition changes) went from 5 across an entire book to
-    483, and a real question that previously got a wrong or uncertain
-    answer through `bookrag chat` ("has this character become an
-    apprentice yet?") is now answered correctly.
-  - **A machine with a GPU**: set `OLLAMA_MODEL` to something meaningfully
-    larger (e.g. `qwen2.5:7b-instruct` or bigger) - larger models are
-    generally more reliable at both instruction-following (respecting the
-    fixed `entity_type` list) and reduced hallucination, and a GPU absorbs
-    most of the extra cost that makes this impractical here. Confirm the
-    improvement empirically before committing to a full-book run: `bookrag
-    eval <book-id> --chapters N --model <candidate>` is fast (one chapter,
-    not the whole book) and read-only.
-
-    **Actually run on this machine**: `qwen2.5:7b-instruct` (7B) vs.
-    `llama3.2:3b` (3B), same 3 chapters of the real Ranger's Apprentice
-    omnibus - ~1.9x slower (28s → 53s/chapter, in line with the ~2.5x
-    predicted from parameter count), but a real quality difference, not
-    just a smaller model being "probably worse": on chapter 2 (a
-    table-of-contents page with no real character content), `llama3.2:3b`
-    hallucinated a fact anyway - **a different wrong name on two separate
-    runs** ("Arthur Penhaligon," then "Arin," neither appearing anywhere in
-    that text) - while `qwen2.5:7b-instruct` correctly returned `{}`
-    (nothing to extract) both times. On chapters with real content, both
-    correctly identified the right character (Will, Horace); qwen's
-    statements were slightly more complete. Worth the ~2x time cost if
-    hallucination on edge-case chapters matters to you; `llama3.2:3b`
-    remains reasonable if throughput matters more and you're relying on
-    `bookrag extract`'s existing safeguards (grounding check, strict
-    `entity_type`) to catch what a smaller model gets wrong.
+  - **CPU-only**: a 3B model (e.g. `llama3.2:3b`) is a reasonable default -
+    measured at roughly 20-90s/chapter depending on chapter length, i.e.
+    multiple hours for a full novel-length book. `bookrag extract` is
+    [resumable](#extracting-facts) specifically because of this - a long
+    run doesn't need to happen in one sitting.
+  - **With a GPU**: a meaningfully larger model (e.g. `qwen2.5:7b-instruct`
+    or bigger) is generally more reliable at both instruction-following
+    (respecting the fixed `entity_type` list) and reduced hallucination,
+    and a GPU absorbs most of the extra cost that makes this impractical on
+    CPU alone. Confirm the improvement empirically before committing to a
+    full-book run: `bookrag eval <book-id> --chapters N --model <candidate>`
+    is fast (one chapter, not the whole book) and read-only, never touching
+    `facts.jsonl`/`entities.json`.
   - Override the Ollama host similarly via `$OLLAMA_BASE_URL` (e.g. to
     point at Ollama running on a different machine on the network instead
     of switching hardware at all).
-- **`anthropic`** — real Claude via the API, for when a direct Anthropic
-  Console key (or Bedrock/Vertex credential - not yet wired up, ask if
-  needed) is available. Create a `.env` file in the project root
-  (gitignored):
+- **`anthropic`** — real Claude via the API, for when a direct
+  [Anthropic Console](https://console.anthropic.com) API key is available
+  (Bedrock/Vertex credentials aren't wired up yet). Create a `.env` file in
+  the project root (gitignored):
   ```
   ANTHROPIC_API_KEY=sk-ant-...
   ```
@@ -123,6 +109,25 @@ Three providers, chosen via `--provider`/`--providers` or `$BOOKRAG_PROVIDER`:
 
 ## Usage
 
+### Quickstart
+
+One book, start to finish. `bookrag ingest` prints the `book_id` it assigns
+(derived from the title) - copy it from there, or recover it later with
+`bookrag list`:
+
+```bash
+bookrag ingest path/to/some-book.epub
+# -> Ingested 'Some Book' as 'some-book' (12 chapters)
+
+bookrag extract some-book --provider fake   # instant, no setup - swap in "ollama" for real extraction
+
+bookrag chat some-book --chapter 3 --question "Who has appeared so far?"
+```
+
+Everything below is the full reference for each of these commands.
+
+### Ingesting a book
+
 Drop a new book anywhere convenient before ingesting it - `data/incoming/` is
 the suggested staging spot, purely for your own clarity (it's not required by
 the tool, and nothing scans it automatically):
@@ -132,7 +137,6 @@ mv ~/Downloads/some-book.epub data/incoming/
 ```
 
 ```bash
-# after activating the venv (or prefix with ./.venv/Scripts/python.exe -m bookrag.cli)
 bookrag ingest data/incoming/some-book.epub
 bookrag ingest path/to/book.pdf --title "Custom Title" --author "Someone"
 
@@ -323,8 +327,11 @@ data/library/entities.json    # global entity registry: entity_id -> canonical
 ## Running tests
 
 ```bash
-./.venv/Scripts/python.exe -m pytest tests/ -v
+pytest tests/ -v
 ```
+
+(with the venv activated - see Setup - or `.venv\Scripts\python.exe -m pytest tests/ -v` /
+`.venv/bin/python -m pytest tests/ -v` if not)
 
 ## Known limitations
 

@@ -1,5 +1,6 @@
-"""Pluggable LLM providers for fact extraction (Claude today; a local model
-and a deterministic fake for tests)."""
+"""Pluggable LLM providers for fact extraction (a local Ollama model by
+default, Claude via the Anthropic API as a swap-in, and a deterministic
+fake for tests)."""
 
 from __future__ import annotations
 

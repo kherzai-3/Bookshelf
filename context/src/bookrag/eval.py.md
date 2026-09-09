@@ -37,9 +37,9 @@ safe to run against production data without disturbing it.
   `parse_ok=False` with an empty fact list, not a crash - `summarize`
   reports the failure count so a badly-behaving provider is visible in the
   report rather than aborting the whole eval run.
-- Combines the two things the user asked for explicitly: a side-by-side
-  human-readable report AND an automated score, in the same output rather
-  than as separate commands.
+- Combines two explicit requirements: a side-by-side human-readable report
+  AND an automated score, in the same output rather than as separate
+  commands.
 
 ## Dependencies
 - Internal: `bookrag.ingest.chapter.Chapter`, `bookrag.providers.base`,

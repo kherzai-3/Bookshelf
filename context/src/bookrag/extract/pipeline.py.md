@@ -150,7 +150,7 @@ isolation (7.9s, not a hang) after the file appeared frozen.
 
 ## Open Questions / TODOs
 - Not yet run against real chapters with `AnthropicProvider` - only
-  `FakeProvider` in this environment (no API key available). Verify real
+  `FakeProvider` so far (no API key available). Verify real
   output once a key/credential exists.
 - `MIN_NARRATIVE_WORDS` only catches the shortest non-narrative fragments;
   a 100-200 word front-matter block (copyright page, table of contents)
@@ -172,7 +172,7 @@ isolation (7.9s, not a hang) after the file appeared frozen.
   `facts.jsonl`/`entities.json` represent "which model produced this," how
   `bookrag chat`/`library.py`'s summaries pick a default, whether
   `resolve_entity` needs to be model-scoped) and hasn't been started -
-  flagged in project memory as a future planning-pass item, not attempted
+  flagged here as a future planning-pass item, not attempted
   as part of this narrower resumability fix.
 - ~~No cap exists on facts-per-chapter or total facts-per-book.~~
   **Resolved**: this was actually the root cause of a real runaway-

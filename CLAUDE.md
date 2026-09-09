@@ -1,12 +1,16 @@
 # Book_RAG
 
+> This file is standing instructions for an AI coding agent working in this
+> repo. A human contributor should start with `README.md`; come back here
+> for the enforced context-doc and git conventions below.
+
 RAG tool that ingests `.epub`/`.pdf` novels and builds a queryable, spoiler-safe
 catalog of characters, settings, and themes — each tracked with chapter-scoped
 history so a reference to chapter N never leaks what happens after it.
 
 Stack: Python (`src/bookrag/`), local single-user, pluggable LLM backends
-(Claude via Anthropic API by default, swappable to a local model) with an eval
-harness to compare their output.
+(local models via Ollama by default, swappable to Claude via the Anthropic
+API) with an eval harness to compare their output.
 
 ## Context-file convention (read this before editing any source file)
 
@@ -16,7 +20,7 @@ Read the context doc instead of the full source file when you just need to know
 what a file does or how it fits together; only open the real source when you're
 about to change it or the context doc is insufficient.
 
-**This is hook-enforced, not just a convention I need to remember:**
+**This is hook-enforced, not just a convention to remember:**
 - A `PostToolUse` hook (`.claude/hooks/track_dirty.sh`) logs every file under `src/`
   touched via Edit/Write/NotebookEdit into `.claude/context_state/dirty.txt` —
   and also logs `pyproject.toml` itself (see below).
@@ -106,8 +110,9 @@ state is ready to become it.
   but only once per distinct change-set (it hashes `git status --porcelain`
   and acks it immediately, so re-running Stop for the same still-in-progress
   change never blocks twice). It deliberately cannot judge "is this actually
-  done" or "did tests pass" — that judgment call stays mine to make; the hook
-  only guarantees the reminder surfaces at least once per real change.
+  done" or "did tests pass" — that judgment call stays with the agent, not
+  the hook; the hook only guarantees the reminder surfaces at least once
+  per real change.
 - It stays silent while `.claude/context_state/dirty.txt` is non-empty —
   no point suggesting a commit before `check_dirty.sh`'s own concern
   (context docs out of sync) is resolved.

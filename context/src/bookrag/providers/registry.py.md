@@ -11,9 +11,10 @@ this rather than importing a specific provider directly.
 
 ## Public Interface
 - `DEFAULT_PROVIDER = "ollama"` — the practical default: no API key
-  required. Changed from `"anthropic"` once it was confirmed the user has
-  no direct Anthropic API key/Bedrock/Vertex access (SSO-only enterprise
-  seat covers Claude Code/Claude.ai, not a standalone script's API calls).
+  required. Changed from `"anthropic"` since a standalone script needs its
+  own direct API/Bedrock/Vertex credential - separate from whatever
+  authenticates a developer's Claude Code/Claude.ai access - and Ollama
+  needs no credential at all.
 - `get_provider(name: str | None = None, model: str | None = None) ->
   Provider` — `name` defaults to `$BOOKRAG_PROVIDER` then
   `DEFAULT_PROVIDER`. Raises `ValueError` for anything other than

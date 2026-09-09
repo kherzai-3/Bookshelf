@@ -3,14 +3,14 @@ name = "bookrag"
 version = "0.0.1"
 description = "RAG tool for ingesting .epub/.pdf books and querying spoiler-safe character, setting, and theme catalogs."
 requires-python = ">=3.11"
+license = "MIT"
 dependencies = []
 
 [project.optional-dependencies]
-# Ingestion + storage: epub/pdf parsing, embeddings, local vector store.
+# Ingestion + storage: epub/pdf parsing.
 core = [
     "ebooklib",
     "pymupdf",
-    "lancedb",
 ]
 # Pluggable LLM backends (Claude via Anthropic API, local/open-source via Ollama)
 # plus the eval harness to compare extraction/query output across them.

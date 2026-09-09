@@ -6,9 +6,9 @@ source_hash: dd84ef415adbcc5b713909101e92713dcccfc65f
 
 ## Purpose
 Local, no-API-key `Provider` implementation via Ollama's REST API - the
-practical default for this project, since the user's only Claude access is
-enterprise SSO with no direct `ANTHROPIC_API_KEY`/Bedrock/Vertex path
-confirmed. Verified against a real, locally-running `llama3.2:3b` model.
+practical default for this project, since it requires no
+`ANTHROPIC_API_KEY`/Bedrock/Vertex credential at all. Verified against a
+real, locally-running `llama3.2:3b` model.
 
 ## Public Interface
 - `OllamaProvider(model=None, base_url=None, num_ctx=DEFAULT_NUM_CTX,

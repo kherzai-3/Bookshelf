@@ -29,13 +29,13 @@ parses a JSON array of new/changed facts back.
   directly) so it also covers an `OllamaProvider`-only run - see that
   file's context doc for why.
 - `ANTHROPIC_API_KEY` is this standalone program's own credential, unrelated
-  to whatever authenticates a Claude Code session. If the user's org access
-  is SSO/Bedrock/Vertex rather than a direct Anthropic Console key, this
-  class needs `anthropic.AnthropicBedrock`/`AnthropicVertex` instead of
-  `anthropic.Anthropic` - **confirmed to be this project's actual situation**
-  (the user has no direct API key), which is why `OllamaProvider` exists
-  and is now the practical default (`registry.DEFAULT_PROVIDER`). This
-  class is kept for whenever direct API/Bedrock/Vertex access exists.
+  to whatever authenticates a developer's Claude Code or Claude.ai access.
+  Bedrock/Vertex access (rather than a direct Anthropic Console key) would
+  need `anthropic.AnthropicBedrock`/`AnthropicVertex` instead of
+  `anthropic.Anthropic` - not implemented here, since `OllamaProvider`
+  covers the no-API-key case and is the practical default
+  (`registry.DEFAULT_PROVIDER`). This class is kept for whenever a direct
+  API/Bedrock/Vertex credential is available.
 - Shares `EXTRACTION_SYSTEM_PROMPTS`/`build_user_message` (`prompts.py`) and
   `parse_facts` (`parsing.py`) with `OllamaProvider` - factored out so the
   eval harness compares providers on the same prompt, not incidentally
