@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/anthropic_provider.py
-last_synced: 2026-09-08T00:00:00Z
-source_hash: 3f20b8d6b42d94b1f234597422d4dae62b790046
+last_synced: 2026-09-09T00:00:00Z
+source_hash: c6e15d379d7f093a7f6dd25ad5aba1873bd30b27
 ---
 
 ## Purpose
@@ -16,8 +16,8 @@ parses a JSON array of new/changed facts back.
   `ANTHROPIC_API_KEY` isn't set (checked after `.env` loading, now done in
   `providers/__init__.py`), so a misconfigured run fails immediately and
   clearly rather than on the first extraction call.
-- `AnthropicProvider.extract_facts(chapter_text, known_entities, content_type="fiction") ->
-  list[ExtractedFact]` — `content_type` selects the prompt/taxonomy the
+- `AnthropicProvider.extract_facts(chapter_text, known_entities, content_type="fiction",
+  known_entity_types=None) -> list[ExtractedFact]` — `content_type` selects the prompt/taxonomy the
   same way as `OllamaProvider`, just without the schema-forcing (see Open
   Questions).
 - `AnthropicProvider.answer_question(question, context, content_type="fiction") -> str`

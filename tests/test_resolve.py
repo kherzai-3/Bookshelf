@@ -59,3 +59,31 @@ def test_new_book_id_gets_added_to_existing_entitys_book_ids() -> None:
 
     assert same_id == entity_id
     assert entities["entities"][0]["book_ids"] == ["moby-dick", "moby-dick-2"]
+
+
+def test_plural_and_article_variants_of_the_same_name_unify() -> None:
+    """Real observed duplication: "Wargal"/"Wargals"/"The Wargals"/"The
+    Wargal" (a creature name from Ranger's Apprentice) each got resolved as
+    a separate entity because matching was exact-string-only. All four
+    spelling variants of the same entity_type must now resolve to one."""
+    entities = {"entities": []}
+    base_id = resolve_entity("Wargals", "character", "book-1", entities)
+
+    assert resolve_entity("Wargal", "character", "book-1", entities) == base_id
+    assert resolve_entity("The Wargals", "character", "book-1", entities) == base_id
+    assert resolve_entity("The Wargal", "character", "book-1", entities) == base_id
+    assert len(entities["entities"]) == 1
+
+
+def test_plural_variant_matching_still_respects_entity_type() -> None:
+    """Name normalization must not accidentally relax the existing
+    type-scoping - a name typed differently across chapters (the other,
+    still-real half of the Wargal duplication bug) is a separate problem
+    (see extract/pipeline.py's known_entity_types), not one this
+    normalization is meant to paper over silently."""
+    entities = {"entities": []}
+    character_id = resolve_entity("Wargals", "character", "book-1", entities)
+    setting_id = resolve_entity("Wargals", "setting", "book-1", entities)
+
+    assert character_id != setting_id
+    assert len(entities["entities"]) == 2

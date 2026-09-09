@@ -146,12 +146,22 @@ using the formula: after the current habit, do the new habit."},
 EXTRACTION_SYSTEM_PROMPTS = {"fiction": EXTRACTION_SYSTEM_PROMPT, "nonfiction": EXTRACTION_SYSTEM_PROMPT_NONFICTION}
 
 
-def build_user_message(chapter_text: str, known_entities: list[str]) -> str:
-    known = ", ".join(known_entities) if known_entities else "(none yet)"
+def build_user_message(
+    chapter_text: str, known_entities: list[str], known_entity_types: dict[str, str] | None = None
+) -> str:
+    known_entity_types = known_entity_types or {}
+    if known_entities:
+        known = ", ".join(
+            f"{name} ({known_entity_types[name]})" if name in known_entity_types else name
+            for name in known_entities
+        )
+    else:
+        known = "(none yet)"
     return (
-        f"Entities already introduced earlier in the book (use these exact "
-        f"names if you're referring to the same person/place, rather than "
-        f"inventing a new name for someone already known): {known}\n\n"
+        f"Entities already introduced earlier in the book, with the type each "
+        f"was already recorded as (use the exact same name AND type if you're "
+        f"referring to the same person/place, rather than inventing a new name "
+        f"or filing it under a different type): {known}\n\n"
         f"Chapter text:\n{chapter_text}"
     )
 

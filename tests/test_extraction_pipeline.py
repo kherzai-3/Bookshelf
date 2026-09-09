@@ -21,7 +21,11 @@ class _FixedResponseProvider:
         self.call_count = 0
 
     def extract_facts(
-        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+        self,
+        chapter_text: str,
+        known_entities: list[str],
+        content_type: str = "fiction",
+        known_entity_types: dict[str, str] | None = None,
     ) -> list[ExtractedFact]:
         self.call_count += 1
         return list(self._facts)
@@ -41,7 +45,11 @@ class _FailsAfterNChapters:
         self._call_count = 0
 
     def extract_facts(
-        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+        self,
+        chapter_text: str,
+        known_entities: list[str],
+        content_type: str = "fiction",
+        known_entity_types: dict[str, str] | None = None,
     ) -> list[ExtractedFact]:
         if self._call_count >= self._n:
             raise RuntimeError("simulated crash")
@@ -61,7 +69,11 @@ class _FailsOnNthCall:
         self._call_count = 0
 
     def extract_facts(
-        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+        self,
+        chapter_text: str,
+        known_entities: list[str],
+        content_type: str = "fiction",
+        known_entity_types: dict[str, str] | None = None,
     ) -> list[ExtractedFact]:
         call_index = self._call_count
         self._call_count += 1
@@ -80,7 +92,7 @@ def test_extract_book_passes_content_type_from_metadata_to_the_provider(tmp_path
     seen_content_types: list[str] = []
 
     class _RecordingProvider:
-        def extract_facts(self, chapter_text, known_entities, content_type="fiction"):
+        def extract_facts(self, chapter_text, known_entities, content_type="fiction", known_entity_types=None):
             seen_content_types.append(content_type)
             return []
 
@@ -107,7 +119,7 @@ def test_extract_book_defaults_to_fiction_when_metadata_predates_content_type(tm
     seen_content_types: list[str] = []
 
     class _RecordingProvider:
-        def extract_facts(self, chapter_text, known_entities, content_type="fiction"):
+        def extract_facts(self, chapter_text, known_entities, content_type="fiction", known_entity_types=None):
             seen_content_types.append(content_type)
             return []
 
@@ -353,6 +365,37 @@ def test_extract_book_skips_very_short_chapters_without_calling_the_provider(tmp
     assert [r["chapter_index"] for r in records] == [1]
 
 
+def test_extract_book_passes_known_entity_types_to_the_provider(tmp_path: Path) -> None:
+    """Real root cause behind half of a confirmed duplication bug: a
+    recurring entity (e.g. "Wargals") got typed as `character` in one
+    chapter and `setting` in another, because the provider only ever saw a
+    bare name with zero type context and had to re-derive a type from
+    scratch each chapter. known_entity_types anchors it to the type
+    already on record."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [
+        Chapter(0, "One", f"Wargals attacked the village. {NARRATIVE_PADDING}"),
+        Chapter(1, "Two", f"The Wargals returned at dusk. {NARRATIVE_PADDING}"),
+    ]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+
+    seen_known_entity_types: list[dict] = []
+
+    class _RecordingProvider:
+        def extract_facts(self, chapter_text, known_entities, content_type="fiction", known_entity_types=None):
+            seen_known_entity_types.append(dict(known_entity_types or {}))
+            if not seen_known_entity_types[:-1]:  # first call only
+                return [ExtractedFact("Wargals", "setting", "description", "The Wargals are fearsome raiders.")]
+            return []
+
+    extract_book(book_id, _RecordingProvider(), root=root)
+
+    assert seen_known_entity_types[0] == {}  # nothing known yet for chapter 0
+    assert seen_known_entity_types[1] == {"Wargals": "setting"}  # anchored from chapter 0's resolution
+
+
 def test_extract_book_saves_progress_and_resumes_after_a_crash(tmp_path: Path) -> None:
     root = tmp_path / "library"
     source = tmp_path / "book.epub"
@@ -398,7 +441,13 @@ def test_extract_book_propagates_keyboard_interrupt_but_still_saves_progress(tmp
             self._delegate = FakeProvider()
             self._call_count = 0
 
-        def extract_facts(self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"):
+        def extract_facts(
+            self,
+            chapter_text: str,
+            known_entities: list[str],
+            content_type: str = "fiction",
+            known_entity_types: dict[str, str] | None = None,
+        ):
             if self._call_count == 1:
                 raise KeyboardInterrupt()
             self._call_count += 1
@@ -430,7 +479,13 @@ def test_extract_book_resume_reuses_entities_from_the_interrupted_portion(tmp_pa
         def __init__(self) -> None:
             self._call_count = 0
 
-        def extract_facts(self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"):
+        def extract_facts(
+            self,
+            chapter_text: str,
+            known_entities: list[str],
+            content_type: str = "fiction",
+            known_entity_types: dict[str, str] | None = None,
+        ):
             self._call_count += 1
             if self._call_count == 1:
                 return [ExtractedFact("Halt", "character", "personality", "Halt walked into the clearing.")]

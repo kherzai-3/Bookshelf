@@ -52,11 +52,15 @@ class OllamaProvider:
         self._timeout = timeout
 
     def extract_facts(
-        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+        self,
+        chapter_text: str,
+        known_entities: list[str],
+        content_type: str = "fiction",
+        known_entity_types: dict[str, str] | None = None,
     ) -> list[ExtractedFact]:
         content = self._chat(
             EXTRACTION_SYSTEM_PROMPTS[content_type],
-            build_user_message(chapter_text, known_entities),
+            build_user_message(chapter_text, known_entities, known_entity_types),
             # A full JSON Schema, not just the string "json" - grammar-
             # constrains sampling so entity_type/category can never drift
             # outside their enums and `statement` can't grow past its

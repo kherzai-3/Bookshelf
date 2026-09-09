@@ -15,12 +15,16 @@ _PROPER_NOUN = re.compile(r"\b[A-Z][a-z]+\b")
 
 class FakeProvider:
     def extract_facts(
-        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+        self,
+        chapter_text: str,
+        known_entities: list[str],
+        content_type: str = "fiction",
+        known_entity_types: dict[str, str] | None = None,
     ) -> list[ExtractedFact]:
-        # content_type is accepted for Provider protocol compatibility but
-        # ignored - this double is deliberately dumb/predictable regardless
-        # of content type (see module docstring), not a realistic stand-in
-        # for either taxonomy.
+        # content_type/known_entity_types are accepted for Provider protocol
+        # compatibility but ignored - this double is deliberately dumb/
+        # predictable regardless of content type (see module docstring), not
+        # a realistic stand-in for either taxonomy.
         facts: list[ExtractedFact] = []
         seen: set[str] = set()
         for sentence in re.split(r"(?<=[.!?])\s+", chapter_text):

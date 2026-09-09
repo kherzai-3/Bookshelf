@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/fake_provider.py
-last_synced: 2026-09-08T00:00:00Z
-source_hash: 6b1936ef59dc9c128d5bf35807b5ad83b7a93463
+last_synced: 2026-09-09T00:00:00Z
+source_hash: 46fe86a2b01308758e0febe743d01d18c93957ff
 ---
 
 ## Purpose
@@ -10,8 +10,8 @@ extraction pipeline, eval harness, and CLI can all be tested without an
 `ANTHROPIC_API_KEY`.
 
 ## Public Interface
-- `FakeProvider.extract_facts(chapter_text, known_entities, content_type="fiction") ->
-  list[ExtractedFact]` — one fact per new capitalized word (regex
+- `FakeProvider.extract_facts(chapter_text, known_entities, content_type="fiction",
+  known_entity_types=None) -> list[ExtractedFact]` — one fact per new capitalized word (regex
   `[A-Z][a-z]+`, excluding a small stopword set) in the chapter, with the
   sentence it appeared in as the `statement`. `entity_type` is always
   `"character"`, `category` always `"development"`, regardless of
@@ -25,9 +25,10 @@ extraction pipeline, eval harness, and CLI can all be tested without an
 ## Key Decisions
 - Deliberately dumb and predictable, not a good extractor - it exists to
   make output assertable in tests (`tests/test_fake_provider.py`), not to
-  approximate real extraction quality. `known_entities` and `content_type`
-  are both accepted (for `Provider` protocol compatibility) but currently
-  ignored. Note `category="development"` is fiction-only (not a member of
+  approximate real extraction quality. `known_entities`, `content_type`,
+  and `known_entity_types` are all accepted (for `Provider` protocol
+  compatibility) but currently ignored. Note `category="development"` is
+  fiction-only (not a member of
   `ALLOWED_CATEGORIES_NONFICTION`, see `providers/parsing.py`) - harmless
   here since this class constructs `ExtractedFact` directly and never goes
   through `parse_facts`/`_normalize_category`'s validation, but a reminder

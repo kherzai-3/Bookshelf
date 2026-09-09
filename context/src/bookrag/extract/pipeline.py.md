@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/pipeline.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: f730b8ff158cabe9a6384a4c8099aef01bda7d2f
+source_hash: f28240f1b8f62f231e3b5b9f098431c1be51ff50
 ---
 
 ## Purpose
@@ -88,6 +88,22 @@ isolation (7.9s, not a hang) after the file appeared frozen.
   an already-established entity as brand new the moment a run resumes. On a
   genuinely fresh run this is a no-op (`book_id` has no entities yet), so
   the change is safe for the non-resume case too.
+- **`known_types` (built by `_entity_types_for_books`, same book-id scope
+  as `known_names`) is threaded through to the provider alongside the bare
+  name list**, and updated inline (`known_types[raw.entity_name] =
+  raw.entity_type`) the same moment a new entity is added to `known_names`.
+  Passed as `known_entity_types` to `provider.extract_facts` (see
+  `providers/base.py`/`prompts.py`) purely as a prompt-building hint - the
+  grounding/resolution logic below (`is_new`, `resolve_entity`) is
+  untouched by this and still only ever sees the plain name list. Added
+  after confirming (real data) that a recurring entity's type can drift
+  across chapters - `known_names` alone gives the provider zero signal
+  about what type a name was already recorded as, so it re-derives one
+  from scratch each time. If the same name was inconsistently typed in
+  entities already on record before this existed, `_entity_types_for_books`
+  just picks whichever type it iterates over last - an acceptable,
+  harmless arbitrary tie-break for a soft hint, not a correctness
+  guarantee.
 - **Resumable, not idempotent-by-overwrite.** `extraction_progress.json`
   (`{chapter_count, next_chapter_index}`) is written after every chapter,
   same per-chapter durability as `facts.jsonl`'s flush - whatever

@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/ollama_provider.py
-last_synced: 2026-09-08T00:00:00Z
-source_hash: dd84ef415adbcc5b713909101e92713dcccfc65f
+last_synced: 2026-09-09T00:00:00Z
+source_hash: 736257b75cd01f0d2697486508823c14b089859e
 ---
 
 ## Purpose
@@ -18,8 +18,8 @@ real, locally-running `llama3.2:3b` model.
   `DEFAULT_TIMEOUT_SECONDS = 900`. The env-var path is what makes switching
   to a bigger model on a different (e.g. GPU-equipped) machine a one-line
   `.env` change rather than a code edit - see README's "LLM provider setup".
-- `OllamaProvider.extract_facts(chapter_text, known_entities, content_type="fiction") ->
-  list[ExtractedFact]` — raises `RuntimeError` (not `ExtractionParseError`)
+- `OllamaProvider.extract_facts(chapter_text, known_entities, content_type="fiction",
+  known_entity_types=None) -> list[ExtractedFact]` — raises `RuntimeError` (not `ExtractionParseError`)
   if Ollama itself isn't reachable, doesn't respond within `timeout`, or a
   request that started responding stalls past `timeout` mid-read (both
   `urllib.error.URLError` and a bare `TimeoutError` are caught and

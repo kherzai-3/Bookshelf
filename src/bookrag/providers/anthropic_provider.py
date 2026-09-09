@@ -30,10 +30,15 @@ class AnthropicProvider:
         self._model = model or os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
 
     def extract_facts(
-        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+        self,
+        chapter_text: str,
+        known_entities: list[str],
+        content_type: str = "fiction",
+        known_entity_types: dict[str, str] | None = None,
     ) -> list[ExtractedFact]:
         raw_text = self._complete(
-            EXTRACTION_SYSTEM_PROMPTS[content_type], build_user_message(chapter_text, known_entities)
+            EXTRACTION_SYSTEM_PROMPTS[content_type],
+            build_user_message(chapter_text, known_entities, known_entity_types),
         )
         return parse_facts(raw_text, content_type)
 

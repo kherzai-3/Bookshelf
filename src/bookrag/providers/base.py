@@ -23,7 +23,11 @@ class ExtractionParseError(Exception):
 
 class Provider(Protocol):
     def extract_facts(
-        self, chapter_text: str, known_entities: list[str], content_type: str = "fiction"
+        self,
+        chapter_text: str,
+        known_entities: list[str],
+        content_type: str = "fiction",
+        known_entity_types: dict[str, str] | None = None,
     ) -> list[ExtractedFact]: ...
 
     def answer_question(self, question: str, context: str, content_type: str = "fiction") -> str: ...

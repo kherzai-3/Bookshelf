@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/resolve.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: b7bd4b1a179c8adc29adf8c59c2795ccfbce9414
+source_hash: 1aa924ed7b2a27776b3132c9ed3fd0713a5fa5a5
 ---
 
 ## Purpose
@@ -17,7 +17,8 @@ registry's load/save.
 - `resolve_entity(name: str, entity_type: str, book_id: str, entities: dict)
   -> str` — **mutates `entities` in place** (adds a new entry, or records
   `book_id` against an existing match) and returns the resolved
-  `entity_id`.
+  `entity_id`. Matches via `_match_key` (see Key Decisions), not raw
+  string equality.
 - `prune_book_from_entities(entities: dict, book_id: str) -> tuple[int, int]`
   — **mutates `entities` in place**: removes `book_id` from every entity's
   `book_ids`, dropping any entity this leaves with none. Returns
@@ -26,13 +27,25 @@ registry's load/save.
   adding a `book_id`.
 
 ## Key Decisions
-- **No fuzzy/semantic coreference in v1** - resolution is case-insensitive
-  exact match against a canonical name or a known alias only. "the old man"
-  will not automatically link to "Ishmael". Documented as a known
-  limitation (README's Known Limitations) rather than solved here - same
-  posture as the epub/pdf ingestion heuristics: ship something reasonable,
-  make the gap visible, improve iteratively. Aliases can be added to
+- **No real fuzzy/semantic coreference** - "the old man" will not
+  automatically link to "Ishmael". Documented as a known limitation
+  (README's Known Limitations) rather than solved here - same posture as
+  the epub/pdf ingestion heuristics: ship something reasonable, make the
+  gap visible, improve iteratively. Aliases can be added to
   `entities.json` by hand today.
+- **`_match_key(name)` adds light, comparison-only normalization** (strip a
+  leading "the ", strip a trailing "s") on top of the case-insensitive
+  exact match, used for both `canonical_name` and every alias.
+  Deliberately narrow, not real fuzzy matching (no edit-distance/
+  similarity library) - real bug found and fixed by this: a single
+  creature ("Wargal(s)" in a real book) had fragmented into 5 entities
+  across name variants ("Wargals"/"The Wargals") *and* entity_types
+  (see the type-drift item below, and `extract/pipeline.py`'s
+  `known_entity_types` for the other half of that fix). A broader
+  similarity library was deliberately not added here - real risk of
+  false-positive merges (two genuinely different names colliding) without
+  much more careful thresholding/testing than this narrow, high-confidence
+  rule needs.
 - Matching is scoped by `entity_type` - a character and a setting with the
   same name (e.g. "Nantucket" the place vs. a character nicknamed
   "Nantucket") resolve to two separate entities.

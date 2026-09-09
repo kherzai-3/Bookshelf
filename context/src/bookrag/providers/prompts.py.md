@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/prompts.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: f88c5146f62090af1d0b2d1f84e61dc24f238017
+source_hash: c2a7c5d3de8e2059c4ca9b2f013fd73d034cb562
 ---
 
 ## Purpose
@@ -28,10 +28,15 @@ book's `content_type` (see `storage.py`/`extract/pipeline.py`).
 - `EXTRACTION_SYSTEM_PROMPTS: dict[str, str]` — `{"fiction": ...,
   "nonfiction": ...}`, so providers do a simple `[content_type]` lookup
   rather than branching logic duplicated in each implementation.
-- `build_user_message(chapter_text: str, known_entities: list[str]) -> str` —
-  frames `known_entities` as "use these exact names for someone already
-  introduced," not "don't restate" (see Key Decisions). Shared unchanged by
-  both content types - already fully mode-agnostic.
+- `build_user_message(chapter_text: str, known_entities: list[str],
+  known_entity_types: dict[str, str] | None = None) -> str` — frames
+  `known_entities` as "use these exact names for someone already
+  introduced," not "don't restate" (see Key Decisions). When
+  `known_entity_types` is given, each known name is rendered with its
+  established type inline (e.g. "Wargals (setting)") and the instruction
+  also says to keep the same type, not just the same name - see Key
+  Decisions for why. Shared unchanged by both content types - already
+  fully mode-agnostic.
 - `ANSWER_SYSTEM_PROMPT: str` — the fiction answer prompt: instructs the
   model to answer only from the facts it's given and never from outside
   knowledge of the book, since outside knowledge could leak spoilers past
@@ -50,6 +55,19 @@ book's `content_type` (see `storage.py`/`extract/pipeline.py`).
   unchanged by both content types.
 
 ## Key Decisions
+- **`build_user_message` renders each known entity's established type
+  alongside its name, when available.** Real root cause found chasing a
+  confirmed entity-duplication bug (5 separate "Wargal(s)" entities in one
+  real book): `known_entities` previously carried bare name strings only,
+  so when the model re-encountered a recurring entity in a later chapter
+  it had zero signal that the name was already typed a certain way (e.g.
+  `setting`) and re-derived a type from scratch purely from how that
+  chapter's sentence read - naturally producing different types for the
+  same real-world entity across chapters. `extract.pipeline` now builds a
+  name -> type map (from `entities.json`, not guessed) and passes it
+  through; `resolve_entity` is still the one place identity is actually
+  decided (type-scoped, see its context doc) - this is a soft prompt-side
+  hint to reduce future drift, not a hard guarantee.
 - `EXTRACTION_SYSTEM_PROMPT` no longer says "only report new or changed
   facts" - dropped deliberately. It was unenforceable (the model only ever
   receives prior entity *names* via `known_entities`, never prior fact

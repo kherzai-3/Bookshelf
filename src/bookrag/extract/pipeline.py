@@ -132,6 +132,7 @@ def extract_book(
     # otherwise the grounding check below would wrongly treat an
     # already-established entity as brand new the moment a run resumes.
     known_names = _entity_names_for_books(series_reading_order(book_id, root), entities)
+    known_types = _entity_types_for_books(series_reading_order(book_id, root), entities)
     resumed_from_chapter = start_index if start_index > 0 else None
 
     fact_count = 0
@@ -156,7 +157,7 @@ def extract_book(
                     # retrying every remaining chapter against a dead provider is
                     # pointless.
                     try:
-                        raw_facts = provider.extract_facts(chapter.text, known_names, content_type)
+                        raw_facts = provider.extract_facts(chapter.text, known_names, content_type, known_types)
                     except ExtractionParseError:
                         parse_failure_count += 1
                         raw_facts = []
@@ -200,6 +201,7 @@ def extract_book(
                     entity_id = resolve_entity(raw.entity_name, raw.entity_type, book_id, entities)
                     if is_new:
                         known_names.append(raw.entity_name)
+                        known_types[raw.entity_name] = raw.entity_type
                     record = {
                         "entity_id": entity_id,
                         "chapter_index": chapter.index,
@@ -251,3 +253,20 @@ def _entity_names_for_books(book_ids: list[str], entities: dict) -> list[str]:
         for entity in entities["entities"]
         if any(bid in entity["book_ids"] for bid in book_ids)
     ]
+
+
+def _entity_types_for_books(book_ids: list[str], entities: dict) -> dict[str, str]:
+    """Name -> established entity_type, for entities already known across
+    the given books - passed to the provider so a recurring entity is
+    anchored to keep the same type instead of the model re-deriving it from
+    scratch each chapter (see resolve_entity's type-scoped matching - a
+    name typed differently in different chapters creates separate
+    entities). If the same name was inconsistently typed across earlier
+    chapters - the exact drift this exists to prevent going forward - the
+    last-encountered type wins; a soft hint, not an enforced identity, so
+    an arbitrary tie-break here is harmless."""
+    types: dict[str, str] = {}
+    for entity in entities["entities"]:
+        if any(bid in entity["book_ids"] for bid in book_ids):
+            types[entity["canonical_name"]] = entity["type"]
+    return types

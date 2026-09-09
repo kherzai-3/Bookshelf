@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/base.py
-last_synced: 2026-09-08T00:00:00Z
-source_hash: 886cc94d8f20ad39eff111e576de354582cdcd4b
+last_synced: 2026-09-09T00:00:00Z
+source_hash: 9a081787f3cc39294a39a17faf07101edab1f004
 ---
 
 ## Purpose
@@ -21,13 +21,18 @@ specifics.
   parsed into facts; `eval.py` catches this to score schema-conformance
   rather than letting the whole run crash.
 - `Provider` (Protocol) — `extract_facts(chapter_text: str, known_entities:
-  list[str], content_type: str = "fiction") -> list[ExtractedFact]`;
-  `answer_question(question: str, context: str, content_type: str =
-  "fiction") -> str` — answers a reader's question from spoiler-safe facts
-  only (see `prompts.ANSWER_SYSTEM_PROMPTS`). `content_type` selects which
+  list[str], content_type: str = "fiction", known_entity_types: dict[str,
+  str] | None = None) -> list[ExtractedFact]`; `answer_question(question:
+  str, context: str, content_type: str = "fiction") -> str` — answers a
+  reader's question from spoiler-safe facts only (see
+  `prompts.ANSWER_SYSTEM_PROMPTS`). `content_type` selects which
   category/entity-type taxonomy and which prompt pair a provider uses
   (`"fiction"` or `"nonfiction"`) - defaults to `"fiction"` so every caller
-  written before this existed keeps working unchanged.
+  written before this existed keeps working unchanged. `known_entity_types`
+  (name -> already-established entity_type) is optional, purely a prompt-
+  building hint (see `prompts.build_user_message`) - not used by the
+  grounding/resolution logic in `extract.pipeline`, which keeps using the
+  plain `known_entities` list unchanged.
 
 ## Key Decisions
 - `Provider` is a `typing.Protocol`, not an ABC — providers don't need to

@@ -1,7 +1,7 @@
 ---
 source: tests/test_extraction_pipeline.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 79632a6b5e5d55cf6eda7aa4fee01aa567008ac2
+source_hash: afbde11d93c00a95ce1dd7001e88ce858af5d2ae
 ---
 
 ## Purpose
@@ -38,3 +38,11 @@ being written, with `duplicate_fact_count` reporting how many were
 dropped - the code-side guardrail added after a real chapter's real
 extraction was found padding toward a raised `maxItems` cap by repeating
 the same fact verbatim.
+
+Also covers `known_entity_types` threading
+(`test_extract_book_passes_known_entity_types_to_the_provider`): a
+`_RecordingProvider` confirms chapter 0 sees an empty type map, and
+chapter 1 sees the type `resolve_entity` actually recorded for an entity
+introduced in chapter 0 - the mechanism behind the fix for a confirmed
+entity-type-drift duplication bug (see `extract/pipeline.py`'s and
+`extract/resolve.py`'s context docs).
