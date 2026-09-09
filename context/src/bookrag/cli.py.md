@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 427a90b24e375cab06b7c1b423e3f3bf9b5c4918
+source_hash: 01b0455c06fb3e309aab6f31cc3b93e8f840e191
 ---
 
 ## Purpose
@@ -53,10 +53,12 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
 - CLI: `bookrag chat <book-id> --chapter N [--provider NAME] [--model NAME]
   [--question TEXT]` — `--chapter` (0-indexed, required) is the reader's
   current position; facts past it are never shown to the provider (goes
-  through `query.facts_as_of`/`query.format_context`). With `--question`,
-  answers once and exits (exit 1 if the book or chapter is invalid, same
-  posture as `extract`/`eval`); without it, starts an interactive
-  `> `-prompt loop, one answer per line, until EOF/Ctrl+C.
+  through `query.facts_as_of`, then `query.select_relevant_facts`/
+  `query.format_context` - see Key Decisions for why those run per
+  question, not once). With `--question`, answers once and exits (exit 1
+  if the book or chapter is invalid, same posture as `extract`/`eval`);
+  without it, starts an interactive `> `-prompt loop, one answer per line,
+  until EOF/Ctrl+C.
 - CLI: `bookrag list` — table of every book in the library: id, title,
   author, chapter count, content type, extraction status (fact count, or
   `N (partial: M/total ch)` when the run hasn't reached the end yet, or `-`
@@ -128,6 +130,14 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   "fiction")`) alongside the chapter count, passed to every
   `answer_question` call so a nonfiction book gets the nonfiction answer
   prompt.
+- **`select_relevant_facts`/`format_context` are called per question, not
+  once before the interactive loop starts.** Changed from the original
+  design (context built once, reused verbatim for every question in a
+  session) specifically because retrieval is now question-dependent - a
+  fixed context computed before the first question is even typed can't
+  reflect what that question is about. `facts_as_of`'s result is still
+  fetched once per `_chat` call (chapter-scoped, not question-scoped, so
+  it doesn't need recomputing per question).
 - `_ingest` calls `ingest.consolidate.should_consolidate`/
   `consolidate_fragments` right after `loader.load_chapters`, before
   `sanity_summary`/`classify_ingestion`/`save_book` all run - so every
@@ -180,7 +190,7 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   `incoming_root`), `bookrag.titles.guess_title_author`,
   `bookrag.extract.pipeline` (`extract_book`, `resume_start_index`), `bookrag.eval` (`run_eval`,
   `summarize`), `bookrag.providers.registry.get_provider`, `bookrag.query`
-  (`facts_as_of`, `format_context`), `bookrag.library` (`list_books`,
+  (`facts_as_of`, `select_relevant_facts`, `format_context`), `bookrag.library` (`list_books`,
   `show_book`, `remove_book`, `run_doctor`, `detect_duplicate_entities`,
   `merge_entities`)
 - External: `statistics` (stdlib)

@@ -6,11 +6,12 @@ queried is chapter-limited."""
 
 from __future__ import annotations
 
+import difflib
 import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from bookrag.extract.resolve import load_entities
+from bookrag.extract.resolve import load_entities, match_key
 from bookrag.storage import library_root, series_reading_order
 
 
@@ -45,6 +46,77 @@ def facts_as_of(book_id: str, chapter_index: int, root: Path | None = None) -> l
                 )
             )
     return facts
+
+
+# Below this ratio, two strings are treated as unrelated rather than a
+# likely typo/near-miss of each other - chosen conservatively (favoring
+# missed fuzzy matches over false ones) since a false match here only ever
+# causes over-inclusion (see select_relevant_facts's no-match fallback),
+# never a lost fact.
+_FUZZY_MATCH_THRESHOLD = 0.8
+
+
+def _name_matches_question(name: str, question_lc: str, question_words: list[str]) -> bool:
+    name_lc = name.lower()
+    if name_lc in question_lc:
+        return True
+    key = match_key(name)
+    # match_key handles the direction plain substring can't: an entity
+    # named "The Wargals" isn't a substring of a question asking about
+    # "wargal", but its match_key ("wargal") is.
+    if key and key in question_lc:
+        return True
+    # Fuzzy fallback only for single-word names - comparing a whole
+    # question word against a multi-word name (e.g. "Random House
+    # Australia") via SequenceMatcher would almost never score usefully,
+    # and skip anything short enough that near-everything scores high.
+    if " " not in name_lc and len(name_lc) >= 3:
+        return any(
+            difflib.SequenceMatcher(None, word, name_lc).ratio() >= _FUZZY_MATCH_THRESHOLD
+            for word in question_words
+            if word
+        )
+    return False
+
+
+def select_relevant_facts(question: str, facts: list[Fact], root: Path | None = None) -> list[Fact]:
+    """Filters facts down to just the entities a question appears to name,
+    so a book with a large fact catalog doesn't unconditionally dump every
+    fact about every entity into one answer's context (see
+    format_context's own docstring - it deliberately never discards
+    anything on its own; this is a separate, question-aware step that runs
+    before it, in cli.py's chat loop). Real motivation: a book's assembled
+    context can run to tens of thousands of tokens by its later chapters,
+    several times the default local model's context window - so this also
+    keeps typical context size roughly independent of book length, not
+    just book-length-proportional.
+
+    Matching is intentionally cheap and dependency-free, not real
+    semantic/embedding search (see README's Future ideas for that): a
+    case-insensitive substring check against each candidate entity's
+    canonical name and aliases, `extract.resolve.match_key` normalization
+    (so a question about "Wargal" matches an entity named "Wargals"/"The
+    Wargals"), and a `difflib.SequenceMatcher` fuzzy check as a last
+    resort for single-word names. If NO entity in `facts` matches at all -
+    a general/topical question naming no specific entity - every fact is
+    returned unchanged, the same as if this function didn't exist."""
+    if not facts:
+        return facts
+
+    entities_by_id = {e["entity_id"]: e for e in load_entities(root)["entities"]}
+    question_lc = question.lower()
+    question_words = [w.strip(".,!?;:\"'()") for w in question_lc.split()]
+
+    matched_entity_ids: set[str] = set()
+    for entity_id in {f.entity_id for f in facts}:
+        entity = entities_by_id.get(entity_id)
+        candidate_names = [entity["canonical_name"], *entity["aliases"]] if entity else [entity_id]
+        if any(_name_matches_question(name, question_lc, question_words) for name in candidate_names):
+            matched_entity_ids.add(entity_id)
+
+    if not matched_entity_ids:
+        return facts
+    return [f for f in facts if f.entity_id in matched_entity_ids]
 
 
 def format_context(facts: list[Fact], root: Path | None = None) -> str:

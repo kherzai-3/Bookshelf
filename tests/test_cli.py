@@ -313,6 +313,46 @@ def test_chat_single_question_with_fake_provider(
     assert "[fake answer] Based on:" in capsys.readouterr().out
 
 
+def test_chat_interactive_session_recomputes_context_per_question(
+    tmp_path: Path, _library_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real behavior change: context used to be built once before the
+    interactive loop even started asking for a question, so every question
+    in a session saw the identical fixed blob. Retrieval is now
+    question-dependent (query.select_relevant_facts), so two questions
+    naming different entities must see different context."""
+    epub_path = tmp_path / "sample.epub"
+    build_narrative_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    main(["extract", book_dir.name, "--provider", "fake"])
+
+    seen_contexts: list[str] = []
+
+    class _RecordingProvider:
+        def answer_question(self, question, context, content_type="fiction"):
+            seen_contexts.append(context)
+            return "answer"
+
+    monkeypatch.setattr("bookrag.cli.get_provider", lambda name=None, model=None: _RecordingProvider())
+
+    questions = iter(["Tell me about Will", "Tell me about Halt"])
+
+    def fake_input(_prompt: str) -> str:
+        try:
+            return next(questions)
+        except StopIteration:
+            raise EOFError from None
+
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    exit_code = main(["chat", book_dir.name, "--chapter", "1"])
+
+    assert exit_code == 0
+    assert len(seen_contexts) == 2
+    assert seen_contexts[0] != seen_contexts[1]
+
+
 def test_chat_passes_content_type_from_metadata_to_answer_question(
     tmp_path: Path, _library_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

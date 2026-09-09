@@ -1,9 +1,10 @@
 from pathlib import Path
 
 from bookrag.extract.pipeline import extract_book
+from bookrag.extract.resolve import save_entities
 from bookrag.ingest.chapter import Chapter
 from bookrag.providers.fake_provider import FakeProvider
-from bookrag.query import Fact, facts_as_of, format_context
+from bookrag.query import Fact, facts_as_of, format_context, select_relevant_facts
 from bookrag.storage import save_book
 from tests.helpers import NARRATIVE_PADDING
 
@@ -154,3 +155,96 @@ def test_format_context_keeps_separate_entities_in_separate_blocks(tmp_path: Pat
         "  description:\n"
         "    [ch 2] a grizzled ranger"
     )
+
+
+def _seed_entities(root: Path, entities: list[dict]) -> None:
+    save_entities({"entities": entities}, root)
+
+
+def test_select_relevant_facts_filters_to_the_named_entity(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    _seed_entities(
+        root,
+        [
+            {"entity_id": "character-halt", "canonical_name": "Halt", "type": "character", "aliases": [], "book_ids": []},
+            {"entity_id": "character-will", "canonical_name": "Will", "type": "character", "aliases": [], "book_ids": []},
+        ],
+    )
+    facts = [
+        Fact(book_id="b", entity_id="character-halt", chapter_index=0, category="appearance", statement="wears a grey cloak"),
+        Fact(book_id="b", entity_id="character-will", chapter_index=0, category="status", statement="is an apprentice"),
+    ]
+
+    relevant = select_relevant_facts("What does Halt look like?", facts, root=root)
+
+    assert [f.entity_id for f in relevant] == ["character-halt"]
+
+
+def test_select_relevant_facts_matches_plural_variant_via_match_key(tmp_path: Path) -> None:
+    """Real motivating case: asking about "Wargal" (singular) must still
+    find facts filed under the entity actually named "Wargals" (plural) -
+    the exact complaint that motivated building this at all."""
+    root = tmp_path / "library"
+    _seed_entities(
+        root,
+        [{"entity_id": "setting-wargals", "canonical_name": "Wargals", "type": "setting", "aliases": [], "book_ids": []}],
+    )
+    facts = [Fact(book_id="b", entity_id="setting-wargals", chapter_index=0, category="description", statement="fearsome raiders")]
+
+    relevant = select_relevant_facts("Tell me about the Wargal", facts, root=root)
+
+    assert [f.entity_id for f in relevant] == ["setting-wargals"]
+
+
+def test_select_relevant_facts_matches_an_alias(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    _seed_entities(
+        root,
+        [
+            {
+                "entity_id": "character-wargals",
+                "canonical_name": "Wargals",
+                "type": "character",
+                "aliases": ["The Wargals"],
+                "book_ids": [],
+            }
+        ],
+    )
+    facts = [Fact(book_id="b", entity_id="character-wargals", chapter_index=0, category="description", statement="fearsome raiders")]
+
+    relevant = select_relevant_facts("What are The Wargals?", facts, root=root)
+
+    assert [f.entity_id for f in relevant] == ["character-wargals"]
+
+
+def test_select_relevant_facts_is_case_insensitive(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    _seed_entities(root, [{"entity_id": "character-halt", "canonical_name": "Halt", "type": "character", "aliases": [], "book_ids": []}])
+    facts = [Fact(book_id="b", entity_id="character-halt", chapter_index=0, category="appearance", statement="wears a grey cloak")]
+
+    relevant = select_relevant_facts("what does HALT look like", facts, root=root)
+
+    assert [f.entity_id for f in relevant] == ["character-halt"]
+
+
+def test_select_relevant_facts_falls_back_to_everything_when_nothing_matches(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    _seed_entities(
+        root,
+        [
+            {"entity_id": "character-halt", "canonical_name": "Halt", "type": "character", "aliases": [], "book_ids": []},
+            {"entity_id": "character-will", "canonical_name": "Will", "type": "character", "aliases": [], "book_ids": []},
+        ],
+    )
+    facts = [
+        Fact(book_id="b", entity_id="character-halt", chapter_index=0, category="appearance", statement="wears a grey cloak"),
+        Fact(book_id="b", entity_id="character-will", chapter_index=0, category="status", statement="is an apprentice"),
+    ]
+
+    relevant = select_relevant_facts("What has happened so far in the story?", facts, root=root)
+
+    assert relevant == facts
+
+
+def test_select_relevant_facts_of_no_facts_is_empty(tmp_path: Path) -> None:
+    assert select_relevant_facts("anything", [], root=tmp_path / "library") == []

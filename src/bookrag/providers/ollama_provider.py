@@ -20,7 +20,19 @@ from bookrag.providers.prompts import (
 
 DEFAULT_MODEL = "llama3.2:3b"
 DEFAULT_BASE_URL = "http://localhost:11434"
-DEFAULT_NUM_CTX = 8192
+# Raised from an initial 8192 after a real confirmed overflow: bookrag
+# chat's context (query.format_context) has no size cap of its own by
+# design (see that module's docstring) and grows with the whole book's
+# fact count - a real full-length novel's assembled context measured at
+# ~26,000-30,000 tokens by its final chapters, 3-4x this window, meaning
+# the model was silently never seeing most of what it was asked about.
+# 16384 is still a bounded, deliberate choice, not "big enough for
+# anything" - query.select_relevant_facts (added alongside this) is the
+# real, scalable fix (only relevant facts are sent at all, so context size
+# stops growing with book length); this is a safety-net baseline for
+# whatever still reaches the model after that filtering (e.g. a broad
+# question naming no specific entity, which still gets everything).
+DEFAULT_NUM_CTX = 16384
 # Raised from an initial 300s - the extraction prompt rewrite (dropping the
 # unenforceable "only new/changed" instruction, adding per-category
 # definitions and a worked example) produces far more facts per chapter than
@@ -43,12 +55,12 @@ class OllamaProvider:
         self,
         model: str | None = None,
         base_url: str | None = None,
-        num_ctx: int = DEFAULT_NUM_CTX,
+        num_ctx: int | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
         self._model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
         self._base_url = (base_url or os.environ.get("OLLAMA_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
-        self._num_ctx = num_ctx
+        self._num_ctx = num_ctx or int(os.environ.get("OLLAMA_NUM_CTX", DEFAULT_NUM_CTX))
         self._timeout = timeout
 
     def extract_facts(

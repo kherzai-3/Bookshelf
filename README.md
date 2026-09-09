@@ -272,15 +272,23 @@ bookrag chat <book-id> --chapter 20
 `--chapter` (0-indexed, required) is the reader's current position - facts
 from later chapters are never shown to the answering model, going through
 the same `facts_as_of` primitive that guarantees spoiler-safety everywhere
-else. Facts are grouped by entity and category and tagged with the chapter
+else. Before rendering, facts are filtered to just the entities your
+question actually names (`query.select_relevant_facts` - exact name/alias
+match, then light normalization so "Wargal" finds an entity named
+"Wargals", then a small fuzzy fallback for typos); a question that doesn't
+name anything specific still sees every known fact, same as before this
+existed. This keeps a chat session's context size roughly independent of
+how large the book's fact catalog has grown, not just proportional to it.
+Facts are then grouped by entity and category and tagged with the chapter
 they came from (e.g. `[ch 9] has completed the Choosing Day`) so the model
 has an explicit recency signal when two facts about the same specific
 detail conflict (a status that changes over the course of the book) -
 later chapters are treated as superseding earlier ones for the same detail,
 never as contradictions to arbitrarily pick between. `--provider`/`--model`
 work the same as `extract`. There's no multi-turn memory yet (each question
-in an interactive session is answered independently) and no way to bump
-`--chapter` mid-session - restart with a new `--chapter` value instead.
+in an interactive session is answered independently, though each now gets
+its own freshly-filtered context) and no way to bump `--chapter` mid-session
+- restart with a new `--chapter` value instead.
 
 ### Managing your library
 
@@ -441,16 +449,25 @@ pytest tests/ -v
   fact - the Ollama schema's `enum` prevents this drift structurally going
   forward, but the lenient fallback stays as a net for providers that don't
   schema-constrain.
-- **No fuzzy/semantic matching of entity names - naming-variant duplicates
-  are a real, observed problem, not just a hypothetical one.** A single
-  real extraction run produced separate entities for `Wargal`, `Wargals`,
-  and `The Wargals` (the same creatures, referred to differently across
-  chapters), further split across different `entity_type`s depending on
-  how a given chapter phrased it. `resolve_entity` only does exact,
-  case-insensitive string matching - it has no way to recognize these as
-  the same thing. Consolidating duplicates and adding semantic/similarity
-  search over facts (e.g. finding "the choosing ceremony" when the catalog
-  calls it "the Choosing Day") is planned future work, not yet started.
+- ~~No fuzzy/semantic matching of entity names~~ **Partially resolved.** A
+  real extraction run had produced separate entities for `Wargal`,
+  `Wargals`, and `The Wargals` (the same creatures, referred to differently
+  across chapters), further split across different `entity_type`s depending
+  on how a given chapter phrased it. `resolve_entity` now normalizes a
+  leading "the " and a trailing "s" before comparing (`extract.resolve.match_key`)
+  so simple spelling/plural variants of the *same* `entity_type` unify going
+  forward, and known entities are now given their established type as a
+  prompt hint so a recurring one is less likely to be re-typed differently
+  each chapter. `bookrag doctor` also detects existing duplicate clusters
+  (regardless of type) and `bookrag doctor --merge-duplicates` merges them
+  with confirmation - run once against this project's own real library, it
+  found and cleaned up 12 real clusters, not just the Wargal case that
+  motivated it. What's still not done: real semantic/similarity search (e.g.
+  finding "the choosing ceremony" when the catalog calls it "the Choosing
+  Day") - `bookrag chat`'s `select_relevant_facts` does cheap substring/
+  normalization/fuzzy matching against known entity names (see "Chatting
+  with a book" above), not embedding-based search over fact content; that
+  remains future work (see Future ideas).
 - **Entity resolution is scoped to the whole library, not to a series.**
   `resolve_entity` matches purely on `(name, entity_type)`, with no check
   that the books involved are actually related - intentional for the series
@@ -496,6 +513,21 @@ pytest tests/ -v
   model?), whether `resolve_entity` needs to become model-scoped, and how
   a user picks/overrides the default when they want to see the smaller
   model's version instead. Needs its own planning pass before building.
+- **Real embedding-based semantic search over fact content**, as a
+  successor to `select_relevant_facts`'s current cheap substring/
+  normalization/fuzzy name matching (see "Chatting with a book"). Would
+  handle a genuinely topical or paraphrased question with no name overlap
+  at all (e.g. "who are the antagonists?" or "the choosing ceremony" when
+  the catalog calls it "the Choosing Day"), which name-based matching
+  structurally can't. Likely direction: embed fact statements via Ollama's
+  own embedding-model support (avoiding a heavy new ML dependency) and
+  retrieve top-K by similarity - deliberately deferred rather than built
+  alongside the cheaper fix, since the real, observed problem (a book's
+  full context silently overflowing the model's window) is already solved
+  by the cheaper approach for anything that names a specific entity, and
+  this is a meaningfully bigger lift (an embedding step that needs to stay
+  incremental/resumable alongside extraction, a similarity-search code
+  path, cache invalidation when facts change).
 
 ## For future development sessions (Claude or human)
 

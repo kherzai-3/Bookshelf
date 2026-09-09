@@ -14,7 +14,7 @@ from bookrag.ingest.chapter import Chapter
 from bookrag.ingest.consolidate import consolidate_fragments, should_consolidate
 from bookrag.library import detect_duplicate_entities, list_books, merge_entities, remove_book, run_doctor, show_book
 from bookrag.providers.registry import get_provider
-from bookrag.query import facts_as_of, format_context
+from bookrag.query import facts_as_of, format_context, select_relevant_facts
 from bookrag.storage import incoming_root, library_root, load_chapters, load_metadata, save_book
 from bookrag.titles import guess_title_author
 
@@ -306,9 +306,9 @@ def _chat(args: argparse.Namespace) -> int:
         return 1
 
     facts = facts_as_of(args.book_id, args.chapter)
-    context = format_context(facts)
 
     if args.question is not None:
+        context = format_context(select_relevant_facts(args.question, facts))
         print(provider.answer_question(args.question, context, content_type))
         return 0
 
@@ -324,6 +324,11 @@ def _chat(args: argparse.Namespace) -> int:
             return 0
         if not question:
             continue
+        # Recomputed every question, not once up front - retrieval is
+        # question-dependent (see query.select_relevant_facts), so a fixed
+        # context built before the first question was ever typed can't
+        # reflect it.
+        context = format_context(select_relevant_facts(question, facts))
         print(provider.answer_question(question, context, content_type))
 
 

@@ -1,7 +1,7 @@
 import pytest
 
 from bookrag.providers.fake_provider import FakeProvider
-from bookrag.providers.ollama_provider import OllamaProvider
+from bookrag.providers.ollama_provider import DEFAULT_NUM_CTX, OllamaProvider
 from bookrag.providers.registry import get_provider
 
 
@@ -31,3 +31,19 @@ def test_ollama_falls_back_to_env_var_then_default(monkeypatch: pytest.MonkeyPat
     provider = get_provider("ollama")
 
     assert provider._model == "llama3.1:8b"
+
+
+def test_ollama_num_ctx_defaults_when_no_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
+
+    provider = OllamaProvider()
+
+    assert provider._num_ctx == DEFAULT_NUM_CTX
+
+
+def test_ollama_num_ctx_falls_back_to_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "32768")
+
+    provider = OllamaProvider()
+
+    assert provider._num_ctx == 32768

@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/ollama_provider.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 736257b75cd01f0d2697486508823c14b089859e
+source_hash: cb9d7e4fd43982f7ec4e3cd51c101f7bdbe7199e
 ---
 
 ## Purpose
@@ -11,13 +11,16 @@ practical default for this project, since it requires no
 real, locally-running `llama3.2:3b` model.
 
 ## Public Interface
-- `OllamaProvider(model=None, base_url=None, num_ctx=DEFAULT_NUM_CTX,
+- `OllamaProvider(model=None, base_url=None, num_ctx=None,
   timeout=DEFAULT_TIMEOUT_SECONDS)` — `model` resolves as `model or
   $OLLAMA_MODEL or DEFAULT_MODEL` ("llama3.2:3b"); `base_url` similarly via
-  `$OLLAMA_BASE_URL` then `"http://localhost:11434"`. `DEFAULT_NUM_CTX = 8192`,
-  `DEFAULT_TIMEOUT_SECONDS = 900`. The env-var path is what makes switching
-  to a bigger model on a different (e.g. GPU-equipped) machine a one-line
-  `.env` change rather than a code edit - see README's "LLM provider setup".
+  `$OLLAMA_BASE_URL` then `"http://localhost:11434"`; `num_ctx` the same
+  way via `$OLLAMA_NUM_CTX` then `DEFAULT_NUM_CTX` (16384 - see Key
+  Decisions for why this was raised from 8192). `DEFAULT_TIMEOUT_SECONDS =
+  900`. The env-var path is what makes switching to a bigger model (or a
+  bigger context window) on a different (e.g. GPU-equipped) machine a
+  one-line `.env` change rather than a code edit - see README's "LLM
+  provider setup".
 - `OllamaProvider.extract_facts(chapter_text, known_entities, content_type="fiction",
   known_entity_types=None) -> list[ExtractedFact]` — raises `RuntimeError` (not `ExtractionParseError`)
   if Ollama itself isn't reachable, doesn't respond within `timeout`, or a
@@ -50,9 +53,22 @@ real, locally-running `llama3.2:3b` model.
   JSON, not this schema - `parsing.parse_facts` still unwraps dict-wrapped
   lists leniently as a fallback for providers/paths that don't schema-
   constrain (Anthropic, Fake, or Ollama's `answer_question` path).
-- Sends `"options": {"num_ctx": 8192}` - raised from Ollama's default 4096
-  tokens, which a long chapter (real chapters up to ~3865 words, roughly
-  5000+ tokens with prompt overhead) can exceed.
+- Sends `"options": {"num_ctx": self._num_ctx}` (default 16384, was 8192
+  until a second, larger overflow was found and fixed): the *original*
+  8192 was itself already raised from Ollama's default 4096, which a long
+  chapter (real chapters up to ~3865 words, roughly 5000+ tokens with
+  prompt overhead) can exceed - that reasoning covers `extract_facts`'
+  single-chapter calls. But `answer_question` sends a very differently-
+  sized payload - `query.format_context`'s *entire* assembled context for
+  the book so far, which has no size cap of its own by design (see that
+  module's docstring) - and a real full-length novel's context measured at
+  ~26,000-30,000 tokens by its final chapters, 3-4x even the 8192 window,
+  meaning `bookrag chat` was silently overflowing on every call for a book
+  that size. `query.select_relevant_facts` (added alongside this) is the
+  real, scalable fix - only relevant facts are sent at all, keeping
+  context size roughly independent of book length - `num_ctx` is a safety
+  net for whatever still reaches the model after that filtering (e.g. a
+  broad question naming no specific entity, which still gets everything).
 - Sends `"temperature": DEFAULT_EXTRACTION_TEMPERATURE` (0.2) for
   `extract_facts` only - lower than Ollama's own default (~0.8), since
   extraction is a structured task that benefits from more deterministic
