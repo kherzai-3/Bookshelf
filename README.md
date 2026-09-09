@@ -494,6 +494,17 @@ pytest tests/ -v
   provider/model as the interrupted one, and it isn't a multi-version
   system (running a bigger model later without discarding a smaller
   model's results - see Future ideas).
+- **`bookrag chat`'s recency-conflict rule can conflate two different real
+  events, not just an updated status for the same one.** Real observed
+  case: asked "what happened to Halt during the fight with the Kalkara?" (a
+  real ch.33-36 event), the answer pulled in an unrelated ch.66 fact
+  ("killed in the attempt to stop the Skandians" - a separate battle
+  entirely) and concluded Halt died fighting the Kalkara, which isn't what
+  happened. `ANSWER_SYSTEM_PROMPT`'s instruction to trust the LATER chapter
+  when two same-category facts about the same entity conflict has no way
+  to distinguish an actual status update from two unrelated occurrences
+  that just happen to share a category and entity. Not yet investigated or
+  fixed.
 
 ## Future ideas (need a planning pass before building)
 
