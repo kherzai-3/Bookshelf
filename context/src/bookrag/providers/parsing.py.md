@@ -222,3 +222,40 @@ schema can't drift from what this file's own normalization actually accepts.
   Normalizing "fifteen years earlier" would invent precision the source
   doesn't have, and a later chapter's more precise phrasing would leak that
   precision to an earlier reader.
+
+## Measured: `maxItems` and story-time cost (2026-09-11, real Ollama run)
+
+Eight real `qwen2.5:7b-instruct` calls on
+`ranger-s-apprentice-1-2-bindup` chapters 4/11/34/66, each run twice - once
+against the current schema, once against the same schema with `when` and
+`time_phrase` stripped back out - to answer whether two extra fields per fact
+grow output enough to matter before committing to a ~4h re-extraction.
+
+- **No systematic output-size increase.** Two chapters grew, two shrank
+  (868->1173, 2388->635, 2236->858, 681->2038 output tokens). Run-to-run
+  sampling variance at temperature 0.2 dominates the field cost completely.
+  Deliberately *not* recorded as "cheaper": n=4 per variant over a bimodal
+  distribution supports no direction at all.
+- **Worst observed output was 2,388 tokens**, against the 8,490+ of the
+  runaway incident `maxItems` was added for. Nothing ran away; termination is
+  structurally guaranteed regardless.
+- `when` classified chapter 4 - the confirmed production bug, `King Duncan, a
+  youth in his twenties, was newly crowned when Morgarath rebelled` - as
+  `past=13, present=4` with 13 time phrases, while a present-action chapter
+  came back `present=15` with zero phrases. The optional-`time_phrase`
+  decision above holds up empirically: it is used where backstory is dense and
+  left empty otherwise.
+
+**Incidental finding worth keeping: fact volume scales with the
+`known_entities` list, not just chapter length.** The harness handed every
+chapter the *final* 148-entity list, and 3 of 8 calls returned exactly 40
+facts (the cap). In the real stored library only 1 of 68 chapters did - #64,
+near the end of the book, where the entity list is genuinely largest. So the
+cap binds in the late-book tail rather than uniformly, and any future
+re-measurement must pass an as-of-that-chapter entity list or it will
+overstate both cost and cap pressure.
+
+**Open question**: whether `maxItems = 40` should rise. It is currently both
+the runaway guard and, for late chapters, a content limiter - raising it
+trades one against the other over a 4-hour run, so it is a deliberate
+decision, not a tuning knob to nudge.
