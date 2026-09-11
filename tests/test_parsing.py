@@ -2,11 +2,11 @@ import pytest
 
 from bookrag.providers.base import ExtractionParseError
 from bookrag.providers.parsing import (
-    ALLOWED_WHEN,
     ALLOWED_CATEGORIES,
     ALLOWED_CATEGORIES_NONFICTION,
     ALLOWED_ENTITY_TYPES,
     ALLOWED_ENTITY_TYPES_NONFICTION,
+    ALLOWED_WHEN,
     extraction_response_schema,
     parse_facts,
 )
