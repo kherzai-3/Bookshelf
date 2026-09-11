@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 14cda1b247171ea0fa54caae7330b9fa279234ec
+source_hash: 9834d3e0e6909f8561dcf481bff08e0c25ff6505
 ---
 
 ## Purpose

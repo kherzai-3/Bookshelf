@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/pipeline.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: f28240f1b8f62f231e3b5b9f098431c1be51ff50
+source_hash: beed4c5bd050610c3b5aa74f2118afcd04a8b441
 ---
 
 ## Purpose
@@ -228,3 +228,28 @@ isolation (7.9s, not a hang) after the file appeared frozen.
   `content_type="nonfiction"`, confirming the same quality/throughput
   characteristics observed for fiction hold here too (`MIN_NARRATIVE_WORDS`/
   `maxItems`/the timeout are genre-agnostic and needed no changes).
+
+## Per-chapter durability of entities.json (added after real data loss)
+`save_entities` now runs **inside** the chapter loop, in lockstep with
+`facts.jsonl`'s flush, not only in the closing `finally`. The three
+per-chapter writes have a deliberate order - facts flush, then entities save,
+then `extraction_progress.json` - so that a death between any two of them
+costs at most a re-processed chapter rather than leaving a chapter marked done
+whose data was never persisted.
+
+Why it changed: the `finally` is honoured by an exception unwinding, but not
+by an abrupt kill. A real run terminated mid-chapter left **38 facts
+(chapters 4-10 of `ranger-s-apprentice-1-2-bindup`) referencing entity_ids
+that were never written to the registry.** The damage is permanent and
+asymmetric:
+- A fact record stores only `entity_id`; the name lived solely in
+  `entities.json`. Nothing can recover it.
+- Some of those entities were later re-created under *fresh* ids when a later
+  chapter mentioned them again (Castle Redmont, Master Chubb) - so one real
+  entity is split across two ids, with its early facts unreachable by
+  entity-name retrieval.
+- Others (Lady Pauline, Nigel, Ulf) were never re-created at all; their facts
+  render as a raw `character-5049ebd0` and are invisible to the name matcher.
+
+`library.run_doctor` detects this state (`unnamed_fact_refs`) but deliberately
+never repairs it - see that file's context doc.

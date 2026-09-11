@@ -217,11 +217,33 @@ def extract_book(
                 # default. Without this, facts.jsonl and any progress
                 # output look frozen even while genuinely making progress.
                 f.flush()
+                # Saved every chapter, in lockstep with the facts flush above,
+                # because the three files have to stay consistent with each
+                # other or the library is left corrupt. This used to run only
+                # in the `finally` below, which a clean exception path honours
+                # but an abrupt kill does not - and that is not hypothetical:
+                # a real run killed mid-chapter left 38 facts in facts.jsonl
+                # (chapters 4-10) pointing at entity_ids that were never
+                # written to entities.json. Those facts are unrecoverable,
+                # because a fact record stores only the entity_id and the name
+                # lived solely in the registry: some entities were silently
+                # re-created under fresh ids later in the same book (the same
+                # character split across two ids, half its facts unreachable
+                # by name), and others simply render as a raw
+                # "character-5049ebd0" forever. Rewriting an ~80KB registry
+                # per chapter is nothing next to the minutes of inference each
+                # chapter already costs.
+                save_entities(entities, root)
                 # Written after every chapter (not just at the end) for the
                 # same durability reason as the flush above - whatever
                 # interrupts this run (Ctrl+C, a dropped connection, a
                 # crash), the next call resumes right after the last
                 # chapter that actually finished, never re-processing it.
+                # Deliberately written LAST: if the process dies between the
+                # writes above and this one, the worst case is re-processing
+                # one chapter, whose facts are then deduplicated by entity
+                # resolution. The reverse order would advance past a chapter
+                # whose facts were never persisted.
                 progress_path.write_text(
                     json.dumps({"chapter_count": len(chapters), "next_chapter_index": chapter.index + 1}),
                     encoding="utf-8",
@@ -229,9 +251,8 @@ def extract_book(
                 if on_chapter_done is not None:
                     on_chapter_done(position, len(chapters))
     finally:
-        # Persist whatever entities were resolved even if the loop above
-        # aborts partway (a non-ExtractionParseError failure) - partial
-        # progress shouldn't silently vanish.
+        # Still here for the clean-exception path (a provider going away
+        # mid-chapter), which unwinds before the per-chapter save above runs.
         save_entities(entities, root)
 
     return ExtractionResult(

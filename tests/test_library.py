@@ -394,3 +394,49 @@ def test_merge_entities_raises_when_keep_is_not_in_the_group(tmp_path: Path) -> 
 
     with pytest.raises(ValueError):
         merge_entities(["character-a", "character-b"], keep="character-c", root=root)
+
+
+def test_run_doctor_reports_a_fact_pointing_at_an_unregistered_entity(tmp_path: Path) -> None:
+    """The inverse of the orphaned-entity check, and the damaging direction.
+    A real run killed mid-chapter left 38 facts (chapters 4-10 of a real book)
+    referencing entity_ids that were never written to entities.json, because
+    facts flushed per chapter while the registry only saved at the end. Those
+    facts render as a raw id and are unreachable by entity-name retrieval."""
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Fantasy Book")
+    save_entities(
+        {"entities": [{"entity_id": "character-known", "canonical_name": "Halt", "type": "character", "aliases": [], "book_ids": [book_id]}]},
+        root,
+    )
+    _write_facts(
+        root,
+        book_id,
+        [
+            {"entity_id": "character-known", "chapter_index": 0, "category": "appearance", "statement": "wears a grey cloak"},
+            {"entity_id": "character-lost", "chapter_index": 4, "category": "appearance", "statement": "Lady Pauline was slim and grey-haired"},
+        ],
+    )
+
+    report = run_doctor(root=root)
+
+    assert report.unnamed_fact_refs == [(book_id, "character-lost")]
+
+
+def test_doctor_fix_never_deletes_facts_with_an_unregistered_entity(tmp_path: Path) -> None:
+    """--fix must leave these alone. The name is unrecoverable (a fact stores
+    only the entity_id), so deleting is destroying real content to satisfy a
+    consistency check - re-extraction is the only honest repair."""
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Fantasy Book")
+    save_entities({"entities": []}, root)
+    _write_facts(
+        root,
+        book_id,
+        [{"entity_id": "character-lost", "chapter_index": 4, "category": "appearance", "statement": "Lady Pauline was slim"}],
+    )
+
+    report = run_doctor(root=root, fix=True)
+
+    assert report.unnamed_fact_refs == [(book_id, "character-lost")]
+    surviving = (root / book_id / "facts.jsonl").read_text(encoding="utf-8")
+    assert "Lady Pauline" in surviving

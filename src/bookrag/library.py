@@ -316,6 +316,15 @@ class DoctorReport:
     stale_entity_book_refs: list[tuple[str, str]]  # (entity_id, book_id) book_id no longer exists
     orphaned_entities: list[str]  # entity_id: zero facts reference it in any book that still exists
     duplicate_entity_groups: list[list[DuplicateEntity]]  # entities that look like the same real thing
+    # (book_id, entity_id) for facts pointing at an entity the registry has no
+    # record of - the exact inverse of orphaned_entities, and the damaging
+    # direction. An orphaned entity is a harmless empty row; a dangling fact
+    # reference is real content that renders as a raw id and is invisible to
+    # entity-name retrieval. Never auto-repaired: the name is unrecoverable
+    # (a fact stores only the entity_id), so the only honest fixes are
+    # re-extracting those chapters or accepting the loss - both the user's
+    # call, not a cleanup pass's.
+    unnamed_fact_refs: list[tuple[str, str]]
     fixed: bool = False
 
 
@@ -345,8 +354,17 @@ def run_doctor(root: Path | None = None, fix: bool = False) -> DoctorReport:
 
     duplicate_groups = _duplicate_clusters(entities, root)
 
+    known_entity_ids = {e["entity_id"] for e in entities["entities"]}
+    unnamed_fact_refs = sorted(
+        (bid, entity_id)
+        for bid, referenced in referenced_by_book.items()
+        for entity_id in referenced - known_entity_ids
+    )
+
     if not fix:
-        return DoctorReport(orphaned_index_entries, stale_refs, orphaned_entities, duplicate_groups, fixed=False)
+        return DoctorReport(
+            orphaned_index_entries, stale_refs, orphaned_entities, duplicate_groups, unnamed_fact_refs, fixed=False
+        )
 
     for book_id in orphaned_index_entries:
         remove_from_index(book_id, root)
@@ -360,4 +378,6 @@ def run_doctor(root: Path | None = None, fix: bool = False) -> DoctorReport:
     entities["entities"] = kept
     save_entities(entities, root)
 
-    return DoctorReport(orphaned_index_entries, stale_refs, orphaned_entities, duplicate_groups, fixed=True)
+    return DoctorReport(
+        orphaned_index_entries, stale_refs, orphaned_entities, duplicate_groups, unnamed_fact_refs, fixed=True
+    )

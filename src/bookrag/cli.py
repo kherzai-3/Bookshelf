@@ -456,6 +456,7 @@ def _doctor(args: argparse.Namespace) -> int:
         and not report.stale_entity_book_refs
         and not report.orphaned_entities
         and not report.duplicate_entity_groups
+        and not report.unnamed_fact_refs
     )
     if nothing_found:
         print("Library is consistent - no issues found.")
@@ -476,6 +477,17 @@ def _doctor(args: argparse.Namespace) -> int:
         print(f"{n} orphaned entit{'y' if n == 1 else 'ies'} (zero facts reference them in any existing book):")
         for entity_id in report.orphaned_entities:
             print(f"  - {entity_id}")
+    if report.unnamed_fact_refs:
+        n = len(report.unnamed_fact_refs)
+        print(f"{n} entity reference(s) in facts that the registry has no record of:")
+        for book_id, entity_id in report.unnamed_fact_refs:
+            print(f"  - {entity_id} (in {book_id})")
+        print(
+            "  These facts are real content, but they render as a raw id and can't be found\n"
+            "  by name. The name is unrecoverable - a fact stores only the entity_id - so\n"
+            "  --fix deliberately leaves them alone. Re-extracting the affected chapters is\n"
+            "  the only way to restore them."
+        )
     if report.duplicate_entity_groups:
         n = len(report.duplicate_entity_groups)
         print(f"{n} possible duplicate entity cluster(s) (same name, resolved as separate entities):")

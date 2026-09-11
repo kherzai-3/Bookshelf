@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from bookrag.extract.pipeline import MIN_NARRATIVE_WORDS, extract_book, resume_start_index
+from bookrag.extract.resolve import load_entities
 from bookrag.ingest.chapter import Chapter
 from bookrag.providers.base import ExtractedFact, ExtractionParseError
 from bookrag.providers.fake_provider import FakeProvider
@@ -598,3 +599,32 @@ def test_resume_start_index_restart_forces_zero_even_with_saved_progress(tmp_pat
     )
 
     assert resume_start_index(book_id, root=root, restart=True) == 0
+
+
+def test_extract_persists_entities_after_every_chapter(tmp_path: Path) -> None:
+    """facts.jsonl flushes per chapter, so entities.json has to as well, or an
+    abrupt kill strands facts pointing at ids the registry never recorded.
+    This is not hypothetical: a real run killed mid-chapter left 38 facts
+    referencing entities that were lost, because saving only happened in a
+    `finally` that a hard kill never reaches. Some of those entities were
+    later re-created under fresh ids (one character split across two, half its
+    facts unreachable by name); others render as a raw id permanently."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [
+        Chapter(0, "One", f"Ishmael arrived. {NARRATIVE_PADDING}"),
+        Chapter(1, "Two", f"Ahab appeared. {NARRATIVE_PADDING}"),
+    ]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+
+    entities_seen: list[int] = []
+    extract_book(
+        book_id,
+        FakeProvider(),
+        root=root,
+        on_chapter_done=lambda done, total: entities_seen.append(len(load_entities(root)["entities"])),
+    )
+
+    # Registered before the run finished, not only once it completed.
+    assert entities_seen[0] > 0

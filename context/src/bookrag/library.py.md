@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/library.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: a32bbd2e7828db01687007b3bd7e4c2a627352da
+source_hash: 5f09854ed384bd606197b077ad69b52ffcf7bb73
 ---
 
 ## Purpose
@@ -149,3 +149,20 @@ module's functions.
   entities silently sharing one `entity_id`); it only checks whether an
   entity has zero facts anywhere, which a collided entity would still pass.
   No real collision has been observed in the current library.
+
+## `unnamed_fact_refs` - facts pointing at an unregistered entity
+The inverse of `orphaned_entities`, and the damaging direction of the same
+inconsistency. An orphaned entity is a harmless empty registry row; a fact
+referencing an entity the registry has no record of is **real content that
+renders as a raw id and cannot be found by name**.
+
+`--fix` deliberately leaves these alone, unlike the three checks it does
+repair. The name is unrecoverable (a fact stores only the `entity_id`), so the
+only honest repairs are re-extracting the affected chapters or accepting the
+loss - both the user's call, not a cleanup pass's. Deleting the facts would be
+destroying real content to satisfy a consistency check.
+
+Found on the project's own library: 14 ids covering 38 facts, all from
+chapters 4-10, caused by `extract/pipeline.py` saving the registry only in a
+`finally` that an abrupt kill never reached (fixed there; see that context
+doc).
