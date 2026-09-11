@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/query.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: b9fe128b4b4f3e0ed6bbd0032e5e6d916bb47fba
+source_hash: 49dd36059f8fcbca97c40556ddc281403d64663d
 ---
 
 ## Purpose
@@ -19,11 +19,17 @@ plain-text context `cli.py`'s `chat` command hands to a provider's
   -> list[Fact]` — never returns a fact past `(book_id, chapter_index)` in
   series reading order.
 - `select_relevant_facts(question: str, facts: list[Fact], root: Path |
-  None = None) -> list[Fact]` — filters to just the entities a question
-  appears to name (see Key Decisions for the matching approach and why);
-  returns every fact unchanged if nothing matches at all. Meant to run
-  between `facts_as_of` and `format_context`, not as a replacement for
-  either.
+  None = None) -> list[Fact]` — three tiers, each a fallback for the one
+  before: (1) filter to the entities the question names (see Key Decisions);
+  (2) if it names none, `_facts_matching_question_text` matches the
+  question's distinctive words against the *statements*; (3) if that also
+  finds nothing, return every fact unchanged, preserving the original
+  guarantee. Runs between `facts_as_of` and `format_context`.
+- `_facts_matching_question_text(question, facts) -> list[Fact]` /
+  `_content_words(text) -> set[str]` / `_MAX_STATEMENT_MATCHES = 80` — the
+  statement-matching tier. Words appearing in more than a tenth of the
+  statements are treated as carrying no topical signal; the rest are scored
+  by rarity (`1/document_frequency`), ranked, and capped.
 - `format_context(facts: list[Fact], root: Path | None = None,
   content_type: str = "fiction") -> str` — groups facts by entity, and
   within an entity splits them into the two kinds that must be *read*
@@ -74,12 +80,14 @@ plain-text context `cli.py`'s `chat` command hands to a provider's
   entity's facts fixes this by construction (far less content sent), not
   just the "can't find it by exact string" complaint that originally
   motivated it.
-- **No-match falls back to every fact, unfiltered** - a general/topical
-  question naming no specific entity (e.g. "what has happened so far?")
-  must not be wrongly narrowed to nothing. This means a sufficiently broad
-  question can still overflow a small context window - `OllamaProvider`'s
-  raised `DEFAULT_NUM_CTX` (16384) is the safety net for exactly this
-  remaining case, not a full fix on its own.
+- **No-match ultimately falls back to every fact, unfiltered** - a
+  general/topical question naming no specific entity (e.g. "what has happened
+  so far?") must not be wrongly narrowed to nothing. Statement matching (see
+  below) now sits *between* entity matching and this fallback, so the
+  whole-book dump is reached far less often, but it remains the last tier and
+  a sufficiently broad question can still overflow a small context window -
+  `OllamaProvider`'s raised `DEFAULT_NUM_CTX` (16384) is the safety net for
+  that remaining case, not a full fix on its own.
 - Verified against real Ollama output, not just unit tests: after this and
   the entity-deduplication work (`library.merge_entities`, run once
   against the real library), "What does Halt look like?" changed from
@@ -122,3 +130,32 @@ plain-text context `cli.py`'s `chat` command hands to a provider's
 - Internal: `bookrag.storage` (`library_root`, `series_reading_order`),
   `bookrag.extract.resolve` (`load_entities`, `match_key`)
 - External: `difflib` (stdlib) for `select_relevant_facts`'s fuzzy fallback
+
+## Statement matching (the third retrieval tier)
+- **Why it exists: entity-name matching only closed half the overflow bug.**
+  `select_relevant_facts` originally matched entity names and, failing that,
+  returned everything. On the real 1248-fact library, 3 of 6 realistic
+  questions took that fallback - and the resulting context measured ~34,500
+  tokens against a 16,384 `num_ctx`, i.e. **2.1x over, silently truncated.**
+  Questions naming an event rather than a cataloged entity ("what happened at
+  the choosing ceremony?", "the battle at Hackham Heath") are the common
+  shape that misses. Statement matching converts those from a truncated
+  whole-book dump into a tight subset (measured 8 and 40 facts respectively).
+- **Rarity is computed over the passed-in `facts`, never the whole book.**
+  Not an optimization - a word's rarity derived from chapters the reader
+  hasn't reached is a value computed from hidden data, and deriving anything
+  from the unfiltered set is how a filter leaks what it removed. Since the
+  caller only ever passes an already-spoiler-filtered list, computing here is
+  correct by construction.
+- **Ranked and capped, not gated on a hit count.** Requiring two shared rare
+  words was tried first and failed on a real question: a reader says "choosing
+  ceremony", the book says "Choosing Day" - one word in common, so a hit-count
+  rule discarded precisely the topic it was meant to find. Scoring tolerates
+  the phrasing mismatch, and `_MAX_STATEMENT_MATCHES` does the bounding the
+  hit count was really there for. Note the cap only engages on large
+  libraries: a word must appear 80+ times while staying under the one-in-ten
+  ceiling, so it needs 800+ facts to bite.
+- **Deliberately still not semantic search.** A question with no lexical
+  overlap at all ("who are the antagonists?") still falls through to the
+  whole-book fallback - correctly, since guessing would be worse. That case
+  is what the deferred embedding work in README's Future ideas is for.

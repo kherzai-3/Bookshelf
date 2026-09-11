@@ -4,7 +4,7 @@ from bookrag.extract.pipeline import extract_book
 from bookrag.extract.resolve import save_entities
 from bookrag.ingest.chapter import Chapter
 from bookrag.providers.fake_provider import FakeProvider
-from bookrag.query import Fact, facts_as_of, format_context, select_relevant_facts
+from bookrag.query import _MAX_STATEMENT_MATCHES, Fact, facts_as_of, format_context, select_relevant_facts
 from bookrag.storage import save_book
 from tests.helpers import NARRATIVE_PADDING
 
@@ -302,3 +302,74 @@ def test_select_relevant_facts_falls_back_to_everything_when_nothing_matches(tmp
 
 def test_select_relevant_facts_of_no_facts_is_empty(tmp_path: Path) -> None:
     assert select_relevant_facts("anything", [], root=tmp_path / "library") == []
+
+
+def test_select_relevant_facts_matches_statement_text_when_no_entity_is_named(tmp_path: Path) -> None:
+    """A question can name an event rather than a cataloged entity ("what
+    happened at the choosing ceremony?"). Entity-name matching alone returned
+    the whole book for those - measured at 2.1x the model's context window on
+    a real library, i.e. silently truncated."""
+    root = tmp_path / "library"
+    _seed_entities(root, [{"entity_id": "character-will", "canonical_name": "Will", "type": "character", "aliases": [], "book_ids": []}])
+    facts = [
+        Fact(book_id="b", entity_id="character-will", chapter_index=6, category="status", statement="was nervous about the Choosing Day"),
+        Fact(book_id="b", entity_id="character-will", chapter_index=2, category="development", statement="climbed the kitchen wall"),
+        Fact(book_id="b", entity_id="character-will", chapter_index=3, category="development", statement="ate breakfast in the hall"),
+    ]
+
+    relevant = select_relevant_facts("What happened at the choosing ceremony?", facts, root=root)
+
+    assert [f.chapter_index for f in relevant] == [6]
+
+
+def test_statement_matching_tolerates_a_reader_phrasing_that_is_not_the_books(tmp_path: Path) -> None:
+    """The reason matches are ranked rather than gated on a hit count: a reader
+    says "choosing ceremony", the book says "Choosing Day". They share exactly
+    one word, so requiring two shared words discarded the right answer."""
+    root = tmp_path / "library"
+    _seed_entities(root, [])
+    facts = [
+        Fact(book_id="b", entity_id="e1", chapter_index=5, category="description", statement="Choosing Day decides each ward's craft"),
+        Fact(book_id="b", entity_id="e1", chapter_index=8, category="description", statement="the harvest was gathered"),
+    ]
+
+    relevant = select_relevant_facts("what happened at the choosing ceremony", facts, root=root)
+
+    assert [f.chapter_index for f in relevant] == [5]
+
+
+def test_statement_matching_ignores_words_common_across_the_book(tmp_path: Path) -> None:
+    """A word appearing in most statements carries no topical signal, so it
+    must not drag in the whole book - that is the failure this replaces."""
+    root = tmp_path / "library"
+    _seed_entities(root, [])
+    facts = [
+        Fact(book_id="b", entity_id="e1", chapter_index=i, category="description", statement=f"the castle stood quiet on day {i}")
+        for i in range(12)
+    ]
+
+    relevant = select_relevant_facts("tell me about the castle", facts, root=root)
+
+    assert relevant == facts  # no distinctive word -> unchanged fallback, not a partial guess
+
+
+def test_statement_matching_is_capped(tmp_path: Path) -> None:
+    """The cap is what actually bounds context on the fallback path. Note the
+    corpus has to be large for the cap to be reachable at all: a word must
+    appear often enough to beat the cap while still landing under the
+    one-in-ten rarity ceiling, so exceeding 80 matches needs 800+ facts."""
+    root = tmp_path / "library"
+    _seed_entities(root, [])
+    matching = [
+        Fact(book_id="b", entity_id="e1", chapter_index=i, category="description", statement=f"a Kalkara stalked the ridge {i}")
+        for i in range(90)
+    ]
+    filler = [
+        Fact(book_id="b", entity_id="e2", chapter_index=i, category="description", statement=f"the harvest was gathered in village {i}")
+        for i in range(910)
+    ]
+
+    relevant = select_relevant_facts("what happened with the Kalkara", matching + filler, root=root)
+
+    assert len(relevant) == _MAX_STATEMENT_MATCHES
+    assert all("Kalkara" in f.statement for f in relevant)

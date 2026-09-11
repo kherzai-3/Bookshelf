@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import difflib
 import json
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -80,6 +81,91 @@ def _name_matches_question(name: str, question_lc: str, question_words: list[str
     return False
 
 
+# Function words carry no topical signal, and several of them ("what",
+# "happened", "during") open almost every question this tool gets asked - left
+# in, they would match nearly every statement and defeat the whole filter.
+_STOPWORDS = frozenset(
+    """a an the and or but if of in on at to from by for with without about into over under
+    is are was were be been being has have had do does did doing will would can could should
+    what who whom whose which when where why how that this these those there here it its it's
+    he she they them his her their him us we you your i me my mine our ours
+    not no nor so than then too very just also only own same s t don now
+    tell me more something anything someone anyone happen happened happens happening
+    say says said tell tells told know knows knew like likes liked""".split()
+)
+
+
+# Bounds the statement-match path. This is a fallback from "send all 1248
+# facts" - which measured 2.1x a real model's context window on a real book -
+# so any cap is strictly an improvement, and a generous one still leaves the
+# assembled context an order of magnitude inside the window.
+_MAX_STATEMENT_MATCHES = 80
+
+
+def _content_words(text: str) -> set[str]:
+    """Lowercased, punctuation-stripped words worth matching on - stopwords and
+    very short tokens dropped. Deliberately not stemmed: `match_key` already
+    handles the plural case that actually mattered in real data, and a real
+    stemmer would be a new dependency for a marginal gain."""
+    words = set()
+    for raw in text.lower().split():
+        word = raw.strip(".,!?;:\"'()[]-—…")
+        if len(word) > 2 and word not in _STOPWORDS:
+            words.add(word)
+    return words
+
+
+def _facts_matching_question_text(question: str, facts: list[Fact]) -> list[Fact]:
+    """Recall net for a question that names no known entity: match the
+    question's *distinctive* words against fact statements themselves.
+
+    Rarity is measured across `facts` - the already-spoiler-filtered list -
+    and never across the whole book. That is not an optimization: a word's
+    rarity computed over chapters the reader hasn't reached is a value derived
+    from hidden data, and deriving anything from the unfiltered set is exactly
+    how a filter leaks what it removed.
+
+    A word is distinctive if it appears in at most a tenth of the statements,
+    so "Kalkara" qualifies and "Ranger" (everywhere in this book) does not.
+    Matches are then *scored* by how rare the shared words are and capped,
+    rather than gated on a hit count. Requiring two shared words was tried
+    first and was wrong on real questions: a reader asking about "the choosing
+    ceremony" shares no statement with the book's own phrase, "Choosing Day" -
+    only the single word `choosing` - and a hit-count rule discards exactly
+    the topic it was supposed to find. Ranking tolerates that mismatch, and
+    the cap does the job the hit count was really there for: bounding how much
+    reaches the model."""
+    if not facts:
+        return []
+    statement_words = [(fact, _content_words(fact.statement)) for fact in facts]
+
+    document_frequency: Counter[str] = Counter()
+    for _, words in statement_words:
+        document_frequency.update(words)
+
+    rarity_ceiling = max(1, len(facts) // 10)
+    distinctive = {
+        word
+        for word in _content_words(question)
+        if 0 < document_frequency[word] <= rarity_ceiling
+    }
+    if not distinctive:
+        return []
+
+    scored: list[tuple[float, int, Fact]] = []
+    for fact, words in statement_words:
+        shared = words & distinctive
+        if shared:
+            # Rarer shared words count for more, so a statement naming the
+            # Kalkara outranks one that merely also mentions a castle.
+            scored.append((sum(1.0 / document_frequency[word] for word in shared), fact.chapter_index, fact))
+    if not scored:
+        return []
+
+    scored.sort(key=lambda row: (-row[0], row[1]))
+    return [fact for _, _, fact in scored[:_MAX_STATEMENT_MATCHES]]
+
+
 def select_relevant_facts(question: str, facts: list[Fact], root: Path | None = None) -> list[Fact]:
     """Filters facts down to just the entities a question appears to name,
     so a book with a large fact catalog doesn't unconditionally dump every
@@ -115,9 +201,19 @@ def select_relevant_facts(question: str, facts: list[Fact], root: Path | None = 
         if any(_name_matches_question(name, question_lc, question_words) for name in candidate_names):
             matched_entity_ids.add(entity_id)
 
-    if not matched_entity_ids:
-        return facts
-    return [f for f in facts if f.entity_id in matched_entity_ids]
+    if matched_entity_ids:
+        return [f for f in facts if f.entity_id in matched_entity_ids]
+
+    # No entity named. Before giving up and returning everything, try matching
+    # the question's distinctive words against the statements themselves -
+    # real questions like "what happened at the choosing ceremony?" name an
+    # event rather than a cataloged entity, and on a real book that fallback
+    # was measured at 2.1x the model's context window, i.e. silently truncated.
+    by_statement = _facts_matching_question_text(question, facts)
+    if by_statement:
+        return by_statement
+
+    return facts
 
 
 def format_context(facts: list[Fact], root: Path | None = None, content_type: str = "fiction") -> str:
