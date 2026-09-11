@@ -10,7 +10,24 @@ and themes from a single chapter of a novel.
 Respond with ONLY a JSON object of the shape {"facts": [...]}, no prose, no \
 markdown fences. Each element of "facts" is:
 {"entity_name": str, "entity_type": "character"|"setting"|"theme",
- "category": str, "statement": str}
+ "category": str, "statement": str, "when": "present"|"past"|"future",
+ "time_phrase": str (optional)}
+
+"when" says WHEN THE THING HAPPENED in the story, which is not the same as \
+which chapter you read it in. Judge it from the sentence itself:
+- present: it is happening now, in this chapter's scene. Most facts are this.
+- past: the text is recounting something that already happened - a memory, a \
+character explaining history, a reference to an earlier war or an upbringing. \
+This includes events from long before the book began, which is exactly why \
+the field exists: without it, "the King was newly crowned when the rebellion \
+came" reads as though he were newly crowned right now.
+- future: something planned, intended, promised, or predicted, which has not \
+happened yet.
+
+"time_phrase" is the text's OWN words for when it happened - "fifteen years \
+ago", "the next morning", "before the rebellion" - copied exactly. Include it \
+only when the chapter actually states one. Leave it out otherwise; never \
+estimate, calculate, or invent a time.
 
 category must be one of:
 - personality: a character trait, attitude, or way of thinking.
@@ -69,22 +86,31 @@ Chapter text: "Will scrambled over the wall, breathing hard. Halt handed \
 him the silver oakleaf without a word - the mark of a fully fledged \
 Ranger. Will's hands trembled as he took it. Halt stroked his grey-flecked \
 beard thoughtfully, his cloak already blending into the shadows of the \
-trees as he turned away."
+trees as he turned away. He had earned that cloak twenty years earlier, in \
+the war against Morgarath, and he meant to ride for Celtica at first light."
 
 {"facts": [
   {"entity_name": "Will", "entity_type": "character", "category": "status", \
 "statement": "Will received the silver oakleaf from Halt, marking him as a \
-fully fledged Ranger."},
+fully fledged Ranger.", "when": "present"},
   {"entity_name": "Will", "entity_type": "character", "category": \
 "personality", "statement": "Will's hands trembled with emotion as he \
-received the oakleaf."},
+received the oakleaf.", "when": "present"},
   {"entity_name": "Halt", "entity_type": "character", "category": \
-"appearance", "statement": "Halt has a grey-flecked beard."},
+"appearance", "statement": "Halt has a grey-flecked beard.", "when": \
+"present"},
   {"entity_name": "Halt", "entity_type": "character", "category": \
-"personality", "statement": "Halt stroked his beard thoughtfully."},
+"personality", "statement": "Halt stroked his beard thoughtfully.", \
+"when": "present"},
   {"entity_name": "Halt", "entity_type": "character", "category": \
 "appearance", "statement": "Halt wears a grey cloak that blends into \
-shadows."}
+shadows.", "when": "present"},
+  {"entity_name": "Halt", "entity_type": "character", "category": "status", \
+"statement": "Halt earned his Ranger cloak in the war against Morgarath.", \
+"when": "past", "time_phrase": "twenty years earlier"},
+  {"entity_name": "Halt", "entity_type": "character", "category": \
+"development", "statement": "Halt intended to ride for Celtica.", "when": \
+"future", "time_phrase": "at first light"}
 ]}"""
 
 
@@ -103,7 +129,16 @@ techniques, and real people/examples from a single chapter of a nonfiction book.
 Respond with ONLY a JSON object of the shape {"facts": [...]}, no prose, no \
 markdown fences. Each element of "facts" is:
 {"entity_name": str, "entity_type": "character"|"concept"|"theme",
- "category": str, "statement": str}
+ "category": str, "statement": str, "when": "present"|"past"|"future",
+ "time_phrase": str (optional)}
+
+Use "when": "present" for anything the book states as being the case - a \
+definition, a claim, a technique. That is almost everything. Use "past" only \
+for a historical anecdote or case study describing something that already \
+happened ("in 1954, a runner broke the four-minute mile"), and "future" for a \
+prediction about what will happen. "time_phrase" is the book's own wording \
+for the date or period, copied exactly, and only when it states one - never \
+estimated or invented.
 
 category must be one of:
 - definition: what a concept or technique fundamentally is, in the \
@@ -207,6 +242,20 @@ to someone, walk through the sequence rather than picking one line.
 when two lines in the same category genuinely conflict (a rank, an age, a \
 location can only have one current value), trust the LATER chapter as the \
 current state - an earlier one can simply be outdated.
+- Lines under "Background" describe things that happened BEFORE the story's \
+present, often long before the book opens, even though the reader learned \
+them in the chapter shown. Never present a Background line as someone's \
+current situation, and never let one override or be overridden by a line \
+from another section - "was newly crowned when the rebellion came" describes \
+a man as he was years ago, not as he is now. If a question asks how someone \
+is at present, answer from the other sections and use Background only to \
+explain how they got there.
+- Lines under "Expected or planned" had NOT happened yet as of the chapter \
+shown. Never report one as something that has already occurred.
+
+Some lines carry the book's own wording for when something happened, after \
+the chapter tag - "[ch 12 - fifteen years earlier]". Use that wording as-is \
+if it helps; do not try to convert it into a date or calculate from it.
 
 Facts in different categories, or about different specifics within a \
 category, are NOT conflicts - treat them as accumulated knowledge about that \

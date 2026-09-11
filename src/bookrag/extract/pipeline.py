@@ -207,7 +207,17 @@ def extract_book(
                         "chapter_index": chapter.index,
                         "category": raw.category,
                         "statement": raw.statement,
+                        # Story-time position, distinct from chapter_index
+                        # (which is discourse position and alone governs
+                        # spoiler safety). time_phrase is omitted rather than
+                        # written as null when absent, which is the common
+                        # case - keeps the line short and leaves older
+                        # records, which have neither key, indistinguishable
+                        # from a new record with nothing to say.
+                        "when": raw.when,
                     }
+                    if raw.time_phrase:
+                        record["time_phrase"] = raw.time_phrase
                     f.write(json.dumps(record) + "\n")
                     fact_count += 1
 

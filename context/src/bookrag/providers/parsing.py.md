@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/parsing.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 6ed46ae71a8c7f26be657fc330d8b2019a3461d5
+source_hash: 136f64e07f0f38a77d6548c743ed44033e339051
 ---
 
 ## Purpose
@@ -201,3 +201,24 @@ schema can't drift from what this file's own normalization actually accepts.
 - Nonfiction's set is empty **by design, not omission** - a definition,
   claim or technique is a standing statement, and even `example` doesn't get
   harmfully superseded by recency the way a story occurrence does.
+
+## `ALLOWED_WHEN` / `time_phrase` (story-time fields)
+- `ALLOWED_WHEN = {"present", "past", "future"}`, `DEFAULT_WHEN = "present"`,
+  `_WHEN_ALIASES`, `_MAX_TIME_PHRASE_LENGTH = 80`.
+- **Three coarse values, deliberately not a date or a global ordering.** A
+  model reading one chapter at a time can tell whether a sentence is set in
+  that chapter's present; it cannot place events on a book-wide timeline, and
+  most novels give no dates to place them with. Asking for more than it can
+  know invites invention.
+- `when` is **required** in the schema (so grammar-constrained decoding forces
+  exactly one enum token per fact); `time_phrase` is deliberately **optional**,
+  because most chapters state no explicit time and requiring the field would
+  push the model to make one up.
+- `_normalize_when` folds an unrecognized value to the default rather than
+  rejecting the fact - same posture as `category`, and unlike `entity_type`
+  which gates identity and so rejects on drift. The aliases exist for
+  providers that aren't schema-constrained (Anthropic, Fake).
+- `time_phrase` is stored verbatim and **never parsed into a date**.
+  Normalizing "fifteen years earlier" would invent precision the source
+  doesn't have, and a later chapter's more precise phrasing would leak that
+  precision to an earlier reader.

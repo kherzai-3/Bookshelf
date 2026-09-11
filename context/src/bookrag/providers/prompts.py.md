@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/prompts.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 2046db4646ee54dc4e2f6d08ace6bae9f546e867
+source_hash: bdc7d7e9f2b16b41e4f1de8705e8c3a447d7163b
 ---
 
 ## Purpose
@@ -197,3 +197,22 @@ book's `content_type` (see `storage.py`/`extract/pipeline.py`).
   as prose, since this project has repeatedly found a small local model
   follows visible structure better than instructions - the same reasoning as
   schema-constrained extraction.
+- **Both extraction prompts now ask for `when` (and optionally
+  `time_phrase`), and both answer prompts explain the blocks those produce.**
+  The extraction instruction stresses that `when` describes when the thing
+  *happened*, not which chapter it was read in, and that `time_phrase` must be
+  the text's own words copied exactly - never estimated, calculated, or
+  invented. Fiction's worked example gained a `past` fact ("earned that cloak
+  twenty years earlier, in the war against Morgarath") and a `future` one
+  ("meant to ride for Celtica at first light") so the model sees all three
+  values demonstrated rather than described. Nonfiction gets a compact version:
+  `present` for anything the book states as being the case (nearly
+  everything), `past` only for a historical anecdote, `future` for a
+  prediction.
+- `ANSWER_SYSTEM_PROMPT` gained rules for the two new rendered blocks:
+  a **Background** line describes something that happened before the story's
+  present however late the chapter that mentions it, must never be presented
+  as a current situation, and must never override or be overridden by a line
+  from another section; an **Expected or planned** line had not happened yet.
+  It also tells the model to reuse a `time_phrase` as-is rather than
+  converting or calculating from it.

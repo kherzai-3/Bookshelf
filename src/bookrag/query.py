@@ -13,7 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from bookrag.extract.resolve import load_entities, match_key
-from bookrag.providers.parsing import OCCURRENCE_CATEGORIES, OCCURRENCE_CATEGORIES_BY_CONTENT_TYPE
+from bookrag.providers.parsing import (
+    DEFAULT_WHEN,
+    OCCURRENCE_CATEGORIES,
+    OCCURRENCE_CATEGORIES_BY_CONTENT_TYPE,
+)
 from bookrag.storage import library_root, series_reading_order
 
 
@@ -24,6 +28,12 @@ class Fact:
     chapter_index: int
     category: str
     statement: str
+    # Story-time position. `chapter_index` above is the *discourse* position -
+    # which chapter revealed this - and it alone governs spoiler safety; this
+    # says when the thing actually happened, which can be long before the book
+    # opens. Defaults cover every fact written before the field existed.
+    when: str = DEFAULT_WHEN
+    time_phrase: str | None = None
 
 
 def facts_as_of(book_id: str, chapter_index: int, root: Path | None = None) -> list[Fact]:
@@ -45,6 +55,11 @@ def facts_as_of(book_id: str, chapter_index: int, root: Path | None = None) -> l
                     chapter_index=record["chapter_index"],
                     category=record["category"],
                     statement=record["statement"],
+                    # Absent from every fact written before these existed, so
+                    # a whole pre-existing library keeps working and simply
+                    # reads as present-tense, which it overwhelmingly is.
+                    when=record.get("when", DEFAULT_WHEN),
+                    time_phrase=record.get("time_phrase"),
                 )
             )
     return facts
@@ -216,6 +231,15 @@ def select_relevant_facts(question: str, facts: list[Fact], root: Path | None = 
     return facts
 
 
+def _phrase_suffix(fact: Fact) -> str:
+    """Renders the text's own wording for when something happened, when it
+    gave one. Shown verbatim and never parsed into a date - "fifteen years
+    earlier" is exactly as precise as the book chose to be, and normalizing it
+    would invent precision the source doesn't have (and, on a later chapter's
+    more precise phrasing, would leak it to an earlier reader)."""
+    return f" - {fact.time_phrase}" if fact.time_phrase else ""
+
+
 def format_context(facts: list[Fact], root: Path | None = None, content_type: str = "fiction") -> str:
     """Renders spoiler-safe facts as the plain-text context a provider's
     `answer_question` expects: grouped by entity, and within an entity split
@@ -242,22 +266,45 @@ def format_context(facts: list[Fact], root: Path | None = None, content_type: st
     names = {e["entity_id"]: e["canonical_name"] for e in load_entities(root)["entities"]}
     occurrence_categories = OCCURRENCE_CATEGORIES_BY_CONTENT_TYPE.get(content_type, OCCURRENCE_CATEGORIES)
 
-    by_entity: dict[str, tuple[list[Fact], dict[str, list[Fact]]]] = {}
+    by_entity: dict[str, tuple[list[Fact], list[Fact], list[Fact], dict[str, list[Fact]]]] = {}
     for fact in facts:
-        occurrences, attributes = by_entity.setdefault(fact.entity_id, ([], {}))
-        if fact.category in occurrence_categories:
+        backstory, occurrences, expected, attributes = by_entity.setdefault(fact.entity_id, ([], [], [], {}))
+        # Story time is bucketed before category, because "this happened long
+        # before the book opens" outranks "this is a status vs an appearance"
+        # for how the fact must be read. A backstory fact must never be
+        # treated as the entity's current state no matter its category.
+        if fact.when == "past":
+            backstory.append(fact)
+        elif fact.when == "future":
+            expected.append(fact)
+        elif fact.category in occurrence_categories:
             occurrences.append(fact)
         else:
             attributes.setdefault(fact.category, []).append(fact)
 
     blocks = []
-    for entity_id, (occurrences, attributes) in by_entity.items():
+    for entity_id, (backstory, occurrences, expected, attributes) in by_entity.items():
         lines = [names.get(entity_id, entity_id)]
+        if backstory:
+            lines.append(
+                "  Background - happened BEFORE the story's present, "
+                "however late the chapter that mentions it:"
+            )
+            lines.extend(
+                f"    [ch {f.chapter_index}{_phrase_suffix(f)}] ({f.category}) {f.statement}"
+                for f in sorted(backstory, key=lambda fact: fact.chapter_index)
+            )
         if occurrences:
             lines.append("  What happened, in order - each line is a separate moment, not a correction of the one above:")
             lines.extend(
-                f"    [ch {f.chapter_index}] ({f.category}) {f.statement}"
+                f"    [ch {f.chapter_index}{_phrase_suffix(f)}] ({f.category}) {f.statement}"
                 for f in sorted(occurrences, key=lambda fact: fact.chapter_index)
+            )
+        if expected:
+            lines.append("  Expected or planned - had not happened yet as of the chapters below:")
+            lines.extend(
+                f"    [ch {f.chapter_index}{_phrase_suffix(f)}] ({f.category}) {f.statement}"
+                for f in sorted(expected, key=lambda fact: fact.chapter_index)
             )
         if attributes:
             lines.append("  Standing description - a later line refines or supersedes an earlier one:")

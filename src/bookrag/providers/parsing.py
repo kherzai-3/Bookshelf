@@ -103,6 +103,37 @@ OCCURRENCE_CATEGORIES = {"status", "development", "relationship"}
 # the same fusion failure.
 OCCURRENCE_CATEGORIES_NONFICTION: set[str] = set()
 
+# Where a fact sits in *story* time, independent of the chapter that revealed
+# it (that stays `chapter_index`, and it alone governs spoiler safety).
+# Deliberately three coarse values rather than a date or an ordering: a model
+# reading one chapter at a time can tell whether a sentence is set in that
+# chapter's present, but it cannot place events on a global timeline, and most
+# novels give no dates to place them with.
+#
+# Real case this exists for: `[ch 4] "King Duncan, a youth in his twenties, was
+# newly crowned when Morgarath rebelled"` describes events roughly fifteen
+# years before the book opens, but was stored indistinguishably from something
+# happening in chapter 4 - so "how old is the King?" got answered "a youth in
+# his twenties" by the recency rule. He would be about forty.
+ALLOWED_WHEN = {"present", "past", "future"}
+DEFAULT_WHEN = "present"
+
+# Lenient normalization for providers that aren't schema-constrained
+# (Anthropic, Fake) - same posture as the category aliases above: fold an
+# obvious synonym rather than rejecting an otherwise-good fact.
+_WHEN_ALIASES = {
+    "now": "present",
+    "current": "present",
+    "currently": "present",
+    "backstory": "past",
+    "before": "past",
+    "earlier": "past",
+    "previously": "past",
+    "later": "future",
+    "planned": "future",
+    "anticipated": "future",
+}
+
 OCCURRENCE_CATEGORIES_BY_CONTENT_TYPE = {
     "fiction": OCCURRENCE_CATEGORIES,
     "nonfiction": OCCURRENCE_CATEGORIES_NONFICTION,
@@ -124,6 +155,9 @@ _CATEGORIES_BY_CONTENT_TYPE = {"fiction": ALLOWED_CATEGORIES, "nonfiction": ALLO
 # a defense-in-depth net, not the primary fix (see
 # extraction_response_schema()'s maxLength).
 _MAX_STATEMENT_LENGTH = 500
+# Matches the schema cap; a phrase is a fragment ("fifteen years ago"), not a
+# sentence, so anything longer is the model writing prose into the wrong field.
+_MAX_TIME_PHRASE_LENGTH = 80
 _SUSPICIOUS_STATEMENT_SUBSTRINGS = ("entity_name", "entity_type")
 
 
@@ -170,8 +204,19 @@ def extraction_response_schema(content_type: str = "fiction") -> dict:
                         # facts the way the corruption case above did - good
                         # real statements observed top out around 230 chars.
                         "statement": {"type": "string", "maxLength": 300},
+                        # One enum token per fact, which is the whole point:
+                        # deciding whether a sentence is set in the chapter's
+                        # own present is a judgment a model can make from that
+                        # sentence alone, unlike anything requiring a view of
+                        # the whole book.
+                        "when": {"type": "string", "enum": sorted(ALLOWED_WHEN)},
+                        # Not required - a chapter usually gives no explicit
+                        # phrase, and forcing one invites invention. Capped
+                        # well under `statement` since it holds a fragment,
+                        # not a sentence.
+                        "time_phrase": {"type": "string", "maxLength": 80},
                     },
-                    "required": ["entity_name", "entity_type", "category", "statement"],
+                    "required": ["entity_name", "entity_type", "category", "statement", "when"],
                 },
             }
         },
@@ -228,9 +273,35 @@ def parse_facts(raw_text: str, content_type: str = "fiction") -> list[ExtractedF
                 entity_type=_normalize_entity_type(entity_type, content_type),
                 category=_normalize_category(category, content_type),
                 statement=statement,
+                # Absent on every fact extracted before this field existed,
+                # and on any provider that isn't schema-constrained and simply
+                # omits it - "present" is the right reading for both.
+                when=_normalize_when(item.get("when")),
+                time_phrase=_normalize_time_phrase(item.get("time_phrase")),
             )
         )
     return facts
+
+
+def _normalize_when(raw_when: object) -> str:
+    if raw_when is None:
+        return DEFAULT_WHEN
+    normalized = str(raw_when).strip().lower()
+    if normalized in ALLOWED_WHEN:
+        return normalized
+    # Unlike entity_type (which gates identity and so rejects on drift), an
+    # unrecognized value here folds to the default rather than losing the
+    # fact - same reasoning as `category`.
+    return _WHEN_ALIASES.get(normalized, DEFAULT_WHEN)
+
+
+def _normalize_time_phrase(raw_phrase: object) -> str | None:
+    if raw_phrase is None:
+        return None
+    phrase = str(raw_phrase).strip()
+    if not phrase:
+        return None
+    return phrase[:_MAX_TIME_PHRASE_LENGTH]
 
 
 def _normalize_category(raw_category: str, content_type: str = "fiction") -> str:

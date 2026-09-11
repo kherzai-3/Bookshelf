@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/base.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 9a081787f3cc39294a39a17faf07101edab1f004
+source_hash: 8c7f06fb27cf1a7157bb8c26a710db5df813f051
 ---
 
 ## Purpose
@@ -38,3 +38,20 @@ specifics.
 - `Provider` is a `typing.Protocol`, not an ABC — providers don't need to
   inherit from anything, they just need the right method shape (matches
   `FakeProvider`, which is a plain class with no base class).
+
+## Story time on `ExtractedFact` (`when`, `time_phrase`)
+`when` ∈ `{"present", "past", "future"}` records where a fact sits in *story*
+time, as distinct from the chapter that revealed it. Both fields default
+(`"present"`, `None`), so every fact extracted before they existed remains
+valid and reads as present-tense - which it overwhelmingly is.
+
+The distinction is load-bearing, not decorative: `chapter_index` is the
+*discourse* position and alone governs spoiler safety, while `when` says when
+the thing actually happened, which may be long before the book opens. Real
+case it exists for: `[ch 4] "King Duncan, a youth in his twenties, was newly
+crowned when Morgarath rebelled"` was stored indistinguishably from something
+happening in chapter 4, so "how old is the King?" answered "a youth in his
+twenties" via the recency rule. He would be about forty.
+
+`time_phrase` holds the text's own wording ("fifteen years earlier") copied
+verbatim, and is displayed but never parsed - see `parsing.py`'s context doc.

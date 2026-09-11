@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/pipeline.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: beed4c5bd050610c3b5aa74f2118afcd04a8b441
+source_hash: 9349b22a12a477aac51de4b092415a1820e722ae
 ---
 
 ## Purpose
@@ -253,3 +253,11 @@ asymmetric:
 
 `library.run_doctor` detects this state (`unnamed_fact_refs`) but deliberately
 never repairs it - see that file's context doc.
+
+## Story-time fields on the written record
+Each fact record now carries `when` (see `providers/parsing.py`'s context
+doc), and `time_phrase` **only when the model supplied one** - omitted rather
+than written as `null`, which is the common case. That keeps the line short
+and leaves an older record, which has neither key, indistinguishable from a
+new record that simply had no time to report; `query.facts_as_of` reads both
+with defaults either way.

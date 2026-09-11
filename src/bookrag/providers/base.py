@@ -14,6 +14,17 @@ class ExtractedFact:
     entity_type: str  # fiction: "character"|"setting"|"theme"; nonfiction: "character"|"concept"|"theme"
     category: str
     statement: str
+    # Where the fact sits in *story* time, as opposed to the chapter that
+    # revealed it. "present" (the chapter's own narrative moment), "past"
+    # (recounted backstory, possibly predating the book entirely), "future"
+    # (anticipated or planned). Defaults to "present" because that is what
+    # the large majority of facts are, and because every fact extracted
+    # before this field existed is one.
+    when: str = "present"
+    # The text's own words for when it happened ("fifteen years ago", "the
+    # next morning"), copied verbatim when the chapter states one. Displayed
+    # to the reader, never parsed - see parsing.py's context doc.
+    time_phrase: str | None = None
 
 
 class ExtractionParseError(Exception):

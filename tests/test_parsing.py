@@ -2,6 +2,7 @@ import pytest
 
 from bookrag.providers.base import ExtractionParseError
 from bookrag.providers.parsing import (
+    ALLOWED_WHEN,
     ALLOWED_CATEGORIES,
     ALLOWED_CATEGORIES_NONFICTION,
     ALLOWED_ENTITY_TYPES,
@@ -166,7 +167,11 @@ def test_extraction_response_schema_enumerates_allowed_types_and_categories() ->
     fact_schema = schema["properties"]["facts"]["items"]
     assert set(fact_schema["properties"]["entity_type"]["enum"]) == ALLOWED_ENTITY_TYPES
     assert set(fact_schema["properties"]["category"]["enum"]) == ALLOWED_CATEGORIES
-    assert fact_schema["required"] == ["entity_name", "entity_type", "category", "statement"]
+    assert fact_schema["required"] == ["entity_name", "entity_type", "category", "statement", "when"]
+    assert set(fact_schema["properties"]["when"]["enum"]) == ALLOWED_WHEN
+    # Deliberately optional: most chapters state no explicit time, and
+    # requiring the field would invite the model to invent one.
+    assert "time_phrase" not in fact_schema["required"]
     assert schema["required"] == ["facts"]
 
 

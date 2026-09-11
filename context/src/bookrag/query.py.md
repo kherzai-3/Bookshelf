@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/query.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 49dd36059f8fcbca97c40556ddc281403d64663d
+source_hash: 69a1bfe434965c20900f11cac1b2a2432065c243
 ---
 
 ## Purpose
@@ -159,3 +159,28 @@ plain-text context `cli.py`'s `chat` command hands to a provider's
   overlap at all ("who are the antagonists?") still falls through to the
   whole-book fallback - correctly, since guessing would be worse. That case
   is what the deferred embedding work in README's Future ideas is for.
+
+## Story time in `Fact` and the rendered context
+`Fact` gained `when` / `time_phrase` (defaults `"present"` / `None`), read
+from the record with `.get(...)` so a library extracted before these existed
+keeps working and reads as present-tense.
+
+`format_context` buckets by **story time before category**, because "this
+happened long before the book opens" outranks "this is a status vs an
+appearance" in how the line must be read. A backstory fact must never be taken
+as the entity's current state whatever its category. Block order per entity:
+
+1. **Background** - `when == "past"`, flat and chronological, category inline
+2. **What happened, in order** - present-tense occurrence categories
+3. **Expected or planned** - `when == "future"`
+4. **Standing description** - present-tense attribute categories, later-wins
+
+`_phrase_suffix` renders a `time_phrase` after the chapter tag
+(`[ch 12 - fifteen years earlier]`), verbatim and never parsed - see
+`providers/parsing.py`'s context doc for why normalizing it would both invent
+precision and risk leaking a later chapter's wording.
+
+**Caveat worth remembering:** `when` is only populated by *new* extraction, so
+on an already-extracted library every fact reads as `present` and the
+Background block never appears. The King Duncan case this was built for stays
+broken until that book is re-extracted.
