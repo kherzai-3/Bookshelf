@@ -112,7 +112,11 @@ def test_format_context_resolves_entity_names_and_includes_category(tmp_path: Pa
     facts = facts_as_of(book_id, 0, root=root)
     context = format_context(facts, root=root)
 
-    assert context == "Ishmael\n  development:\n    [ch 0] Ishmael arrived."
+    assert context == (
+        "Ishmael\n"
+        "  What happened, in order - each line is a separate moment, not a correction of the one above:\n"
+        "    [ch 0] (development) Ishmael arrived."
+    )
 
 
 def test_format_context_of_no_facts_is_empty(tmp_path: Path) -> None:
@@ -130,11 +134,59 @@ def test_format_context_groups_same_entity_facts_by_category_and_chapter(tmp_pat
 
     assert context == (
         "character-1\n"
-        "  status:\n"
-        "    [ch 5] hasn't gone through the Choosing Day yet\n"
-        "    [ch 9] has completed the Choosing Day\n"
-        "  personality:\n"
-        "    [ch 3] is curious and eager to please"
+        "  What happened, in order - each line is a separate moment, not a correction of the one above:\n"
+        "    [ch 5] (status) hasn't gone through the Choosing Day yet\n"
+        "    [ch 9] (status) has completed the Choosing Day\n"
+        "  Standing description - a later line refines or supersedes an earlier one:\n"
+        "    personality:\n"
+        "      [ch 3] is curious and eager to please"
+    )
+
+
+def test_format_context_separates_occurrences_from_standing_description(tmp_path: Path) -> None:
+    """The structural half of the cross-event conflation fix: a wound and a
+    later, unrelated death report are both `status`, and fusing them produced
+    a confidently wrong answer. They must render as two moments in one
+    sequence, never as a correction, while genuinely standing properties keep
+    the later-wins grouping."""
+    facts = [
+        Fact(book_id="b", entity_id="character-1", chapter_index=66, category="status", statement="was reported killed"),
+        Fact(book_id="b", entity_id="character-1", chapter_index=34, category="status", statement="was wounded"),
+        Fact(book_id="b", entity_id="character-1", chapter_index=2, category="appearance", statement="has a grey beard"),
+    ]
+
+    context = format_context(facts, root=tmp_path / "library")
+
+    assert context == (
+        "character-1\n"
+        "  What happened, in order - each line is a separate moment, not a correction of the one above:\n"
+        "    [ch 34] (status) was wounded\n"
+        "    [ch 66] (status) was reported killed\n"
+        "  Standing description - a later line refines or supersedes an earlier one:\n"
+        "    appearance:\n"
+        "      [ch 2] has a grey beard"
+    )
+
+
+def test_format_context_treats_every_nonfiction_category_as_standing(tmp_path: Path) -> None:
+    """Nonfiction has no occurrence categories by design - a definition or
+    claim is a standing statement, so a nonfiction book keeps the grouped,
+    later-wins shape rather than growing a spurious event sequence."""
+    facts = [
+        Fact(book_id="b", entity_id="concept-1", chapter_index=3, category="technique", statement="pair a new habit with an old one"),
+        Fact(book_id="b", entity_id="concept-1", chapter_index=1, category="definition", statement="a habit is an automatic routine"),
+    ]
+
+    context = format_context(facts, root=tmp_path / "library", content_type="nonfiction")
+
+    assert "What happened, in order" not in context
+    assert context == (
+        "concept-1\n"
+        "  Standing description - a later line refines or supersedes an earlier one:\n"
+        "    technique:\n"
+        "      [ch 3] pair a new habit with an old one\n"
+        "    definition:\n"
+        "      [ch 1] a habit is an automatic routine"
     )
 
 
@@ -148,12 +200,14 @@ def test_format_context_keeps_separate_entities_in_separate_blocks(tmp_path: Pat
 
     assert context == (
         "character-1\n"
-        "  description:\n"
-        "    [ch 1] a young apprentice"
+        "  Standing description - a later line refines or supersedes an earlier one:\n"
+        "    description:\n"
+        "      [ch 1] a young apprentice"
         "\n\n"
         "character-2\n"
-        "  description:\n"
-        "    [ch 2] a grizzled ranger"
+        "  Standing description - a later line refines or supersedes an earlier one:\n"
+        "    description:\n"
+        "      [ch 2] a grizzled ranger"
     )
 
 

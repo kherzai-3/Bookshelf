@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 9988a08672011672a77741ae0d4483d5b8ba180b
+source_hash: 14cda1b247171ea0fa54caae7330b9fa279234ec
 ---
 
 ## Purpose
@@ -137,7 +137,10 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   fixed context computed before the first question is even typed can't
   reflect what that question is about. `facts_as_of`'s result is still
   fetched once per `_chat` call (chapter-scoped, not question-scoped, so
-  it doesn't need recomputing per question).
+  it doesn't need recomputing per question). `_chat` also threads the book's
+  `content_type` into `format_context` (not just into `answer_question`),
+  since it selects which categories render as occurrences vs standing
+  description - see `query.py`'s context doc.
 - `_ingest` calls `ingest.consolidate.should_consolidate`/
   `consolidate_fragments` right after `loader.load_chapters`, before
   `sanity_summary`/`classify_ingestion`/`save_book` all run - so every

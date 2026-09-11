@@ -191,18 +191,26 @@ limited to what has happened up to the reader's current point in the book, \
 so they must never be supplemented with outside knowledge, which could spoil \
 something not yet reached.
 
-Facts are grouped by character/setting/theme, then by category (e.g. \
-status, personality, appearance), with each individual fact tagged by the \
-chapter it came from, e.g. "[ch 9] has completed the Choosing Day." \
-Chapters are always listed in increasing order within a group. When two \
-facts in the SAME category for the SAME entity describe conflicting states \
-(e.g. one chapter says something hasn't happened yet, a later chapter says \
-it has), trust the fact from the LATER chapter as the current, correct \
-state - characters and circumstances change as the story progresses, and an \
-earlier fact can simply be outdated. Facts in different categories, or \
-about different specifics within a category, are NOT conflicts - treat them \
-as accumulated knowledge about that entity, not contradictions to pick \
-between.
+Facts are grouped by character/setting/theme, and each individual fact is \
+tagged by the chapter it came from, e.g. "[ch 9] has completed the Choosing \
+Day." Chapters are always listed in increasing order. Within each entity the \
+facts are split into two kinds, and they must be read DIFFERENTLY:
+
+- Lines under "What happened, in order" are SEPARATE MOMENTS in the story. A \
+later line never corrects, replaces, or concludes an earlier one - both \
+things simply happened, at different times. Never merge two of these into a \
+single claim, and never assume one caused or resolved the other unless a \
+fact explicitly says so. Two entries that sound contradictory are usually \
+two different occasions, not a correction. If the reader asks what happened \
+to someone, walk through the sequence rather than picking one line.
+- Lines under "Standing description" describe how something simply IS. Here, \
+when two lines in the same category genuinely conflict (a rank, an age, a \
+location can only have one current value), trust the LATER chapter as the \
+current state - an earlier one can simply be outdated.
+
+Facts in different categories, or about different specifics within a \
+category, are NOT conflicts - treat them as accumulated knowledge about that \
+entity, not contradictions to pick between.
 
 A question about a specific kind of detail is NOT limited to the category \
 whose label matches that topic - relevant details can appear under any \
@@ -234,14 +242,14 @@ book, so they must never be supplemented with outside knowledge - a later \
 chapter may define a term, introduce a technique, or refine an earlier \
 claim in a way the reader hasn't reached yet.
 
-Facts are grouped by concept/person/theme, then by category (e.g. \
-technique, definition, claim), with each individual fact tagged by the \
-chapter it came from, e.g. "[ch 9] pair a new habit with an existing one." \
-Chapters are always listed in increasing order within a group. When two \
-facts in the SAME category for the SAME entity describe conflicting or \
-updated information (e.g. a claim refined or corrected later in the \
-book), trust the fact from the LATER chapter as the current, most \
-complete version. Facts in different categories, or about different \
+Facts are grouped by concept/person/theme under a "Standing description" \
+heading, then by category (e.g. technique, definition, claim), with each \
+individual fact tagged by the chapter it came from, e.g. "[ch 9] pair a new \
+habit with an existing one." Chapters are always listed in increasing order \
+within a group. When two facts in the SAME category for the SAME entity \
+describe conflicting or updated information (e.g. a claim refined or \
+corrected later in the book), trust the fact from the LATER chapter as the \
+current, most complete version. Facts in different categories, or about different \
 specifics within a category, are NOT conflicts - treat them as \
 accumulated knowledge, not contradictions to pick between.
 

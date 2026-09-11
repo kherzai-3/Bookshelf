@@ -77,6 +77,37 @@ _ENTITY_TYPE_ALIASES_NONFICTION: dict[str, str] = {}
 # history.
 ALLOWED_CATEGORIES_NONFICTION = {"definition", "claim", "technique", "example", "relationship", "description"}
 
+# Which categories describe a distinct MOMENT rather than a standing property.
+# This split exists because of a real, confirmed wrong answer: a character
+# wounded by monsters in ch.34 and an unrelated report of his death in ch.66 -
+# both `status` facts about the same entity - were fused by the answer prompt's
+# "trust the later chapter" rule into "he died fighting the monsters." That rule
+# is correct for a standing property (a rank, an age, a location have one
+# current value, and a later chapter's version wins) and actively wrong for
+# occurrences, which don't supersede each other - they both simply happened.
+#
+# `development` is unambiguous (the extraction prompt defines it as a notable
+# action or event). `status` is defined there as a *change* in role, rank, or
+# life-condition, so it's an occurrence by construction - and it's the category
+# the real bug occurred in. `relationship` is the genuinely mixed one ("Halt is
+# Will's master" is standing; "Halt has sworn to rescue Will" is a moment), and
+# it's grouped with occurrences deliberately: mislabelling a standing fact as a
+# moment only makes an answer slightly more verbose, while mislabelling a moment
+# as standing reintroduces the fusion bug. Worth revisiting against real answers.
+OCCURRENCE_CATEGORIES = {"status", "development", "relationship"}
+
+# Empty for nonfiction, by design rather than omission: a definition, claim or
+# technique is a standing statement about the world, and even `example` (the
+# closest thing to an episode) doesn't get harmfully superseded by recency the
+# way a story occurrence does. Revisit only if a real nonfiction answer shows
+# the same fusion failure.
+OCCURRENCE_CATEGORIES_NONFICTION: set[str] = set()
+
+OCCURRENCE_CATEGORIES_BY_CONTENT_TYPE = {
+    "fiction": OCCURRENCE_CATEGORIES,
+    "nonfiction": OCCURRENCE_CATEGORIES_NONFICTION,
+}
+
 _ENTITY_TYPES_BY_CONTENT_TYPE = {"fiction": ALLOWED_ENTITY_TYPES, "nonfiction": ALLOWED_ENTITY_TYPES_NONFICTION}
 _ENTITY_TYPE_ALIASES_BY_CONTENT_TYPE = {"fiction": _ENTITY_TYPE_ALIASES, "nonfiction": _ENTITY_TYPE_ALIASES_NONFICTION}
 _CATEGORIES_BY_CONTENT_TYPE = {"fiction": ALLOWED_CATEGORIES, "nonfiction": ALLOWED_CATEGORIES_NONFICTION}

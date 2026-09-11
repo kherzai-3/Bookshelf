@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/query.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: b88f0b78a3b2bbc5f2bd2a345a2a3395977414ad
+source_hash: b9fe128b4b4f3e0ed6bbd0032e5e6d916bb47fba
 ---
 
 ## Purpose
@@ -24,13 +24,26 @@ plain-text context `cli.py`'s `chat` command hands to a provider's
   returns every fact unchanged if nothing matches at all. Meant to run
   between `facts_as_of` and `format_context`, not as a replacement for
   either.
-- `format_context(facts: list[Fact], root: Path | None = None) -> str` —
-  groups facts by entity, then by category, each line tagged
-  `"[ch N] statement"` and sorted chronologically within its group; entity
-  names resolved via the global entity registry (`extract.resolve.load_entities`),
-  falling back to the raw `entity_id` if unresolved. Empty `facts` renders
-  as `""`, which providers treat as "no information yet" rather than a
-  valid-but-empty context.
+- `format_context(facts: list[Fact], root: Path | None = None,
+  content_type: str = "fiction") -> str` — groups facts by entity, and
+  within an entity splits them into the two kinds that must be *read*
+  differently (see `parsing.OCCURRENCE_CATEGORIES`):
+  - **"What happened, in order"** — occurrence categories, rendered as one
+    chronological sequence with the category inline
+    (`"[ch 34] (status) ..."`). Separate moments; a later line never
+    corrects an earlier one.
+  - **"Standing description"** — everything else, keeping the older
+    per-category grouping, where a later line legitimately supersedes an
+    earlier one.
+  Each block's header states that rule in plain language, because a small
+  local model follows visible structure far more reliably than a paragraph
+  of prompt instructions - the same reasoning behind schema-constraining
+  extraction rather than asking nicely. Entity names resolve via the global
+  registry (`extract.resolve.load_entities`), falling back to the raw
+  `entity_id`. `content_type` selects the occurrence set; nonfiction's is
+  empty, so a nonfiction book renders entirely as standing description
+  (its old shape). Empty `facts` renders as `""`, which providers treat as
+  "no information yet".
 
 ## Key Decisions
 - Uses `series_reading_order(book_id)` (see `storage.py`): every **earlier**
@@ -73,6 +86,21 @@ plain-text context `cli.py`'s `chat` command hands to a provider's
   "not mentioned in the novel" to a real answer, and "Tell me about the
   Wargals" went from fragmented/overflowing context to one complete,
   well-organized answer covering appearance, behavior, and relationships.
+- **The occurrence/standing split is the structural half of a real
+  wrong-answer fix.** A character wounded by monsters in ch.34 and an
+  unrelated report of his death in ch.66 - both `status` - were fused by the
+  answer prompt's blanket "trust the later chapter" rule into "he died
+  fighting the monsters." That rule is right for a standing property and
+  actively wrong for occurrences. Verified against the frozen pre-restart
+  fixture (the only place the repro still exists, since the fresh
+  qwen2.5:7b-instruct extraction doesn't reproduce the hallucinated death
+  facts): the same question that previously concluded "killed during the
+  fight with the Kalkara" now keeps the two occasions distinct and
+  attributes each correctly. Worth being precise about the limit - that old
+  data asserts "Halt was killed" three separate times, so the answer is
+  still wrong *about the death*; what the fix removes is the **fusion** of
+  two unrelated events, not the underlying hallucination. An answer-layer
+  change cannot rescue false data, only stop compounding it.
 - `format_context` itself still never discards or dedupes facts (that
   hasn't changed - `select_relevant_facts` is a separate step *before* it,
   not a change to what it does with whatever it's given), even ones that

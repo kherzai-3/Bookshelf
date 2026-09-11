@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/prompts.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: e4247babbfee0d5c2a0e61a18580b0baf5606bcd
+source_hash: 2046db4646ee54dc4e2f6d08ace6bae9f546e867
 ---
 
 ## Purpose
@@ -180,3 +180,20 @@ book's `content_type` (see `storage.py`/`extract/pipeline.py`).
   conversational sampling isn't consistent run to run. Both fixes are
   real, verified improvements, but neither is a guarantee - they raise the
   odds a given detail surfaces, not a hard fix.
+- **The answer prompts' recency rule is now scoped to standing descriptions
+  only.** Previously both answer prompts said, unconditionally, to trust the
+  later chapter when two same-category facts about one entity conflict. That
+  produced a real wrong answer: a ch.34 wound and an unrelated ch.66 death
+  report (both `status`) were fused into "he died fighting the monsters."
+  `ANSWER_SYSTEM_PROMPT` now describes the two-block context shape
+  `query.format_context` emits and gives each block its own reading rule -
+  lines under "What happened, in order" are separate moments that never
+  correct one another and must never be merged into a single claim; lines
+  under "Standing description" keep later-wins, because a rank or an age
+  really does have one current value. The nonfiction twin only gained a
+  mention of the "Standing description" heading it will now see, since its
+  occurrence set is empty and its rendering is otherwise unchanged.
+  Deliberately carried by *structure* (block headers in the context) as well
+  as prose, since this project has repeatedly found a small local model
+  follows visible structure better than instructions - the same reasoning as
+  schema-constrained extraction.

@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/parsing.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 35e08a7c3563fff3a25e7f2489ef1f45ddf72bee
+source_hash: 6ed46ae71a8c7f26be657fc330d8b2019a3461d5
 ---
 
 ## Purpose
@@ -174,3 +174,30 @@ schema can't drift from what this file's own normalization actually accepts.
 
 ## Dependencies
 - Internal: `bookrag.providers.base` (`ExtractedFact`, `ExtractionParseError`)
+
+## Occurrence vs standing categories (added with the conflation fix)
+- `OCCURRENCE_CATEGORIES = {"status", "development", "relationship"}` /
+  `OCCURRENCE_CATEGORIES_NONFICTION = set()` /
+  `OCCURRENCE_CATEGORIES_BY_CONTENT_TYPE` — which categories describe a
+  distinct *moment* rather than a standing property. Consumed by
+  `query.format_context` to decide which facts render as a chronological
+  sequence (where a later fact never supersedes an earlier one) and which
+  keep the per-category, later-wins grouping.
+- Why it exists: a real confirmed wrong answer. A ch.34 wound and an
+  unrelated ch.66 death report - both `status` - were fused by the answer
+  prompt's blanket recency rule into "he died fighting the monsters."
+  Recency is correct for a rank/age/location (one current value) and wrong
+  for occurrences, which simply both happened.
+- Membership reasoning: `development` is unambiguous (the extraction prompt
+  defines it as a notable action or event). `status` is defined there as a
+  *change* in role/rank/life-condition, so it's an occurrence by
+  construction - and it is the category the real bug occurred in.
+  `relationship` is genuinely mixed ("Halt is Will's master" is standing;
+  "Halt has sworn to rescue Will" is a moment) and is grouped with
+  occurrences deliberately: mislabelling a standing fact as a moment only
+  makes an answer more verbose, while mislabelling a moment as standing
+  reintroduces the bug. Asymmetric blast radius decides it; worth revisiting
+  against real answers.
+- Nonfiction's set is empty **by design, not omission** - a definition,
+  claim or technique is a standing statement, and even `example` doesn't get
+  harmfully superseded by recency the way a story occurrence does.

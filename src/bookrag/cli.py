@@ -328,7 +328,7 @@ def _chat(args: argparse.Namespace) -> int:
     facts = facts_as_of(args.book_id, args.chapter)
 
     if args.question is not None:
-        context = format_context(select_relevant_facts(args.question, facts))
+        context = format_context(select_relevant_facts(args.question, facts), content_type=content_type)
         print(provider.answer_question(args.question, context, content_type))
         return 0
 
@@ -348,7 +348,7 @@ def _chat(args: argparse.Namespace) -> int:
         # question-dependent (see query.select_relevant_facts), so a fixed
         # context built before the first question was ever typed can't
         # reflect it.
-        context = format_context(select_relevant_facts(question, facts))
+        context = format_context(select_relevant_facts(question, facts), content_type=content_type)
         print(provider.answer_question(question, context, content_type))
 
 

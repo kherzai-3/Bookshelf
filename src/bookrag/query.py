@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from bookrag.extract.resolve import load_entities, match_key
+from bookrag.providers.parsing import OCCURRENCE_CATEGORIES, OCCURRENCE_CATEGORIES_BY_CONTENT_TYPE
 from bookrag.storage import library_root, series_reading_order
 
 
@@ -119,35 +120,56 @@ def select_relevant_facts(question: str, facts: list[Fact], root: Path | None = 
     return [f for f in facts if f.entity_id in matched_entity_ids]
 
 
-def format_context(facts: list[Fact], root: Path | None = None) -> str:
+def format_context(facts: list[Fact], root: Path | None = None, content_type: str = "fiction") -> str:
     """Renders spoiler-safe facts as the plain-text context a provider's
-    `answer_question` expects: grouped by entity, then by category, each
-    fact tagged with its chapter number and sorted chronologically within
-    its group - so a provider (even a small local model) has an explicit
-    recency signal to resolve a later chapter superseding an earlier one
-    (e.g. a status that changes) without any fact ever being discarded here.
-    A coarse "keep only the latest fact per category" rule was considered
-    and rejected - status/relationship facts are not single-valued (e.g. a
-    character can have several simultaneous status facts), so pruning by
-    category alone would silently delete other, still-true facts. Entity
-    names are resolved via the global entity registry; an id with no match
-    (or no registry at all) falls back to its raw entity_id."""
+    `answer_question` expects: grouped by entity, and within an entity split
+    into the two kinds of fact that must be READ differently. Every fact is
+    tagged with its chapter and sorted chronologically; nothing is ever
+    discarded here. A coarse "keep only the latest fact per category" rule
+    was considered and rejected - a character can have several simultaneous
+    true facts, so pruning by category alone would silently delete still-true
+    ones. Entity names resolve via the global entity registry; an id with no
+    match (or no registry) falls back to its raw entity_id.
+
+    The split (see `parsing.OCCURRENCE_CATEGORIES`) is the structural half of
+    a real bug fix. Occurrences are listed as one chronological sequence with
+    their category inline, because they are separate moments that never
+    supersede one another - fusing two of them is exactly how a ch.34 wound
+    and an unrelated ch.66 death report became "he died fighting the
+    monsters." Standing descriptions keep the old per-category grouping,
+    because there recency genuinely is the right rule. The headers say so in
+    plain language: a small local model follows visible structure far more
+    reliably than it follows a paragraph of instructions (the same reason
+    this project schema-constrains extraction rather than asking nicely)."""
     if not facts:
         return ""
     names = {e["entity_id"]: e["canonical_name"] for e in load_entities(root)["entities"]}
+    occurrence_categories = OCCURRENCE_CATEGORIES_BY_CONTENT_TYPE.get(content_type, OCCURRENCE_CATEGORIES)
 
-    by_entity: dict[str, dict[str, list[Fact]]] = {}
+    by_entity: dict[str, tuple[list[Fact], dict[str, list[Fact]]]] = {}
     for fact in facts:
-        by_entity.setdefault(fact.entity_id, {}).setdefault(fact.category, []).append(fact)
+        occurrences, attributes = by_entity.setdefault(fact.entity_id, ([], {}))
+        if fact.category in occurrence_categories:
+            occurrences.append(fact)
+        else:
+            attributes.setdefault(fact.category, []).append(fact)
 
     blocks = []
-    for entity_id, by_category in by_entity.items():
+    for entity_id, (occurrences, attributes) in by_entity.items():
         lines = [names.get(entity_id, entity_id)]
-        for category, cat_facts in by_category.items():
-            lines.append(f"  {category}:")
+        if occurrences:
+            lines.append("  What happened, in order - each line is a separate moment, not a correction of the one above:")
             lines.extend(
-                f"    [ch {f.chapter_index}] {f.statement}"
-                for f in sorted(cat_facts, key=lambda fact: fact.chapter_index)
+                f"    [ch {f.chapter_index}] ({f.category}) {f.statement}"
+                for f in sorted(occurrences, key=lambda fact: fact.chapter_index)
             )
+        if attributes:
+            lines.append("  Standing description - a later line refines or supersedes an earlier one:")
+            for category, cat_facts in attributes.items():
+                lines.append(f"    {category}:")
+                lines.extend(
+                    f"      [ch {f.chapter_index}] {f.statement}"
+                    for f in sorted(cat_facts, key=lambda fact: fact.chapter_index)
+                )
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
