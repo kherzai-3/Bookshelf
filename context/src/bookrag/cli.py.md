@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
 last_synced: 2026-09-09T00:00:00Z
-source_hash: 01b0455c06fb3e309aab6f31cc3b93e8f840e191
+source_hash: 9988a08672011672a77741ae0d4483d5b8ba180b
 ---
 
 ## Purpose
@@ -153,15 +153,32 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   (heading/TOC signal found), else `"text-bound"` (fell back to raw
   page/spine fragmentation - see epub_loader/pdf_loader "no exploitable
   structure" cases). Empty chapter list is `"text-bound"`.
-- `_print_progress(start_time: float) -> OnChapterDone` — returns a closure
-  suitable for `extract_book`'s `on_chapter_done`; prints
+- `_print_progress(start_time: float, start_index: int = 0) -> OnChapterDone`
+  — returns a closure suitable for `extract_book`'s `on_chapter_done`; prints
   `"[N/total] chapter done - elapsed Xs, ~Ys remaining"` per chapter, ETA
-  estimated as `(elapsed / done) * remaining_count`. Added once a real
-  75-chapter extraction against a local model took long enough (minutes) to
-  need visible progress. Prints with `flush=True` - without it, a
+  estimated as `(elapsed / (done - start_index)) * remaining_count`. Added
+  once a real 75-chapter extraction against a local model took long enough
+  (minutes) to need visible progress. Prints with `flush=True` - without it, a
   backgrounded run's progress is invisible until process exit (Python fully
   buffers stdout when it isn't a real terminal), which is exactly the
   problem this feature exists to solve.
+  `start_index` exists because `done` is the *absolute* chapter position
+  (`extract_book` enumerates from `start_index + 1`) while `start_time` only
+  covers chapters this run processed - dividing by `done` credits elapsed time
+  to chapters an earlier run already paid for. Real case: a resume from
+  chapter 11 of 75 divided by 56 instead of 45 and reported ~60 minutes left
+  when ~75 was honest. Caller passes the same `start_index` it uses for the
+  "Resuming from chapter N" message.
+- `_use_utf8_output() -> None` — reconfigures `sys.stdout`/`sys.stderr` to
+  UTF-8 at the top of `main()`. Real book text is full of curly quotes
+  (U+2019) and dashes, but a Windows console defaults to a legacy code page
+  (cp1252 observed on this machine), so correctly-stored facts printed by
+  `chat` came out as mojibake (`"Ranger<?>s cloak"`) - clean data looking
+  like a corrupted extraction, which is worse than a visible error because it
+  erodes trust in output that is actually fine. Display-only; nothing about
+  what's stored changes. Each `reconfigure` call is individually guarded
+  (`AttributeError`/`ValueError`) because a replaced stream - pytest's
+  capture, a `StringIO` - may not implement it.
 - `_format_duration(seconds: float) -> str` — `"45s"` / `"3m12s"` /
   `"1h2m3s"`, whichever units are non-zero.
 - `write_ingestion_report(book_id, chapters, root=None, raw_chapter_count=None) -> Path`

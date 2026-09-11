@@ -565,6 +565,17 @@ pytest tests/ -v
   timeline-aware to actually pick the right event for a question rather
   than just the facts. Needs its own planning pass before building.
 
+- **Configurable cross-category answer eagerness.** `ANSWER_SYSTEM_PROMPT`
+  tells the model to read across *all* of an entity's categories rather than
+  only the one whose name matches the question, which is what lets "what does
+  Halt look like?" pick up a physical detail filed under `personality`. In
+  practice it also pulls in a character's carried equipment (a knife, a bow)
+  for a physical-description question - **intended behaviour**, since what
+  someone carries is part of how they appear. Noted here only in case a future
+  case proves it *too* eager for some question shapes, at which point the
+  breadth would want to be a setting rather than a fixed instruction. Not a
+  defect today, and nothing to fix unless a real over-reach shows up.
+
 ## For future development sessions (Claude or human)
 
 This project keeps a **mirrored context doc** under `context/<path>.md` for

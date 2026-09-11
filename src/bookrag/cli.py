@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import statistics
+import sys
 import time
 from pathlib import Path
 
@@ -24,7 +25,23 @@ LOADERS = {
 }
 
 
+def _use_utf8_output() -> None:
+    """Force UTF-8 on stdout/stderr. Real book text is full of curly quotes and
+    dashes (U+2019 etc.), but a Windows console defaults to a legacy code page
+    (cp1252 observed here) that can't represent them - so correctly-stored
+    facts printed by `chat` came out as mojibake ("Ranger�s cloak"), making
+    clean data look like a corrupted extraction. This is a display fix only;
+    nothing about what's stored changes. Guarded because a replaced stream
+    (pytest's capture, a StringIO) may not implement reconfigure()."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _use_utf8_output()
     parser = argparse.ArgumentParser(prog="bookrag")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -219,7 +236,10 @@ def _extract(args: argparse.Namespace) -> int:
         if 0 < start_index < chapter_count:
             print(f"Resuming '{args.book_id}' from chapter {start_index}")
         result = extract_book(
-            args.book_id, provider, on_chapter_done=_print_progress(time.monotonic()), restart=args.restart
+            args.book_id,
+            provider,
+            on_chapter_done=_print_progress(time.monotonic(), start_index),
+            restart=args.restart,
         )
     except KeyboardInterrupt:
         print()
@@ -525,15 +545,24 @@ def sanity_summary(chapters: list[Chapter], edge_count: int = 3) -> list[str]:
     return lines
 
 
-def _print_progress(start_time: float):
+def _print_progress(start_time: float, start_index: int = 0):
     """Returns an on_chapter_done callback that prints one line per chapter
     with an elapsed/ETA estimate - a real-world need once extraction meant
     tens-to-hundreds of real LLM calls (minutes to hours), not instant
-    FakeProvider calls."""
+    FakeProvider calls.
+
+    `start_index` matters on a resumed run: `done` is the *absolute* chapter
+    position (it starts at start_index + 1), but `start_time` only covers the
+    chapters this run actually processed. Dividing by `done` would credit the
+    elapsed time to chapters an earlier run paid for, understating the
+    per-chapter average and so the estimate - real case: a resume from chapter
+    11 of 75 divided by 56 instead of 45, reporting ~60 min left when the
+    honest figure was ~75."""
 
     def report(done: int, total: int) -> None:
         elapsed = time.monotonic() - start_time
-        avg_per_chapter = elapsed / done
+        processed = max(done - start_index, 1)
+        avg_per_chapter = elapsed / processed
         remaining = avg_per_chapter * (total - done)
         print(
             f"  [{done}/{total}] chapter done - "

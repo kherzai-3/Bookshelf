@@ -1,10 +1,13 @@
+import io
 import json
 import shutil
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
-from bookrag.cli import main
+from bookrag.cli import _print_progress, _use_utf8_output, main
 from bookrag.extract.resolve import load_entities, save_entities
 from bookrag.storage import load_chapters
 from tests.helpers import build_fragmented_epub, build_narrative_epub, build_sample_epub
@@ -220,6 +223,51 @@ def test_extract_prints_per_chapter_progress(
     assert "[1/2] chapter done - elapsed" in output
     assert "[2/2] chapter done - elapsed" in output
     assert "remaining" in output
+
+
+def test_progress_estimate_ignores_chapters_an_earlier_run_already_did(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`done` is the *absolute* chapter position, but the timer only covers the
+    chapters this run processed - so a resumed run must divide by the latter.
+    Real case: resuming at chapter 11 of 75 divided elapsed time by 56 instead
+    of 45, crediting time to chapters an earlier run paid for and reporting
+    ~60 minutes left when the honest figure was ~75."""
+    report = _print_progress(time.monotonic() - 100.0, start_index=10)
+
+    report(20, 30)
+
+    output = capsys.readouterr().out
+    # 100s spread over the 10 chapters this run actually did = 10s each, and
+    # 10 chapters remain -> 100s, not the 150s a divide-by-20 would report.
+    assert "[20/30] chapter done" in output
+    assert "1m40s remaining" in output
+
+
+def test_progress_estimate_on_a_fresh_run_counts_every_completed_chapter(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The companion case: with no resume, every completed chapter does belong
+    to this run, so the average is unchanged from the original behaviour."""
+    report = _print_progress(time.monotonic() - 100.0)
+
+    report(10, 30)
+
+    output = capsys.readouterr().out
+    # 100s over 10 chapters = 10s each, 20 remaining -> 200s.
+    assert "3m20s remaining" in output
+
+
+def test_utf8_output_setup_tolerates_a_stream_that_cannot_be_reconfigured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anything that swaps sys.stdout for a plain object (pytest's own capture,
+    a StringIO) leaves a stream with no reconfigure() - forcing UTF-8 must
+    degrade quietly there rather than crashing every command."""
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+    monkeypatch.setattr(sys, "stderr", io.StringIO())
+
+    _use_utf8_output()
 
 
 def test_extract_is_a_no_op_on_an_already_extracted_book(
