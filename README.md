@@ -565,6 +565,18 @@ pytest tests/ -v
   timeline-aware to actually pick the right event for a question rather
   than just the facts. Needs its own planning pass before building.
 
+- **Surface how a thing changed, instead of silently resolving it.** Today
+  `ANSWER_SYSTEM_PROMPT` resolves two conflicting same-category facts by
+  trusting the later chapter, which throws away the more interesting half of
+  the information. Showing the progression instead - "ch.34 wounded and
+  unconscious, ch.35 recuperating, ch.36 back on his feet at the ceremony" -
+  turns a conflict-resolution rule into a genuine reading-companion feature:
+  the reader sees the state evolve across exactly the span they've read. It
+  also sidesteps the failure mode where recency silently picks wrong (see the
+  cross-event conflation limitation above), since an explicitly-presented
+  progression isn't a wrong answer even when the underlying facts disagree.
+  Wants the timeline work below to land first, so "progression" can mean
+  ordered events rather than same-category facts that merely share an entity.
 - **Configurable cross-category answer eagerness.** `ANSWER_SYSTEM_PROMPT`
   tells the model to read across *all* of an entity's categories rather than
   only the one whose name matches the question, which is what lets "what does
