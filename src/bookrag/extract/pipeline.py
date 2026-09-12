@@ -9,10 +9,37 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from bookrag.extract.resolve import load_entities, resolve_entity, save_entities
-from bookrag.providers.base import ExtractionParseError, Provider
+from bookrag.providers.base import ExtractionParseError, Provider, extraction_identity
 from bookrag.storage import library_root, load_chapters, load_metadata, series_reading_order
 
 OnChapterDone = Callable[[int, int], None]
+
+
+class ExtractionResumeMismatch(Exception):
+    """Raised when a resumed run would append a different provider/model's
+    facts onto the ones already in facts.jsonl.
+
+    extract_book's contract has always been "the same book, the same
+    provider/model, continuing an interrupted run" - this makes it true
+    rather than merely documented. A book whose chapters 0-30 were extracted
+    by one model and 31-75 by another is not a library with a footnote; it's
+    a library whose facts silently disagree about a character for reasons no
+    reader can see, and nothing downstream records which model wrote which
+    line. The refusal is deliberately loud and non-recoverable: the two ways
+    out (re-run with the original model, or --restart and pay for a full
+    fresh run) are both the caller's decision to make, not a default this
+    can pick for them.
+    """
+
+    def __init__(self, recorded: str, current: str, next_chapter_index: int) -> None:
+        super().__init__(
+            f"This book's facts were extracted with {recorded}, but this run uses {current}. "
+            f"Resuming would append one model's facts to another's, from chapter {next_chapter_index} on. "
+            f"Re-run with {recorded}, or pass --restart to discard the existing facts and start over."
+        )
+        self.recorded = recorded
+        self.current = current
+        self.next_chapter_index = next_chapter_index
 
 # Real chapters run to hundreds/thousands of words (median 1904 in a real
 # book measured); a "chapter" fragment this short is never actual narrative
@@ -77,6 +104,46 @@ def resume_start_index(
     return min(max(int(progress.get("next_chapter_index", 0)), 0), chapter_count)
 
 
+def recorded_extraction_identity(book_id: str, root: Path | None = None) -> str | None:
+    """The provider+model string saved with this book's extraction progress,
+    or None for a book extracted before this was recorded (or never
+    extracted at all). Same read-only, tolerant posture as
+    resume_start_index: an unreadable or absent file is "unknown", not an
+    error - the caller decides what unknown means."""
+    root = root or library_root()
+    progress_path = root / book_id / "extraction_progress.json"
+    if not progress_path.exists():
+        return None
+    try:
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    identity = progress.get("provider")
+    return str(identity) if identity else None
+
+
+def resume_blocker(
+    book_id: str, provider: Provider, root: Path | None = None, *, start_index: int
+) -> ExtractionResumeMismatch | None:
+    """The mismatch extract_book would raise for this (book, provider), or
+    None if resuming is fine. Returned rather than raised so cli.py can ask
+    the question *before* announcing "Resuming from chapter N" and starting a
+    run that would immediately refuse - one source of truth for the policy,
+    two call sites with different needs.
+
+    Either identity being None means unverifiable, not mismatched: a book
+    extracted before this was recorded, or a provider that doesn't identify
+    itself, must still be resumable.
+    """
+    if start_index <= 0:
+        return None
+    recorded_identity = recorded_extraction_identity(book_id, root)
+    current_identity = extraction_identity(provider)
+    if recorded_identity and current_identity and recorded_identity != current_identity:
+        return ExtractionResumeMismatch(recorded_identity, current_identity, start_index)
+    return None
+
+
 def extract_book(
     book_id: str,
     provider: Provider,
@@ -119,6 +186,14 @@ def extract_book(
             skipped_chapter_count=0,
             already_complete=True,
         )
+
+    # Deliberately after the already-complete short-circuit above: a finished
+    # book writes nothing, so there is nothing there to corrupt, and
+    # "already complete, pass --restart" is the more useful thing to say.
+    blocker = resume_blocker(book_id, provider, root, start_index=start_index)
+    if blocker is not None:
+        raise blocker
+    current_identity = extraction_identity(provider)
 
     entities = load_entities(root)
     entities_before = len(entities["entities"])
@@ -254,10 +329,20 @@ def extract_book(
                 # one chapter, whose facts are then deduplicated by entity
                 # resolution. The reverse order would advance past a chapter
                 # whose facts were never persisted.
-                progress_path.write_text(
-                    json.dumps({"chapter_count": len(chapters), "next_chapter_index": chapter.index + 1}),
-                    encoding="utf-8",
-                )
+                progress = {
+                    "chapter_count": len(chapters),
+                    "next_chapter_index": chapter.index + 1,
+                }
+                # Omitted rather than written as null when the provider has
+                # no identity, so the key's presence always means "this was
+                # verified as of the last chapter written". Note this stamps
+                # the *current* run's identity even when resuming a file that
+                # had none - the earlier chapters' model is unknowable at
+                # that point, and recording the half we do know is strictly
+                # better than recording nothing.
+                if current_identity:
+                    progress["provider"] = current_identity
+                progress_path.write_text(json.dumps(progress), encoding="utf-8")
                 if on_chapter_done is not None:
                     on_chapter_done(position, len(chapters))
     finally:

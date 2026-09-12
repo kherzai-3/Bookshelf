@@ -114,6 +114,11 @@ class OllamaProvider:
         )
         return parse_facts(content, content_type)
 
+    def extraction_identity(self) -> str:
+        # self._model, not self._answer_model - this labels who wrote a
+        # book's facts, and only extract_facts ever does that.
+        return f"ollama:{self._model}"
+
     def answer_question(self, question: str, context: str, content_type: str = "fiction") -> str:
         # No response_format/temperature override here - a chat answer is
         # free text, not a structured fact list, and benefits from Ollama's

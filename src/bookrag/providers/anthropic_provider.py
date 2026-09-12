@@ -42,6 +42,9 @@ class AnthropicProvider:
         )
         return parse_facts(raw_text, content_type)
 
+    def extraction_identity(self) -> str:
+        return f"anthropic:{self._model}"
+
     def answer_question(self, question: str, context: str, content_type: str = "fiction") -> str:
         return self._complete(ANSWER_SYSTEM_PROMPTS[content_type], build_answer_user_message(question, context))
 

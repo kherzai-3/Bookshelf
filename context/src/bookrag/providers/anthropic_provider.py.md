@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/anthropic_provider.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: c6e15d379d7f093a7f6dd25ad5aba1873bd30b27
+last_synced: 2026-09-12T10:54:08-05:00
+source_hash: 58d67f887a0ddfff6997465b6d587667e64ef7d4
 ---
 
 ## Purpose
@@ -58,3 +58,8 @@ parses a JSON array of new/changed facts back.
   provider is untested against a live API in this project at all, so
   speculatively building and tuning an unverifiable schema-forcing path
   isn't worth it until real credentials exist to validate it against.
+
+## Public Interface (added)
+- `extraction_identity() -> str` — `"anthropic:<model>"`, recorded in
+  `extraction_progress.json` so a resumed run can refuse to mix two models'
+  facts. See `base.py`'s context doc.

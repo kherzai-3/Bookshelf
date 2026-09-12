@@ -14,6 +14,13 @@ _PROPER_NOUN = re.compile(r"\b[A-Z][a-z]+\b")
 
 
 class FakeProvider:
+    def extraction_identity(self) -> str:
+        # No model behind it, so no model in the label - but it still has an
+        # identity, so resuming a real Ollama run with this one is caught
+        # rather than silently mixing deterministic stub facts into a real
+        # library.
+        return "fake"
+
     def extract_facts(
         self,
         chapter_text: str,

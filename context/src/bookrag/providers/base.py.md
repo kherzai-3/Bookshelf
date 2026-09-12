@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/base.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: 8c7f06fb27cf1a7157bb8c26a710db5df813f051
+last_synced: 2026-09-12T10:54:08-05:00
+source_hash: 638b56f37f1caed9118619dfa5c4843354d2b10c
 ---
 
 ## Purpose
@@ -55,3 +55,22 @@ twenties" via the recency rule. He would be about forty.
 
 `time_phrase` holds the text's own wording ("fifteen years earlier") copied
 verbatim, and is displayed but never parsed - see `parsing.py`'s context doc.
+
+## `extraction_identity(provider) -> str | None` (optional capability)
+
+Returns `"<provider>:<model>"` (`"ollama:qwen2.5:7b-instruct"`,
+`"anthropic:claude-sonnet-5"`, `"fake"`) for a provider that offers one, and
+`None` for one that doesn't. Recorded in `extraction_progress.json` so a
+resumed extraction can refuse to continue a different model's work - see
+`extract/pipeline.py`'s `ExtractionResumeMismatch`.
+
+**Deliberately a free function probing an optional method, not a member of
+the `Provider` protocol.** Providers are matched structurally, and the test
+suite passes many minimal stand-ins implementing `extract_facts` and nothing
+else; making identity mandatory would break all of them to serve a
+bookkeeping concern. A provider whose identity probe *raises* is treated
+exactly like one that has none - an identity exists to label a run and must
+never be what takes one down.
+
+Callers must read `None` as **"unknown, so unverifiable"**, never as "a
+different model".

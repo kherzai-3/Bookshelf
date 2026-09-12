@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: 9834d3e0e6909f8561dcf481bff08e0c25ff6505
+last_synced: 2026-09-12T10:54:08-05:00
+source_hash: f08987b81da9b60eac67ba1f35a3ec5a379486ef
 ---
 
 ## Purpose
@@ -232,3 +232,12 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   of re-ingesting (which doesn't touch chapter boundaries). A `bookrag trim
   <book-id>` or similar is a known, deliberately deferred gap (see README's
   Known Limitations).
+
+## `extract`: refusing a resume before announcing one
+
+`_extract` calls `pipeline.resume_blocker` between computing `start_index`
+and printing `"Resuming '<book>' from chapter N"`. Ordering is the whole
+point: `extract_book` would raise the same mismatch on its own, but only
+after the CLI had already told the user a multi-hour run was under way. On a
+block it prints `Refusing to resume '<book>': <message>` and returns 1
+without touching the provider or the progress file.

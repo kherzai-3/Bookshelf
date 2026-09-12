@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/fake_provider.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: 46fe86a2b01308758e0febe743d01d18c93957ff
+last_synced: 2026-09-12T10:54:08-05:00
+source_hash: 9373a1a81c19ba3455a1fbca71ca07fb6c5d8e38
 ---
 
 ## Purpose
@@ -37,3 +37,9 @@ extraction pipeline, eval harness, and CLI can all be tested without an
 
 ## Dependencies
 - None beyond stdlib (`re`).
+
+## Public Interface (added)
+- `extraction_identity() -> str` — `"fake"`. No model behind it, so no model
+  in the label, but it still *has* an identity: resuming a real Ollama run
+  with this provider is then caught rather than silently mixing
+  deterministic stub facts into a real library.

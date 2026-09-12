@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/pipeline.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: 9349b22a12a477aac51de4b092415a1820e722ae
+last_synced: 2026-09-12T10:54:08-05:00
+source_hash: c620bfdf47d46c4e793b7a9a2b22a3454fbcd25e
 ---
 
 ## Purpose
@@ -170,11 +170,15 @@ isolation (7.9s, not a hang) after the file appeared frozen.
 - Fact record written to `facts.jsonl`: `{entity_id, chapter_index,
   category, statement}` (`book_id` is implicit from the file's directory,
   same convention as `chapters.jsonl`).
-- `extraction_progress.json` (new): `{chapter_count: int, next_chapter_index:
-  int}` - `chapter_count` is a staleness guard (see Key Decisions),
-  `next_chapter_index` is where the next call resumes. Written after every
-  chapter; never deleted, including on full completion (see Key Decisions
-  for why that's deliberate).
+- `extraction_progress.json`: `{chapter_count: int, next_chapter_index: int,
+  provider?: str}` - `chapter_count` is a staleness guard (see Key
+  Decisions), `next_chapter_index` is where the next call resumes. Written
+  after every chapter; never deleted, including on full completion (see Key
+  Decisions for why that's deliberate). `provider` is the
+  `"<provider>:<model>"` identity that wrote these facts, e.g.
+  `"ollama:qwen2.5:7b-instruct"`; **optional, and absent means "unknown",
+  never "none"** - every book extracted before it was introduced has no such
+  key, and those must stay resumable.
 
 ## Dependencies
 - Internal: `bookrag.extract.resolve` (entity load/save/resolve),
@@ -261,3 +265,44 @@ than written as `null`, which is the common case. That keeps the line short
 and leaves an older record, which has neither key, indistinguishable from a
 new record that simply had no time to report; `query.facts_as_of` reads both
 with defaults either way.
+
+## Resume guard: refusing to mix two models' facts
+
+`extract_book`'s docstring has always scoped it to *"the same book, the same
+provider/model, continuing an interrupted run"* - nothing enforced it. A
+resumed run with a different `--model`/`$OLLAMA_MODEL` silently appended one
+model's facts to another's, producing a book whose facts disagree about a
+character for reasons no reader can see and that nothing downstream records.
+This nearly damaged the real library during development, which is why it was
+promoted ahead of other Phase 1 work.
+
+**Interface**
+- `ExtractionResumeMismatch(recorded, current, next_chapter_index)` - raised
+  by `extract_book`; its message names both models and both ways out.
+- `recorded_extraction_identity(book_id, root=None) -> str | None` - the
+  identity saved with a book's progress; same tolerant read as
+  `resume_start_index` (missing/unreadable is `None`, not an error).
+- `resume_blocker(book_id, provider, root=None, *, start_index) -> 
+  ExtractionResumeMismatch | None` - the policy itself, **returned rather
+  than raised** so `cli.py` can ask the question before printing
+  `"Resuming from chapter N"`. One source of truth, two call sites with
+  different needs: the CLI wants to report, the pipeline wants to stop.
+
+**Key decisions**
+- **Either identity being `None` means unverifiable, not mismatched.** A
+  provider that doesn't identify itself and a book extracted before this
+  existed must both stay resumable - refusing every pre-existing book would
+  be a far worse bug than the one being prevented.
+- **Checked after the already-complete short-circuit**, not before. A
+  finished book writes nothing, so a different model cannot corrupt it, and
+  *"already complete, pass `--restart`"* is both true and more useful than a
+  mismatch error.
+- **`--restart` is never blocked.** It discards the existing facts rather
+  than appending to them, so there is nothing to mix - and it is one of the
+  two ways out the refusal points at.
+- **The refusal is deliberately non-recoverable.** Re-running with the
+  original model and paying for a fresh full run are both the caller's
+  decision; neither is a default this can pick for them.
+- Resuming a progress file that had no identity **stamps the current run's
+  identity** onto it. The earlier chapters' model is unknowable at that
+  point, and recording the half that is knowable beats recording nothing.

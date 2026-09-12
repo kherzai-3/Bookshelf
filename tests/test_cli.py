@@ -634,3 +634,54 @@ def test_doctor_merge_duplicates_without_yes_aborts_on_no_confirmation(
     assert "Skipped" in output
     remaining_ids = {e["entity_id"] for e in load_entities(_library_root)["entities"]}
     assert {"character-a", "setting-b"} <= remaining_ids  # nothing merged
+
+
+def test_extract_refuses_a_model_mismatch_before_announcing_a_resume(
+    tmp_path: Path, _library_root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The refusal has to land *before* "Resuming from chapter N", or the
+    user is told a multi-hour run has started and then that it hasn't. It
+    also must not call the provider at all - the point is that no second
+    model's facts reach the file."""
+    epub_path = tmp_path / "sample.epub"
+    build_narrative_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    progress_path = book_dir / "extraction_progress.json"
+    chapter_count = len(load_chapters(book_dir.name))
+    progress_path.write_text(
+        json.dumps(
+            {
+                "chapter_count": chapter_count,
+                "next_chapter_index": 1,
+                "provider": "ollama:qwen2.5:7b-instruct",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _NeverCalledProvider:
+        calls = 0
+
+        def extraction_identity(self):
+            return "ollama:llama3.2:3b"
+
+        def extract_facts(self, *a, **kw):
+            type(self).calls += 1
+            return []
+
+    monkeypatch.setattr("bookrag.cli.get_provider", lambda name=None, model=None: _NeverCalledProvider())
+
+    exit_code = main(["extract", book_dir.name])
+
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert "Refusing to resume" in out
+    # The announcement line specifically, not the word "Resuming" - the
+    # refusal's own text legitimately contains "Resuming would append...".
+    assert f"Resuming '{book_dir.name}'" not in out
+    assert "ollama:qwen2.5:7b-instruct" in out and "ollama:llama3.2:3b" in out
+    assert "--restart" in out
+    assert _NeverCalledProvider.calls == 0
+    # Progress left exactly as it was - a refusal must not be destructive.
+    assert json.loads(progress_path.read_text(encoding="utf-8"))["provider"] == "ollama:qwen2.5:7b-instruct"

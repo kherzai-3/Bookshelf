@@ -32,6 +32,33 @@ class ExtractionParseError(Exception):
     caught by eval.py to score schema-conformance rather than crashing."""
 
 
+def extraction_identity(provider: object) -> str | None:
+    """Which provider+model produced a set of facts, e.g.
+    "ollama:qwen2.5:7b-instruct" - recorded in extraction_progress.json so a
+    resumed run can refuse to continue someone else's work with a different
+    model (see pipeline.ExtractionResumeMismatch).
+
+    Deliberately a free function probing an *optional* method rather than a
+    required member of the Provider protocol below. Providers are matched
+    structurally, and the test suite passes many minimal stand-ins that
+    implement extract_facts and nothing else; making this mandatory would
+    break them all to serve a bookkeeping concern. Returns None when the
+    provider doesn't offer one, which callers must read as "unknown, so
+    unverifiable" - never as "a different model".
+    """
+    describe = getattr(provider, "extraction_identity", None)
+    if not callable(describe):
+        return None
+    try:
+        identity = describe()
+    except Exception:  # noqa: BLE001 - see below
+        # An identity probe exists only to label a run; it must never be the
+        # thing that takes one down. A provider whose identity raises is
+        # treated exactly like one that has no identity at all.
+        return None
+    return str(identity) if identity else None
+
+
 class Provider(Protocol):
     def extract_facts(
         self,
@@ -42,3 +69,7 @@ class Provider(Protocol):
     ) -> list[ExtractedFact]: ...
 
     def answer_question(self, question: str, context: str, content_type: str = "fiction") -> str: ...
+
+    # Optional, intentionally not declared here: extraction_identity() ->
+    # str. Read it through the module-level extraction_identity() above,
+    # which tolerates its absence.

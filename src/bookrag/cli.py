@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from bookrag.eval import run_eval, summarize
-from bookrag.extract.pipeline import extract_book, resume_start_index
+from bookrag.extract.pipeline import extract_book, resume_blocker, resume_start_index
 from bookrag.ingest import epub_loader, pdf_loader
 from bookrag.ingest.chapter import Chapter
 from bookrag.ingest.consolidate import consolidate_fragments, should_consolidate
@@ -233,6 +233,12 @@ def _extract(args: argparse.Namespace) -> int:
     try:
         chapter_count = len(load_chapters(args.book_id))
         start_index = resume_start_index(args.book_id, restart=args.restart, chapter_count=chapter_count)
+        # Asked before the "Resuming..." line below, so a refusal never
+        # follows an announcement that the run is under way.
+        blocker = resume_blocker(args.book_id, provider, start_index=start_index)
+        if blocker is not None:
+            print(f"Refusing to resume '{args.book_id}': {blocker}")
+            return 1
         if 0 < start_index < chapter_count:
             print(f"Resuming '{args.book_id}' from chapter {start_index}")
         result = extract_book(

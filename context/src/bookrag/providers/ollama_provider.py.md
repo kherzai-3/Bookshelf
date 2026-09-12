@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/ollama_provider.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: 57dc5686a23d77ef2791bceadcb0b97c93699927
+last_synced: 2026-09-12T10:54:08-05:00
+source_hash: ae4322cf461b600a56421b65557af84bc971db2b
 ---
 
 ## Purpose
@@ -199,3 +199,10 @@ locally-running `llama3.2:3b` and `qwen2.5:7b-instruct` models.
   at all) and wasn't the timeout's sole cause (output volume per chapter
   matters at least as much as prompt length). Raising the timeout was
   chosen instead as the lower-risk fix for this pass.
+
+## Public Interface (added)
+- `extraction_identity() -> str` — `"ollama:<model>"`, from `self._model`
+  (extraction's model, never `self._answer_model` - this labels who wrote a
+  book's facts, and only `extract_facts` ever does that). Recorded in
+  `extraction_progress.json`; see `base.py`'s context doc for why it is an
+  optional capability rather than part of the `Provider` protocol.

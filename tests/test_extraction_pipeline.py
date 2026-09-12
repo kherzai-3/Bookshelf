@@ -3,7 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from bookrag.extract.pipeline import MIN_NARRATIVE_WORDS, extract_book, resume_start_index
+from bookrag.extract.pipeline import (
+    MIN_NARRATIVE_WORDS,
+    ExtractionResumeMismatch,
+    extract_book,
+    recorded_extraction_identity,
+    resume_start_index,
+)
 from bookrag.extract.resolve import load_entities
 from bookrag.ingest.chapter import Chapter
 from bookrag.providers.base import ExtractedFact, ExtractionParseError
@@ -628,3 +634,168 @@ def test_extract_persists_entities_after_every_chapter(tmp_path: Path) -> None:
 
     # Registered before the run finished, not only once it completed.
     assert entities_seen[0] > 0
+
+
+class _IdentifiedProvider:
+    """Test double that reports an extraction_identity, delegating the real
+    work to FakeProvider. The resume guard keys on identity, and the other
+    doubles in this file deliberately have none (that absence is itself
+    covered below), so exercising the guard needs a provider that does.
+    `fails_after` sets up genuine interrupted state the same way
+    _FailsAfterNChapters does."""
+
+    def __init__(self, identity: str, fails_after: int | None = None) -> None:
+        self._identity = identity
+        self._delegate = FakeProvider()
+        self._fails_after = fails_after
+        self._call_count = 0
+
+    def extraction_identity(self) -> str:
+        return self._identity
+
+    def extract_facts(
+        self,
+        chapter_text: str,
+        known_entities: list[str],
+        content_type: str = "fiction",
+        known_entity_types: dict[str, str] | None = None,
+    ) -> list[ExtractedFact]:
+        if self._fails_after is not None and self._call_count >= self._fails_after:
+            raise RuntimeError("connection dropped")
+        self._call_count += 1
+        return self._delegate.extract_facts(chapter_text, known_entities, content_type, known_entity_types)
+
+    def answer_question(self, question: str, context: str, content_type: str = "fiction") -> str:
+        return ""
+
+
+def _three_chapter_book(tmp_path: Path) -> tuple[Path, str]:
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [
+        Chapter(0, "One", f"Ishmael went to sea. {NARRATIVE_PADDING}"),
+        Chapter(1, "Two", f"Ahab commanded the ship. {NARRATIVE_PADDING}"),
+        Chapter(2, "Three", f"Starbuck protested. {NARRATIVE_PADDING}"),
+    ]
+    return root, save_book(source, chapters, title="Test Novel", root=root)
+
+
+def test_extraction_progress_records_which_provider_wrote_the_facts(tmp_path: Path) -> None:
+    root, book_id = _three_chapter_book(tmp_path)
+
+    extract_book(book_id, _IdentifiedProvider("ollama:qwen2.5:7b-instruct"), root=root)
+
+    progress = json.loads((root / book_id / "extraction_progress.json").read_text(encoding="utf-8"))
+    assert progress["provider"] == "ollama:qwen2.5:7b-instruct"
+    assert recorded_extraction_identity(book_id, root) == "ollama:qwen2.5:7b-instruct"
+
+
+def test_resuming_with_a_different_model_refuses_instead_of_mixing_facts(tmp_path: Path) -> None:
+    """extract_book's contract has always been "same book, same
+    provider/model, continuing an interrupted run" - nothing enforced it, so
+    a resumed run would happily append a second model's facts onto the
+    first's, leaving a book whose facts disagree for reasons invisible to any
+    reader and recorded nowhere."""
+    root, book_id = _three_chapter_book(tmp_path)
+    with pytest.raises(RuntimeError):
+        extract_book(book_id, _IdentifiedProvider("ollama:qwen2.5:7b-instruct", fails_after=2), root=root)
+    facts_before = (root / book_id / "facts.jsonl").read_text(encoding="utf-8")
+
+    with pytest.raises(ExtractionResumeMismatch) as caught:
+        extract_book(book_id, _IdentifiedProvider("ollama:llama3.2:3b"), root=root)
+
+    assert caught.value.recorded == "ollama:qwen2.5:7b-instruct"
+    assert caught.value.current == "ollama:llama3.2:3b"
+    assert caught.value.next_chapter_index == 2
+    # Refused before writing anything, not partway through.
+    assert (root / book_id / "facts.jsonl").read_text(encoding="utf-8") == facts_before
+
+
+def test_the_refusal_names_both_models_and_the_way_out(tmp_path: Path) -> None:
+    """A data-integrity stop is only useful if it says what to do next - the
+    two ways out (re-run with the original model, or --restart and pay for a
+    fresh run) are the caller's decision, not a default this can pick."""
+    root, book_id = _three_chapter_book(tmp_path)
+    with pytest.raises(RuntimeError):
+        extract_book(book_id, _IdentifiedProvider("ollama:qwen2.5:7b-instruct", fails_after=2), root=root)
+
+    with pytest.raises(ExtractionResumeMismatch) as caught:
+        extract_book(book_id, _IdentifiedProvider("anthropic:claude-sonnet-5"), root=root)
+
+    message = str(caught.value)
+    assert "ollama:qwen2.5:7b-instruct" in message
+    assert "anthropic:claude-sonnet-5" in message
+    assert "--restart" in message
+
+
+def test_resuming_with_the_same_model_still_works(tmp_path: Path) -> None:
+    root, book_id = _three_chapter_book(tmp_path)
+    with pytest.raises(RuntimeError):
+        extract_book(book_id, _IdentifiedProvider("ollama:qwen2.5:7b-instruct", fails_after=2), root=root)
+
+    result = extract_book(book_id, _IdentifiedProvider("ollama:qwen2.5:7b-instruct"), root=root)
+
+    assert result.resumed_from_chapter == 2
+    records = [
+        json.loads(line)
+        for line in (root / book_id / "facts.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert {r["chapter_index"] for r in records} == {0, 1, 2}
+
+
+def test_restart_is_not_blocked_by_a_model_mismatch(tmp_path: Path) -> None:
+    """--restart discards the existing facts rather than appending to them,
+    so there is nothing to mix - it is one of the two ways out the refusal
+    points at, and must not itself be refused."""
+    root, book_id = _three_chapter_book(tmp_path)
+    with pytest.raises(RuntimeError):
+        extract_book(book_id, _IdentifiedProvider("ollama:qwen2.5:7b-instruct", fails_after=2), root=root)
+
+    result = extract_book(book_id, _IdentifiedProvider("ollama:llama3.2:3b"), root=root, restart=True)
+
+    assert result.resumed_from_chapter is None
+    assert recorded_extraction_identity(book_id, root) == "ollama:llama3.2:3b"
+
+
+def test_a_book_extracted_before_identities_were_recorded_still_resumes(tmp_path: Path) -> None:
+    """Backward compatibility, and the reason the guard treats None as
+    "unverifiable" rather than "different": every book in an existing library
+    has progress recorded without a provider key, and refusing to resume all
+    of them would be a far worse bug than the one this prevents."""
+    root, book_id = _three_chapter_book(tmp_path)
+    (root / book_id / "extraction_progress.json").write_text(
+        json.dumps({"chapter_count": 3, "next_chapter_index": 2}), encoding="utf-8"
+    )
+
+    result = extract_book(book_id, _IdentifiedProvider("ollama:qwen2.5:7b-instruct"), root=root)
+
+    assert result.resumed_from_chapter == 2
+    # The half we can know gets recorded going forward, even though the
+    # earlier chapters' model is unknowable at this point.
+    assert recorded_extraction_identity(book_id, root) == "ollama:qwen2.5:7b-instruct"
+
+
+def test_a_provider_that_does_not_identify_itself_can_still_resume(tmp_path: Path) -> None:
+    """The other direction of the same rule: identity is optional on the
+    Provider protocol, so an unidentified provider is unverifiable, not
+    mismatched."""
+    root, book_id = _three_chapter_book(tmp_path)
+    with pytest.raises(RuntimeError):
+        extract_book(book_id, _IdentifiedProvider("ollama:qwen2.5:7b-instruct", fails_after=2), root=root)
+
+    result = extract_book(book_id, _FailsAfterNChapters(99), root=root)
+
+    assert result.resumed_from_chapter == 2
+
+
+def test_an_already_complete_book_says_so_rather_than_reporting_a_mismatch(tmp_path: Path) -> None:
+    """A finished book writes nothing, so a different model cannot corrupt
+    it - "already complete, pass --restart" is both true and more useful
+    than a mismatch error."""
+    root, book_id = _three_chapter_book(tmp_path)
+    extract_book(book_id, _IdentifiedProvider("ollama:qwen2.5:7b-instruct"), root=root)
+
+    result = extract_book(book_id, _IdentifiedProvider("ollama:llama3.2:3b"), root=root)
+
+    assert result.already_complete is True
