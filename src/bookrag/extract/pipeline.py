@@ -8,7 +8,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from bookrag.extract.resolve import load_entities, resolve_entity, save_entities
+from bookrag.extract.resolve import (
+    load_entities,
+    prune_book_from_entities,
+    resolve_entity,
+    save_entities,
+)
 from bookrag.providers.base import ExtractionParseError, Provider, extraction_identity
 from bookrag.storage import library_root, load_chapters, load_metadata, series_reading_order
 
@@ -40,6 +45,7 @@ class ExtractionResumeMismatch(Exception):
         self.recorded = recorded
         self.current = current
         self.next_chapter_index = next_chapter_index
+
 
 # Real chapters run to hundreds/thousands of words (median 1904 in a real
 # book measured); a "chapter" fragment this short is never actual narrative
@@ -196,6 +202,19 @@ def extract_book(
     current_identity = extraction_identity(provider)
 
     entities = load_entities(root)
+    # A restart truncates facts.jsonl (file_mode "w" below), so every entity
+    # the discarded run resolved has to go with it - otherwise it survives
+    # with nothing behind it: still seeded into known_names, still claiming
+    # this book in book_ids, still counted by `bookrag show`. Real observed
+    # consequence: an entity left claiming a book that held zero facts about
+    # it, which then looked exactly like a genuine cross-book merge.
+    # prune_book_from_entities only strips THIS book_id, so an entity an
+    # earlier series book also owns keeps that book and survives - correct,
+    # since that run's facts were not discarded.
+    if restart:
+        pruned, _ = prune_book_from_entities(entities, book_id)
+        if pruned:
+            save_entities(entities, root)
     entities_before = len(entities["entities"])
     # .get(..., "fiction"): a book ingested before content_type existed has
     # no such key in its metadata.json - defaults to the taxonomy every book

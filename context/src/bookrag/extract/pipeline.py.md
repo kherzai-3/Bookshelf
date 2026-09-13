@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/pipeline.py
-last_synced: 2026-09-12T19:49:37-05:00
-source_hash: 6dc3e41c011136c35a6e11f3f915c985e8d933c3
+last_synced: 2026-09-12T20:05:41-05:00
+source_hash: f70842bd1f675678884732b90b34be665b75966d
 ---
 
 ## Purpose
@@ -316,3 +316,22 @@ promoted ahead of other Phase 1 work.
 itself - telling the provider a name is already known while resolving that
 same name to a brand-new entity. See `extract/resolve.py`'s context doc for
 the cross-book merges this closes.
+
+## `--restart` prunes this book's entities
+
+`restart=True` reopens `facts.jsonl` in `"w"` mode, discarding the previous
+run's facts - so that run's entities have to go with them. Left in place they
+are invisible damage: still seeded into `known_names`, still claiming this
+book in `book_ids`, still counted by `bookrag show`, with not one fact behind
+them. Real observed consequence: an entity whose registry row claimed a book
+holding zero facts about it, which then looked indistinguishable from a
+genuine cross-book merge (see `library.split_cross_book_entity`, which
+handles exactly that shape).
+
+Uses `prune_book_from_entities`, which strips only **this** `book_id`. An
+entity an earlier series book also owns keeps that book and survives -
+correct, since that book's facts were not discarded, and dropping it would
+silently un-establish a character book 1 introduced.
+
+Runs before `known_names`/`known_types` are built, so a restarted run is
+seeded from what actually survives rather than from the discarded run.

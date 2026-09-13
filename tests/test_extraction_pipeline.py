@@ -840,3 +840,76 @@ def test_extract_book_keeps_unrelated_books_entities_separate(tmp_path: Path) ->
     assert sorted(b for e in michaels for b in e["book_ids"]) == sorted([book1, book2])
     # No single record claims both books.
     assert all(len(e["book_ids"]) == 1 for e in michaels)
+
+
+def test_restart_discards_the_previous_runs_entities(tmp_path: Path) -> None:
+    """--restart truncates facts.jsonl, so the entities that run resolved
+    have to go too. Left behind they are invisible damage: still seeded into
+    known_names, still claiming this book in book_ids, still counted by
+    `bookrag show`, with not one fact behind them.
+
+    Real consequence before this: an entity whose registry row claimed a book
+    that held zero facts about it, which then looked indistinguishable from a
+    genuine cross-book merge (see library.split_cross_book_entity)."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    book_id = save_book(
+        source,
+        [Chapter(0, "One", f"Ishmael went to sea. {NARRATIVE_PADDING}")],
+        title="Test Novel",
+        root=root,
+    )
+    extract_book(book_id, FakeProvider(), root=root)
+    assert [e["canonical_name"] for e in load_entities(root)["entities"]] == ["Ishmael"]
+
+    # Re-ingest different content, then restart - Ishmael is now in no chapter.
+    (root / book_id / "chapters.jsonl").write_text(
+        json.dumps({"index": 0, "title": "One", "text": f"Starbuck waited. {NARRATIVE_PADDING}"}) + "\n",
+        encoding="utf-8",
+    )
+    extract_book(book_id, FakeProvider(), root=root, restart=True)
+
+    names = [e["canonical_name"] for e in load_entities(root)["entities"]]
+    assert names == ["Starbuck"]
+    # And nothing is left claiming this book without facts to back it.
+    referenced = {
+        json.loads(line)["entity_id"]
+        for line in (root / book_id / "facts.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    assert all(e["entity_id"] in referenced for e in load_entities(root)["entities"])
+
+
+def test_restart_keeps_entities_an_earlier_series_book_still_owns(tmp_path: Path) -> None:
+    """Pruning strips only THIS book's id. An entity an earlier series book
+    also owns keeps that book and survives - its facts were never discarded,
+    and dropping it would silently un-establish a character book 1
+    introduced."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    book1 = save_book(
+        source,
+        [Chapter(0, "One", f"Ishmael set sail. {NARRATIVE_PADDING}")],
+        title="Saga Book One",
+        series_name="Saga",
+        series_position=1,
+        root=root,
+    )
+    extract_book(book1, FakeProvider(), root=root)
+    book2 = save_book(
+        source,
+        [Chapter(0, "One", f"Ishmael returned. {NARRATIVE_PADDING}")],
+        title="Saga Book Two",
+        series_name="Saga",
+        series_position=2,
+        root=root,
+    )
+    extract_book(book2, FakeProvider(), root=root)
+
+    extract_book(book2, FakeProvider(), root=root, restart=True)
+
+    ishmael = [e for e in load_entities(root)["entities"] if e["canonical_name"] == "Ishmael"]
+    assert len(ishmael) == 1
+    assert book1 in ishmael[0]["book_ids"]
