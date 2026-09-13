@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/registry.py
-last_synced: 2026-09-02T00:00:00Z
-source_hash: 62d98e276ecbe8adfb3429301976083a445c1b8d
+last_synced: 2026-09-13T15:24:02Z
+source_hash: 4e2a557d2c2bb5ecf8f06123c35fdf89fa2ddd29
 ---
 
 ## Purpose
@@ -34,4 +34,6 @@ this rather than importing a specific provider directly.
 ## Dependencies
 - Internal: `bookrag.providers.anthropic_provider.AnthropicProvider`,
   `bookrag.providers.ollama_provider.OllamaProvider`,
-  `bookrag.providers.fake_provider.FakeProvider` (all three lazy)
+  `bookrag.providers.fake_provider.FakeProvider` (all three lazy),
+  `bookrag.env.env_str` (`$BOOKRAG_PROVIDER` — a blank value in `.env` counts
+  as unset rather than resolving to an unknown provider named `""`)

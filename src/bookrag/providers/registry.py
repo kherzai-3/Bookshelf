@@ -4,8 +4,7 @@ be available."""
 
 from __future__ import annotations
 
-import os
-
+from bookrag.env import env_str
 from bookrag.providers.base import Provider
 
 DEFAULT_PROVIDER = "ollama"  # no API key needed - the practical default here
@@ -15,7 +14,7 @@ def get_provider(name: str | None = None, model: str | None = None) -> Provider:
     """`model` overrides the provider's own default/env-var model (e.g. pick
     a bigger Ollama model on a machine with a GPU). Ignored for "fake",
     which has no underlying model to select."""
-    name = name or os.environ.get("BOOKRAG_PROVIDER", DEFAULT_PROVIDER)
+    name = name or env_str("BOOKRAG_PROVIDER", DEFAULT_PROVIDER)
 
     if name == "anthropic":
         from bookrag.providers.anthropic_provider import AnthropicProvider

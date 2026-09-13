@@ -5,10 +5,10 @@ adding an HTTP client dependency, since it's just one JSON POST."""
 from __future__ import annotations
 
 import json
-import os
 import urllib.error
 import urllib.request
 
+from bookrag.env import env_int, env_str
 from bookrag.providers.base import ExtractedFact
 from bookrag.providers.parsing import extraction_response_schema, parse_facts
 from bookrag.providers.prompts import (
@@ -81,16 +81,16 @@ class OllamaProvider:
         num_ctx: int | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
-        self._model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
+        self._model = model or env_str("OLLAMA_MODEL", DEFAULT_MODEL)
         # A single `model` override (constructor arg or `--model`) applies to
         # whichever attribute the caller actually uses - extract_facts only
         # ever reads self._model, answer_question only ever reads
         # self._answer_model, and no caller uses both on the same instance -
         # so this is never ambiguous in practice despite one override
         # feeding both.
-        self._answer_model = model or os.environ.get("OLLAMA_ANSWER_MODEL", DEFAULT_ANSWER_MODEL)
-        self._base_url = (base_url or os.environ.get("OLLAMA_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
-        self._num_ctx = num_ctx or int(os.environ.get("OLLAMA_NUM_CTX", DEFAULT_NUM_CTX))
+        self._answer_model = model or env_str("OLLAMA_ANSWER_MODEL", DEFAULT_ANSWER_MODEL)
+        self._base_url = (base_url or env_str("OLLAMA_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
+        self._num_ctx = num_ctx or env_int("OLLAMA_NUM_CTX", DEFAULT_NUM_CTX)
         self._timeout = timeout
 
     def extract_facts(

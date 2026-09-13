@@ -15,6 +15,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/cli.py](src/bookrag/cli.py.md) — `bookrag ingest|extract|eval|chat|list|show|remove|doctor` CLI entry point.
 - [src/bookrag/library.py](src/bookrag/library.py.md) — library-wide list/show/remove/doctor: extraction-status summaries and index/entities.json consistency cleanup.
 - [src/bookrag/titles.py](src/bookrag/titles.py.md) — last-resort title/author guess from a filename.
+- [src/bookrag/env.py](src/bookrag/env.py.md) — reads settings from the environment/`.env`; a blank value counts as unset, not as an empty-string override.
 - [src/bookrag/providers/__init__.py](src/bookrag/providers/__init__.py.md) — `providers` subpackage marker.
 - [src/bookrag/providers/base.py](src/bookrag/providers/base.py.md) — `ExtractedFact`, `Provider` Protocol (`extract_facts` + `answer_question`), `ExtractionParseError`.
 - [src/bookrag/providers/fake_provider.py](src/bookrag/providers/fake_provider.py.md) — deterministic no-network provider, for tests.
@@ -34,6 +35,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [tests/test_storage_series_reading_order.py](../tests/test_storage_series_reading_order.py.md) — covers `series_reading_order`.
 - [tests/test_cli.py](../tests/test_cli.py.md) — end-to-end `bookrag ingest|extract|eval` coverage, plus CLI-plumbing coverage of `list|show|remove|doctor`.
 - [tests/test_library.py](../tests/test_library.py.md) — covers `library.py`'s list/show/remove/doctor logic in depth.
+- [tests/test_env.py](../tests/test_env.py.md) — covers `env.py`'s blank-means-unset rule, and that copying `.env.example` to `.env` leaves every default intact.
 - [tests/test_titles.py](../tests/test_titles.py.md) — covers `titles.guess_title_author`, including the real `Finite-and-Infinite-Games-by-James-Carse` case.
 - [tests/test_resolve.py](../tests/test_resolve.py.md) — covers entity resolution (exact/alias match, type separation).
 - [tests/test_fake_provider.py](../tests/test_fake_provider.py.md) — covers `FakeProvider`'s deterministic extraction.

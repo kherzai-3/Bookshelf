@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/storage.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: 4f92efc240add5df9b03e33b2d80301c488d59ab
+last_synced: 2026-09-13T15:24:02Z
+source_hash: db78e26b452715b0cd531ade384d3f965cb26a93
 ---
 
 ## Purpose
@@ -79,7 +79,11 @@ listing/grouping books without ever merging their chapter numbering.
   `test_save_book_leaves_no_partial_directory_on_failure`.
 
 ## Dependencies
-- Internal: `bookrag.ingest.chapter.Chapter`
+- Internal: `bookrag.ingest.chapter.Chapter`, `bookrag.env.env_str`
+  (`$BOOKRAG_LIBRARY_ROOT`/`$BOOKRAG_INCOMING_ROOT` — routed through the shared
+  helper so a blank value in `.env` counts as unset, same rule as everywhere
+  else; this file's previous inline `if root else` check was already correct,
+  but only incidentally)
 
 ## Data Contracts
 - `metadata.json`: `{book_id, title, author, series: {name, position} | null,

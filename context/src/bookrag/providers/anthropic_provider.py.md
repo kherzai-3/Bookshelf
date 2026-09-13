@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/anthropic_provider.py
-last_synced: 2026-09-12T10:54:08-05:00
-source_hash: 58d67f887a0ddfff6997465b6d587667e64ef7d4
+last_synced: 2026-09-13T15:24:02Z
+source_hash: e8913304d0fce2f3ad020b3931e249547dd8d3bc
 ---
 
 ## Purpose
@@ -45,6 +45,9 @@ parses a JSON array of new/changed facts back.
 - Internal: `bookrag.providers.parsing.parse_facts`,
   `bookrag.providers.prompts` (`EXTRACTION_SYSTEM_PROMPTS`,
   `ANSWER_SYSTEM_PROMPTS`, `build_user_message`, `build_answer_user_message`)
+  `bookrag.env.env_str` (`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` — a blank value
+  in `.env` counts as unset, so `.env.example`'s empty `ANTHROPIC_MODEL=` line
+  no longer replaces `DEFAULT_MODEL` with `""`)
 - External: `anthropic`, `python-dotenv`
 
 ## Open Questions / TODOs

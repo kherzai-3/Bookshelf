@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import os
-
+from bookrag.env import env_str
 from bookrag.providers.base import ExtractedFact
 from bookrag.providers.parsing import parse_facts
 from bookrag.providers.prompts import (
@@ -18,7 +17,7 @@ DEFAULT_MODEL = "claude-sonnet-5"
 
 class AnthropicProvider:
     def __init__(self, model: str | None = None) -> None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        api_key = env_str("ANTHROPIC_API_KEY")
         if not api_key:
             raise RuntimeError(
                 "ANTHROPIC_API_KEY is not set (checked environment and .env). "
@@ -27,7 +26,7 @@ class AnthropicProvider:
         import anthropic
 
         self._client = anthropic.Anthropic(api_key=api_key)
-        self._model = model or os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
+        self._model = model or env_str("ANTHROPIC_MODEL", DEFAULT_MODEL)
 
     def extract_facts(
         self,

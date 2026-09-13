@@ -12,23 +12,23 @@ series) - it never merges two books' chapters into one numbering space.
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from bookrag.env import env_str
 from bookrag.ingest.chapter import Chapter
 
 
 def library_root() -> Path:
-    root = os.environ.get("BOOKRAG_LIBRARY_ROOT")
+    root = env_str("BOOKRAG_LIBRARY_ROOT")
     return Path(root) if root else Path("data/library")
 
 
 def incoming_root() -> Path:
-    root = os.environ.get("BOOKRAG_INCOMING_ROOT")
+    root = env_str("BOOKRAG_INCOMING_ROOT")
     return Path(root) if root else Path("data/incoming")
 
 

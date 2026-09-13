@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/ollama_provider.py
-last_synced: 2026-09-12T10:54:08-05:00
-source_hash: ae4322cf461b600a56421b65557af84bc971db2b
+last_synced: 2026-09-13T15:24:02Z
+source_hash: f1abbc5d6c692ba7d81e9ea5f0096bc72f18efbb
 ---
 
 ## Purpose
@@ -48,6 +48,13 @@ locally-running `llama3.2:3b` and `qwen2.5:7b-instruct` models.
   `extract_facts`'s call doesn't pass it and gets `self._model` as before).
 
 ## Key Decisions
+- **Every env-var read goes through `bookrag.env`, not `os.environ.get`.** All
+  four settings here (`OLLAMA_MODEL`, `OLLAMA_ANSWER_MODEL`, `OLLAMA_BASE_URL`,
+  `OLLAMA_NUM_CTX`) used to read `os.environ.get(name, DEFAULT)`, which returns
+  `""` — not the default — for a variable that is present but empty. That is
+  exactly what a `.env` copied from `.env.example` produces, so
+  `int(os.environ.get("OLLAMA_NUM_CTX", 16384))` became `int("")` and raised on
+  every single call. See `context/src/bookrag/env.py.md` for the full account.
 - **`DEFAULT_MODEL` changed from `"llama3.2:3b"` to `"qwen2.5:7b-instruct"`,
   and chat answering got its own independent `DEFAULT_ANSWER_MODEL`
   constant (same value today, but not derived from `DEFAULT_MODEL`).** Real,
@@ -152,7 +159,7 @@ locally-running `llama3.2:3b` and `qwen2.5:7b-instruct` models.
 - Internal: `bookrag.providers.parsing` (`parse_facts`,
   `extraction_response_schema`), `bookrag.providers.prompts`
   (`EXTRACTION_SYSTEM_PROMPTS`, `ANSWER_SYSTEM_PROMPTS`, `build_user_message`,
-  `build_answer_user_message`)
+  `build_answer_user_message`), `bookrag.env` (`env_str`, `env_int`)
 - External: none beyond stdlib (`urllib`); requires Ollama itself running
   locally with the target model pulled (`ollama pull qwen2.5:7b-instruct`)
 
