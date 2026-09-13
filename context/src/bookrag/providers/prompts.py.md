@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/prompts.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: bdc7d7e9f2b16b41e4f1de8705e8c3a447d7163b
+last_synced: 2026-09-12T19:14:46-05:00
+source_hash: 979b74e700912e53cccd08f3c6ee7d7982161563
 ---
 
 ## Purpose
@@ -216,3 +216,73 @@ book's `content_type` (see `storage.py`/`extract/pipeline.py`).
   from another section; an **Expected or planned** line had not happened yet.
   It also tells the model to reuse a `time_phrase` as-is rather than
   converting or calculating from it.
+
+## Measured: the Background-leak fix (2026-09-12, real Ollama A/B)
+
+After the re-extraction populated `when`, the King Duncan case still failed
+at the *answer* layer even though the data and the render were both correct.
+`format_context` filed the fact properly:
+
+```
+King Duncan
+  Background - happened BEFORE the story's present, ...:
+    [ch 4 - when the old king's sickness progressed] (status) King Duncan
+    was a youth in his twenties when he became king.
+```
+
+and the model still replied *"the latest we know is that he is still in his
+twenties"* - applying the recency rule to a Background line, which this
+prompt already forbade **and already illustrated with this exact scenario**.
+So the remaining defect was not missing instruction; it was instruction the
+7B did not bind to.
+
+**Four targeted edits**, each aimed at an observed mechanism rather than a
+general "be more careful":
+1. The sentence introducing the sections said *"split into two kinds"* while
+   listing four - the miscount was in the very sentence that frames the
+   section the model then ignored. Now "up to four sections... A rule stated
+   for one section NEVER applies to another".
+2. The recency rule lived inside the Standing bullet but was never *scoped*,
+   so the model generalized it across sections. Now "Here, and ONLY here...
+   Never apply this rule to a line from any other section".
+3. Added "never treat a single lone fact as 'the latest known state' - one
+   fact is not a sequence" - the model was reading its only fact as its
+   most recent one.
+4. Added the missing case, which is the actual Duncan shape: **when
+   Background is the only source for an attribute, the facts do not say what
+   it is now, and the honest answer says so** rather than carrying the old
+   value forward.
+
+**Result, n=20 per arm** (context built once and reused, so the prompt is the
+only variable):
+
+| | leaked "still in his twenties" | still conveyed the fact |
+|---|---|---|
+| baseline | 7/20 | 8/10 (first batch) |
+| candidate | **0/20** | **10/10** |
+
+Fisher's exact two-tailed **p = 0.0083**. Sample size was fixed at n=10 per
+batch *before* looking at any output, and a second batch was run specifically
+because the first (4/10 vs 0/10) sat at p = 0.087 - an earlier experiment in
+this project (answer temperature 0.4) looked like a clean win at n=6 and
+evaporated at n=10, and that mistake is not worth repeating.
+
+The candidate does not win by evasion: it reports the Background fact, states
+that it describes an earlier time, and says the present value is unknown.
+
+**Regression check** (n=5 per arm, three questions the facts genuinely do
+answer, guarding against the new "say the book hasn't told you" instruction
+over-triggering into refusals):
+
+| question | baseline | candidate |
+|---|---|---|
+| What does Halt look like? | 15/15 content, 0 refusals | 15/15, 0 refusals |
+| What happened to Halt vs the Kalkara? | 9/10, 0 death-fusions | **10/10**, 0 |
+| Who is Will apprenticed to? | 5/5, 0 refusals | 5/5, 0 refusals |
+
+No content loss and no over-refusal anywhere.
+
+**Not asserted in a test.** Prompt text is tuned by measurement against a
+specific model, not by unit test; an assertion on this wording would freeze a
+7B's quirk into the suite. This section is the record instead - same posture
+as `parsing.py`'s `maxItems` measurement.

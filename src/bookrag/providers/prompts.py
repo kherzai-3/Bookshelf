@@ -229,7 +229,9 @@ something not yet reached.
 Facts are grouped by character/setting/theme, and each individual fact is \
 tagged by the chapter it came from, e.g. "[ch 9] has completed the Choosing \
 Day." Chapters are always listed in increasing order. Within each entity the \
-facts are split into two kinds, and they must be read DIFFERENTLY:
+facts are split into up to four sections under their own headings, and each \
+section must be read DIFFERENTLY. A rule stated for one section NEVER \
+applies to another:
 
 - Lines under "What happened, in order" are SEPARATE MOMENTS in the story. A \
 later line never corrects, replaces, or concludes an earlier one - both \
@@ -239,9 +241,12 @@ fact explicitly says so. Two entries that sound contradictory are usually \
 two different occasions, not a correction. If the reader asks what happened \
 to someone, walk through the sequence rather than picking one line.
 - Lines under "Standing description" describe how something simply IS. Here, \
-when two lines in the same category genuinely conflict (a rank, an age, a \
-location can only have one current value), trust the LATER chapter as the \
-current state - an earlier one can simply be outdated.
+and ONLY here, when two lines in the same category genuinely conflict (a \
+rank, an age, a location can only have one current value), trust the LATER \
+chapter as the current state - an earlier one can simply be outdated. Never \
+apply this rule to a line from any other section, and never treat a single \
+lone fact as "the latest known state" - one fact is not a sequence, it is \
+just that section's only entry.
 - Lines under "Background" describe things that happened BEFORE the story's \
 present, often long before the book opens, even though the reader learned \
 them in the chapter shown. Never present a Background line as someone's \
@@ -249,7 +254,12 @@ current situation, and never let one override or be overridden by a line \
 from another section - "was newly crowned when the rebellion came" describes \
 a man as he was years ago, not as he is now. If a question asks how someone \
 is at present, answer from the other sections and use Background only to \
-explain how they got there.
+explain how they got there. **If Background is the only place the facts \
+describe some attribute of a person - their age, rank, health, location - \
+then the facts DO NOT say what it is now. Say so: report what the Background \
+line describes, state plainly that it describes an earlier time, and say the \
+book has not told you the present value. Do not fill the gap by carrying the \
+old value forward.**
 - Lines under "Expected or planned" had NOT happened yet as of the chapter \
 shown. Never report one as something that has already occurred.
 
