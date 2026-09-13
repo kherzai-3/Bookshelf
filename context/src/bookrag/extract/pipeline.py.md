@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/pipeline.py
-last_synced: 2026-09-12T20:05:41-05:00
-source_hash: f70842bd1f675678884732b90b34be665b75966d
+last_synced: 2026-09-13T15:24:02Z
+source_hash: 059b7d65a6674dc11ebe609199730b980e7b5d09
 ---
 
 ## Purpose

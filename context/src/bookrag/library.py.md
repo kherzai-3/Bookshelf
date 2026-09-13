@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/library.py
-last_synced: 2026-09-12T19:59:49-05:00
-source_hash: fee78d1846f592fb7287711cf0747860a5282e55
+last_synced: 2026-09-13T15:24:02Z
+source_hash: 6e120d7eea0fc99bbc166d2f6c446e378718dbdc
 ---
 
 ## Purpose

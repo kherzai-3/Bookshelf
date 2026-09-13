@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/resolve.py
-last_synced: 2026-09-12T19:49:37-05:00
-source_hash: c92dafa104f944f41e7da5830c10141784733b4f
+last_synced: 2026-09-13T15:24:02Z
+source_hash: 273b66f76ec27429bf0c6f284b575c8167db953f
 ---
 
 ## Purpose
