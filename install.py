@@ -255,6 +255,91 @@ def verify_install():
         )
 
 
+def context_doc_for(relative):
+    """context/<path>.md for a source file, or None if there isn't one."""
+    doc = os.path.join(ROOT, "context", relative + ".md")
+    return doc if os.path.isfile(doc) else None
+
+
+def recorded_hash(doc_path):
+    """The source_hash out of a context doc's frontmatter, or None."""
+    with open(doc_path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("source_hash:"):
+                return line.split(":", 1)[1].strip()
+            if line.startswith("## "):
+                break  # past the frontmatter
+    return None
+
+
+def source_files():
+    """Every .py under src/ and tests/, as repo-relative slash-separated paths."""
+    found = []
+    for top in ("src", "tests"):
+        base = os.path.join(ROOT, top)
+        if not os.path.isdir(base):
+            continue
+        for dirpath, dirnames, filenames in os.walk(base):
+            if "__pycache__" in dirnames:
+                dirnames.remove("__pycache__")
+            for name in filenames:
+                if not name.endswith(".py"):
+                    continue
+                full = os.path.join(dirpath, name)
+                found.append(os.path.relpath(full, ROOT).replace(os.sep, "/"))
+    return sorted(found)
+
+
+def check_context_docs():
+    """Report source files whose context/<path>.md is out of date.
+
+    This project keeps a mirrored context doc per source file, each recording
+    the sha1 of the source it describes. Drift means someone changed code
+    without updating the doc that explains it - the docs are meant to be
+    readable instead of the source, so a stale one is worse than none.
+
+    The hash is taken over CR-stripped content, matching
+    .claude/hooks/check_drift.sh exactly. .gitattributes normalizes to LF on
+    commit, so hashing raw bytes reports drift on files a checkout merely
+    rewrote - which is most of what an earlier "stale docs" backlog turned out
+    to be. The hook stays authoritative; this is the same check for anyone not
+    running Claude Code.
+    """
+    import hashlib
+
+    step("Checking context docs against their sources")
+    if not os.path.isdir(os.path.join(ROOT, "context")):
+        note("no context/ directory - skipping")
+        return
+
+    stale = []
+    missing = []
+    checked = 0
+    for relative in source_files():
+        doc = context_doc_for(relative)
+        if doc is None:
+            missing.append(relative)
+            continue
+        with open(os.path.join(ROOT, relative), "rb") as handle:
+            digest = hashlib.sha1(handle.read().replace(b"\r", b"")).hexdigest()
+        checked += 1
+        if digest != recorded_hash(doc):
+            stale.append(relative)
+
+    if not stale and not missing:
+        ok("all %d context docs match their sources" % checked)
+        return
+    if stale:
+        warn("%d context doc(s) are out of date with their source" % len(stale))
+        for relative in stale:
+            note("  context/%s.md" % relative)
+    if missing:
+        warn("%d source file(s) have no context doc" % len(missing))
+        for relative in missing:
+            note("  " + relative)
+    note("See CLAUDE.md for the convention. This does not affect the install.")
+
+
 def run_tests():
     step("Running the test suite")
     note("this takes a couple of minutes")
@@ -498,6 +583,10 @@ def parse_args(argv):
         "--run-tests", action="store_true",
         help="run the test suite after installing",
     )
+    parser.add_argument(
+        "--skip-doc-check", action="store_true",
+        help="skip the context-doc freshness check",
+    )
     parser.set_defaults(pull="ask")
     return parser.parse_args(argv)
 
@@ -513,6 +602,8 @@ def main(argv=None):
     seed_env_file()
     create_data_dirs()
     verify_install()
+    if not args.skip_doc_check:
+        check_context_docs()
     if args.run_tests:
         run_tests()
     if args.skip_ollama:

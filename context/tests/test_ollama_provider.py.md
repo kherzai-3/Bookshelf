@@ -1,7 +1,7 @@
 ---
 source: tests/test_ollama_provider.py
-last_synced: 2026-09-02T00:00:00Z
-source_hash: 881e3ec4ca54c21f7a7a702757db0dbb30dd9dec
+last_synced: 2026-09-13T16:40:00Z
+source_hash: c600c1743850864e8a92029b156e85fe20864628
 ---
 
 ## Purpose
@@ -14,5 +14,7 @@ model where it's available.
 ## Key Decisions
 - Only asserts the response parsed into well-formed `ExtractedFact`s - a
   real LLM's exact content isn't asserted (non-deterministic), just that
-  the pipeline (network call → `format: "json"` → `parse_facts`) works
-  end-to-end without raising.
+  the pipeline (network call → schema-constrained decoding → `parse_facts`)
+  works end-to-end without raising. `format` now carries a full JSON Schema
+  from `extraction_response_schema()`, not the bare string `"json"` it was
+  written against.

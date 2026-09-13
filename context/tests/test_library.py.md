@@ -1,7 +1,7 @@
 ---
 source: tests/test_library.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: 8f43205d1177ff373d1b8619d1e5411775ec5b26
+last_synced: 2026-09-13T16:40:00Z
+source_hash: f1b7cdfe4f262b2832f595f7a24cdfa43c9cecf3
 ---
 
 ## Purpose
@@ -23,6 +23,23 @@ potentially multiple book directories, `aliases` populated from every
 merged-away entity's own name/aliases, `book_ids` unioned, defaulting
 `keep` to the most-facts entity, and the `ValueError` cases: fewer than
 two real entity_ids, or a `keep` that isn't one of them).
+
+Also covers two areas added since:
+- **Facts pointing at an unregistered entity**
+  (`test_run_doctor_reports_a_fact_pointing_at_an_unregistered_entity`,
+  `test_doctor_fix_never_deletes_facts_with_an_unregistered_entity`) — doctor
+  reports it, and `--fix` deliberately will not resolve it by deleting facts.
+  Extracted facts are the expensive artifact (hours of real model time);
+  registry entries are cheap to rebuild.
+- **Cross-book entity detection and splitting** — the repair for entities
+  wrongly shared between unrelated books before identity was series-scoped:
+  `test_doctor_detects_an_entity_shared_by_unrelated_books`,
+  `test_doctor_does_not_flag_an_entity_shared_within_one_series` (the
+  legitimate case must not be flagged),
+  `test_split_gives_each_book_its_own_entity_and_rewrites_its_facts`,
+  `test_split_drops_a_book_reference_with_no_facts_behind_it`, and
+  `test_split_preserves_every_fact` — the load-bearing one, since a split
+  rewrites fact rows across multiple book directories and must not lose any.
 
 ## Key Decisions
 - Book fixtures are built via the real `storage.save_book` (`_make_book`

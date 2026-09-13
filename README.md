@@ -27,8 +27,28 @@ then reports whether Ollama is reachable and whether the default model is
 pulled — offering to download it if not. It never installs Python or Ollama
 themselves.
 
-It is safe to re-run, and re-running is how you update after a `git pull`. An
-existing `.venv` and an existing `.env` are reused, never overwritten.
+**One command, at most one question.** The only thing it ever asks is whether
+to download the default model, and only when Ollama is running and that model
+isn't pulled yet — because that is a multi-GB download that shouldn't start
+without you saying so. Pass `--pull-model` to answer it in advance and make the
+whole run unattended, or `--no-pull-model` to decline it. Everything else is
+automatic.
+
+### Updating
+
+```bash
+git pull
+python install.py
+```
+
+Re-running is the update path. `.venv` and `.env` are reused, never
+overwritten; dependencies are re-resolved, so a change to `requirements.txt`
+is picked up; and because `bookrag` is installed in editable mode, changed
+Python source is already live without reinstalling anything. Your library
+under `data/` is never touched — it is not part of the install.
+
+You only need `--recreate` if the venv itself is broken or the required Python
+version changed.
 
 ```bash
 python install.py --run-tests      # also run the test suite afterwards
@@ -36,7 +56,13 @@ python install.py --pull-model     # download the default model without asking
 python install.py --no-pull-model  # never download it, don't even ask
 python install.py --skip-ollama    # skip the Ollama check entirely
 python install.py --recreate       # delete and rebuild .venv from scratch
+python install.py --skip-doc-check # skip the context-doc freshness check
 ```
+
+It also checks that every `context/<path>.md` still matches the source file it
+describes (see "For future development sessions" below) and names any that
+drifted. That is a contributor-facing check — it never affects the install, and
+a clean checkout simply reports that all of them match.
 
 Ollama being absent is a warning, not a failure — `bookrag ingest` and
 `--provider fake` work without it.
@@ -429,10 +455,15 @@ pytest tests/ -v
   - a missing field in an old book is evidence about its extraction date.
 - **Two distinct occurrences can still be fused into one claim.** The
   recency rule ("a later chapter supersedes an earlier one") is only valid
-  for standing attributes, not for events. Answer-layer rendering now
-  separates the two (see `query.format_context`), which removed the known
-  trigger from real data, but the underlying rule is unfixed and there is
-  currently no live reproduction of it.
+  for standing attributes, not for events. The real case that exposed it:
+  asked "what happened to Halt during the fight with the Kalkara?" (a ch.33-36
+  event), the answer pulled in an unrelated ch.66 fact about a separate battle
+  and concluded Halt died fighting the Kalkara, which is not what happened -
+  two unrelated occurrences that merely shared an entity and a category.
+  Answer-layer rendering now separates occurrences from standing attributes
+  (see `query.format_context`), which removed the known trigger from real
+  data, but the underlying rule is unfixed and there is currently no live
+  reproduction of it.
 - **No cleanup/trim tool exists yet.** The sanity summary printed after
   ingest is diagnostic only - if it reveals bad chapters (front/back-matter
   noise, junk titles), there is currently no command to fix them up; the
@@ -531,34 +562,28 @@ pytest tests/ -v
   normalization/fuzzy matching against known entity names (see "Chatting
   with a book" above), not embedding-based search over fact content; that
   remains future work (see Future ideas).
-- **Entity resolution is scoped to the whole library, not to a series.**
-  `resolve_entity` matches purely on `(name, entity_type)`, with no check
-  that the books involved are actually related - intentional for the series
-  case (a character's facts should accumulate across sequential books), but
-  it applies globally: two entirely unrelated books that each introduce a
-  same-named, same-typed entity would silently share one `entity_id` in
-  `entities.json`. Each book's own `facts.jsonl` stays correctly scoped
-  regardless (this isn't a spoiler-safety issue), but the shared entity
-  registry would conflate two different identities. Not yet observed in
-  practice (no two books in the current library share a character name);
-  noted here so it isn't rediscovered from scratch if one ever does.
+- ~~Entity resolution is scoped to the whole library, not to a series~~
+  **Resolved.** `resolve_entity` used to match purely on `(name,
+  entity_type)` with no check that the books involved were related, so two
+  unrelated books that each introduced a same-named, same-typed entity
+  silently shared one `entity_id`. This was **not** hypothetical, contrary to
+  what this entry claimed for a while: four real cross-book merges were found
+  in this project's own library. Identity is now scoped to
+  `series_reading_order(book_id)`, and `bookrag doctor --split-cross-book`
+  repairs libraries that already merged. Each book's own `facts.jsonl` was
+  always correctly scoped regardless, so this was never a spoiler-safety
+  issue. The default scope is deliberately the *narrow* one (just the book
+  itself): scoping too narrowly duplicates an entity within a series, which is
+  visible and repairable by a merge tool, while scoping too widely fuses two
+  unrelated characters, which is invisible and cannot be undone by merging.
 - ~~No resumable extraction~~ **Resolved (2026-09-09)** - see "Extracting
-  facts" above. Scoped narrowly to the same book/same provider continuing
-  an interrupted run; it doesn't validate that a resumed run uses the same
-  provider/model as the interrupted one, and it isn't a multi-version
-  system (running a bigger model later without discarding a smaller
-  model's results - see Future ideas).
-- **`bookrag chat`'s recency-conflict rule can conflate two different real
-  events, not just an updated status for the same one.** Real observed
-  case: asked "what happened to Halt during the fight with the Kalkara?" (a
-  real ch.33-36 event), the answer pulled in an unrelated ch.66 fact
-  ("killed in the attempt to stop the Skandians" - a separate battle
-  entirely) and concluded Halt died fighting the Kalkara, which isn't what
-  happened. `ANSWER_SYSTEM_PROMPT`'s instruction to trust the LATER chapter
-  when two same-category facts about the same entity conflict has no way
-  to distinguish an actual status update from two unrelated occurrences
-  that just happen to share a category and entity. Not yet investigated or
-  fixed.
+  facts" above. It is not a multi-version system (running a bigger model later
+  without discarding a smaller model's results - see Future ideas), but a
+  resumed run *is* now checked against the model that wrote the existing
+  facts: `extraction_progress.json` records a provider identity, and resuming
+  with a different model is refused rather than silently mixing two models'
+  output in one `facts.jsonl`. A book extracted before identities were
+  recorded still resumes - unknown means unverifiable, not mismatched.
 
 ## Future ideas (need a planning pass before building)
 

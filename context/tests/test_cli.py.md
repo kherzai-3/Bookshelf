@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: 1ff7dc73b832f6a1e02ab56d4f10635b279c29ef
+last_synced: 2026-09-13T16:40:00Z
+source_hash: 9d98b2d844b8c64eb327550a8dff54608d1c6cc8
 ---
 
 ## Purpose
@@ -38,6 +38,27 @@ questions in one session (via a fake multi-answer `input()`) must produce
 two *different* recorded `context` values on a `_RecordingProvider`,
 confirming retrieval now actually runs per question instead of once
 before the loop starts.
+
+Also covers, added since the above:
+- **Model-mismatch refusal at the CLI boundary**
+  (`test_extract_refuses_a_model_mismatch_before_announcing_a_resume`): the
+  check must run *before* the "Resuming ..." line is printed, so the user is
+  never told a resume is happening that is then refused.
+- **The ETA denominator** (`test_progress_estimate_ignores_chapters_an_earlier_
+  run_already_did`, `..._on_a_fresh_run_counts_every_completed_chapter`): a
+  resumed run must divide elapsed time by chapters *this* run did, not by the
+  absolute chapter position.
+- **Console encoding** (`test_utf8_output_setup_tolerates_a_stream_that_cannot_
+  be_reconfigured`): stdout is reconfigured to UTF-8 so a cp1252 Windows
+  console doesn't render correct data as mojibake, guarded so an already-
+  replaced stream (pytest capture) doesn't break.
+- **Content type at the CLI**: `ingest` defaults to fiction, takes an explicit
+  `--content-type`, and `chat` reads it back out of `metadata.json` to pick the
+  answer prompt.
+- **Fragment consolidation at ingest**
+  (`test_ingest_consolidates_many_small_fragments`).
+- `chat`'s remaining argument handling: an out-of-range `--chapter` and an
+  unknown `book_id` both fail cleanly.
 
 ## Key Decisions
 - The `_library_root` autouse fixture points `BOOKRAG_LIBRARY_ROOT` at a

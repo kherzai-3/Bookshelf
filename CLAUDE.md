@@ -27,9 +27,16 @@ about to change it or the context doc is insufficient.
 - A `Stop` hook (`.claude/hooks/check_dirty.sh`) blocks the turn from ending while
   that file is non-empty, naming which files still need attention and what kind.
 - A `SessionStart` hook (`.claude/hooks/check_drift.sh`) checks, once per session,
-  whether any `src/` file's hash has drifted from the `source_hash` recorded in its
-  context doc (catches edits made outside Edit/Write, e.g. a manual save) and
-  reports it as informational context — it does not block.
+  whether any `.py` file under `src/` **or `tests/`** has drifted from the
+  `source_hash` recorded in its context doc (catches edits made outside
+  Edit/Write, e.g. a manual save) and reports it as informational context — it
+  does not block. It hashes CR-stripped content and ignores `__pycache__`.
+  Note the asymmetry: drift is *detected* for `tests/` but only *blocked* for
+  `src/`, since `track_dirty.sh` logs `src/` alone. A stale test doc is
+  reported at session start rather than stopping the turn it happened in.
+- `install.py` runs the same check (`--skip-doc-check` opts out), so a
+  contributor not using Claude Code still sees stale docs. The hook stays
+  authoritative; keep the two consistent if either changes.
 
 **So: whenever you create or edit a file under `src/`, before ending your turn,
 update its `context/<path>.md` and update `context/_INDEX.md` if the file's
@@ -71,14 +78,16 @@ Shapes of data in/out (schemas, dataclasses, DB rows), if any.
 Unresolved items, deliberately deferred decisions.
 ```
 Omit sections that don't apply (a pure config file has no "Public Interface").
-Get the hash with `sha1sum <file>` (Git Bash).
-
-**Hash LF content, not CRLF.** `.gitattributes` is `* text=auto eol=lf`, so
-git stores every file with LF and any checkout that rewrites a file gives the
-working tree LF. A file newly written on Windows may be CRLF, and a hash taken
-from it will mismatch the moment a checkout normalizes the file — which is
-what happened to seven context docs at once when a `git checkout master`/merge
-rewrote files during a push. Convert to LF first if `file <path>` reports CRLF.
+**Get the hash with `tr -d '\r' < <file> | sha1sum`** (Git Bash) — the CR strip
+is not optional. `.gitattributes` is `* text=auto eol=lf`, so git stores every
+file with LF and any checkout that rewrites a file gives the working tree LF,
+while a file newly written on Windows may be CRLF. A hash taken from raw bytes
+therefore goes stale the moment a checkout normalizes the file, with no content
+change at all — that is what silently invalidated seven context docs when a
+`git checkout master`/merge rewrote files during a push, and it accounted for
+most of a "pre-existing stale docs" backlog that turned out not to exist.
+`check_drift.sh` and `install.py` both strip CRs before hashing, so recording a
+raw-byte hash of a CRLF file is what breaks, not the other way round.
 
 ## Project layout
 ```

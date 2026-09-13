@@ -1,7 +1,7 @@
 ---
 source: tests/test_extraction_pipeline.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: afbde11d93c00a95ce1dd7001e88ce858af5d2ae
+last_synced: 2026-09-13T16:40:00Z
+source_hash: 240f36de102b4567202c5e2dad479d15ed5f5300
 ---
 
 ## Purpose
@@ -38,6 +38,34 @@ being written, with `duplicate_fact_count` reporting how many were
 dropped - the code-side guardrail added after a real chapter's real
 extraction was found padding toward a raised `maxItems` cap by repeating
 the same fact verbatim.
+
+Also covers **which model wrote a book's facts**, added after a resume with a
+different model nearly corrupted real data: `extraction_progress.json` records
+a `provider` identity (`..._records_which_provider_wrote_the_facts`), resuming
+with a different model refuses outright rather than silently mixing two
+models' output in one `facts.jsonl` (`..._refuses_instead_of_mixing_facts`),
+and the refusal names both models and the way out
+(`test_the_refusal_names_both_models_and_the_way_out`) rather than just
+failing. Three tests pin down what must *not* be blocked: the same model
+resuming normally, `--restart` (which discards the old facts anyway, so a
+mismatch is irrelevant), and a book extracted before identities were recorded
+at all (`..._before_identities_were_recorded_still_resumes`) - unknown means
+unverifiable, never mismatched, so old books stay resumable. A provider that
+doesn't implement the optional identity capability is also fine
+(`..._that_does_not_identify_itself_can_still_resume`), and an already-complete
+book says so rather than reporting a mismatch.
+
+Also covers **entity identity across books**:
+`test_extract_book_keeps_unrelated_books_entities_separate` (the pipeline
+passes `series_reading_order` as the scope, so two unrelated books never fuse
+a same-named character), `test_restart_discards_the_previous_runs_entities`
+(the root cause of a real "Michael" anomaly - `--restart` dropped the old
+facts but left the entities they created), and
+`test_restart_keeps_entities_an_earlier_series_book_still_owns` (the prune
+must not reach past this book). `test_extract_persists_entities_after_every
+_chapter` pins the durability ordering: facts flush, then `save_entities`,
+then the progress write - so a crash can never leave progress claiming a
+chapter whose entities were never saved.
 
 Also covers `known_entity_types` threading
 (`test_extract_book_passes_known_entity_types_to_the_provider`): a

@@ -1,13 +1,18 @@
 ---
 source: tests/test_storage.py
-last_synced: 2026-09-02T00:00:00Z
-source_hash: 68a397a643f81418a8f35f1a1b1544aa8e6f22f6
+last_synced: 2026-09-13T16:40:00Z
+source_hash: 3cda136c3fd3b823f10c972f5db7c2876c009fce
 ---
 
 ## Purpose
 Covers `bookrag.storage`: slug generation, book-id collision handling, the
 full `save_book` write (source copy + metadata.json + chapters.jsonl +
-index.json update), and its rollback behavior on failure.
+index.json update), that an explicit `content_type` is persisted to
+`metadata.json` (the field `extract`/`eval`/`chat` later read back to pick a
+taxonomy), and its rollback behavior on failure.
+
+`series_reading_order` is covered separately in
+`tests/test_storage_series_reading_order.py`, not here.
 
 ## Key Decisions
 - `test_series_books_each_keep_their_own_chapter_2` is the load-bearing test

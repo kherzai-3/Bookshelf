@@ -1,7 +1,7 @@
 ---
 source: tests/helpers.py
-last_synced: 2026-09-08T00:00:00Z
-source_hash: 52d1df732e772dc144de5e0bf5412f9d53f2327c
+last_synced: 2026-09-13T16:40:00Z
+source_hash: b9c411a0d4a202e24c4ccb934ee8d2167d768bd5
 ---
 
 ## Purpose
@@ -15,9 +15,14 @@ have something real to assert against.
   chapters each; fine for ingest/metadata tests, too short to exercise real
   extraction (see `NARRATIVE_PADDING` below).
 - `build_narrative_epub(path)` — like `build_sample_epub`, but with two
-  chapter paragraphs (~20+ words each) long enough to clear
-  `extract.pipeline.MIN_NARRATIVE_WORDS`, for tests that need extraction to
-  actually run against real chapter text, not just ingestion.
+  chapters padded (via `_bulk_filler`) to ~725 words each, for tests that need
+  extraction to actually run against real chapter text, not just ingestion.
+  The size is set by `ingest.consolidate`, not by extraction: clearing
+  `MIN_NARRATIVE_WORDS` (20) only takes a sentence or two, but anything near
+  that would sit under `CONSOLIDATION_MEDIAN_WORDS_THRESHOLD` and get merged
+  into a single chapter, breaking every test that assumes two.
+- `_bulk_filler(min_words)` — private; repeats the same proper-noun-free,
+  `FakeProvider`-safe padding until it clears `min_words`.
 - `NARRATIVE_PADDING: str` — a ~20-word block of filler sentences to append
   to a short synthetic `Chapter.text` in extraction/query tests, so it
   clears `MIN_NARRATIVE_WORDS` without `FakeProvider` mistaking any of it
