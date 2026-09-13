@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/library.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: 5f09854ed384bd606197b077ad69b52ffcf7bb73
+last_synced: 2026-09-12T19:59:49-05:00
+source_hash: fee78d1846f592fb7287711cf0747860a5282e55
 ---
 
 ## Purpose
@@ -166,3 +166,45 @@ Found on the project's own library: 14 ids covering 38 facts, all from
 chapters 4-10, caused by `extract/pipeline.py` saving the registry only in a
 `finally` that an abrupt kill never reached (fixed there; see that context
 doc).
+
+## Cross-book entity split (`detect_cross_book_entities` / `split_cross_book_entity`)
+
+The counterpart to `extract/resolve.py`'s identity scoping: that stops new
+wrong merges, this undoes existing ones. Scoping alone cannot, because a
+re-extraction resolves against the same registry - all four merges in the
+real library survived a full 5h27m re-run untouched.
+
+- `detect_cross_book_entities(root=None) -> list[CrossBookEntity]` — entities
+  claimed by 2+ books that do **not** share one series name. Sharing across a
+  series is the intended feature and is never reported. Carries
+  `facts_per_book` so the report shows where the content actually sits.
+- `split_cross_book_entity(entity_id, root=None) -> SplitResult` — gives each
+  book its own record and rewrites that book's fact `entity_id`s.
+- Surfaced by `bookrag doctor`, applied by `--split-cross-book`. Deliberately
+  **not** part of `--fix`, same posture as `--merge-duplicates`: rewriting
+  fact records across book files is higher-stakes than deleting an orphan.
+
+**Why this is safe to automate when the dangling-reference repair is not.**
+`unnamed_fact_refs` stays unrepairable because a fact stores only an
+`entity_id` and the name is genuinely gone. Here nothing is lost: facts are
+already partitioned by book file, so which book a fact belongs to is read,
+not guessed, and both halves keep the same `canonical_name` and `type` -
+they merged precisely because they spell alike.
+
+**Key decisions**
+- The book with the **most facts keeps the original id**, so the common case
+  rewrites the fewest records - and it matches `merge_entities`'s own
+  keep-the-dominant-entity convention.
+- A book_id with **zero** facts is dropped rather than given an entity.
+  It is a stale reference, not a second character: `extract --restart`
+  truncates `facts.jsonl` but leaves `entities.json` alone, so a book_id
+  recorded by a pre-restart run outlives every fact that justified it.
+  Observed live - "Michael" claimed Ranger's Apprentice with 0 facts there.
+- **Aliases are not copied** to the new entity. An alias could have come from
+  either book and this cannot know which; losing one costs a retrieval
+  near-miss, inventing one asserts a name a book may never have used.
+
+**Verified on real data** before touching the real library: run against an
+exact copy of the four-book library, then the copy re-checked - 2,035 facts
+before and after, zero dangling references, zero cross-book entities
+remaining. Applied to the real library with the same result.

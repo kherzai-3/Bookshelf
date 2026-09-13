@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import json
 import shutil
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from bookrag.extract.resolve import load_entities, match_key, prune_book_from_entities, save_entities
@@ -311,6 +312,160 @@ def merge_entities(entity_ids: list[str], keep: str | None = None, root: Path | 
 
 
 @dataclass
+class CrossBookEntity:
+    entity_id: str
+    canonical_name: str
+    type: str
+    # book_id -> how many facts in that book point at this entity. A book
+    # with 0 is a leftover book_ids entry with nothing behind it (see
+    # split_cross_book_entity), not a real second character.
+    facts_per_book: dict[str, int]
+
+
+@dataclass
+class SplitResult:
+    original_entity_id: str
+    new_entity_ids: list[str]
+    facts_rewritten: int
+    dropped_book_ids: list[str]
+
+
+def _series_name(root: Path, book_id: str) -> str | None:
+    for book in load_index(root)["books"]:
+        if book["book_id"] == book_id:
+            series = book.get("series")
+            return series["name"] if series else None
+    return None
+
+
+def detect_cross_book_entities(root: Path | None = None) -> list[CrossBookEntity]:
+    """Entities claimed by two or more books that are NOT part of one
+    series - i.e. two unrelated books' characters fused into a single
+    identity.
+
+    Before `resolve_entity` took a `scope` (see extract/resolve.py's context
+    doc), its match loop ran over every entity from every book ever
+    ingested, so any two books sharing a common name merged. Scoping stops
+    new ones; it cannot undo existing ones, because a re-extraction resolves
+    against the same registry. This finds them.
+
+    Sharing an identity across books in the *same series* is the intended
+    behaviour and is never reported here.
+    """
+    root = root or library_root()
+    entities = load_entities(root)
+    found = []
+    for entity in entities["entities"]:
+        book_ids = entity["book_ids"]
+        if len(book_ids) < 2:
+            continue
+        series = {_series_name(root, bid) for bid in book_ids}
+        # One shared, non-None series name means this is legitimate.
+        if len(series) == 1 and None not in series:
+            continue
+        found.append(
+            CrossBookEntity(
+                entity_id=entity["entity_id"],
+                canonical_name=entity["canonical_name"],
+                type=entity["type"],
+                facts_per_book={
+                    bid: sum(
+                        1
+                        for line in (root / bid / "facts.jsonl").read_text(encoding="utf-8").splitlines()
+                        if line.strip() and json.loads(line)["entity_id"] == entity["entity_id"]
+                    )
+                    if (root / bid / "facts.jsonl").exists()
+                    else 0
+                    for bid in book_ids
+                },
+            )
+        )
+    return found
+
+
+def split_cross_book_entity(entity_id: str, root: Path | None = None) -> SplitResult:
+    """Gives each book its own entity record, undoing a wrong merge.
+
+    Losslessly mechanical, unlike the dangling-fact-reference case doctor
+    deliberately refuses to auto-repair: facts are already partitioned by
+    book file, so which book each fact belongs to is not a guess. Every book
+    keeps the same canonical_name and type - they merged precisely because
+    they spell the same.
+
+    The book with the most facts keeps the original entity_id, so the common
+    case rewrites the fewest records (and matches merge_entities' own
+    keep-the-dominant-entity convention). A book_id with **zero** facts gets
+    no entity at all, just dropped: it is a leftover reference, not a second
+    character. That happens after `extract --restart`, which truncates
+    facts.jsonl but leaves entities.json alone, so a book_id recorded by the
+    pre-restart run outlives every fact that justified it.
+    """
+    root = root or library_root()
+    entities = load_entities(root)
+    by_id = {e["entity_id"]: e for e in entities["entities"]}
+    if entity_id not in by_id:
+        raise ValueError(f"No entity with id {entity_id!r}")
+
+    entity = by_id[entity_id]
+    counts = {
+        bid: sum(
+            1
+            for line in (root / bid / "facts.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip() and json.loads(line)["entity_id"] == entity_id
+        )
+        if (root / bid / "facts.jsonl").exists()
+        else 0
+        for bid in entity["book_ids"]
+    }
+    with_facts = [bid for bid, n in counts.items() if n]
+    dropped = sorted(bid for bid, n in counts.items() if not n)
+
+    if len(with_facts) < 2:
+        # Nothing to split - at most one book actually has content. Still
+        # worth dropping the unbacked book_ids, which is the whole repair
+        # in this case.
+        entity["book_ids"] = with_facts or entity["book_ids"][:1]
+        save_entities(entities, root)
+        return SplitResult(entity_id, [], 0, dropped)
+
+    keeper = max(with_facts, key=lambda bid: counts[bid])
+    entity["book_ids"] = [keeper]
+
+    new_ids: list[str] = []
+    facts_rewritten = 0
+    for book_id in sorted(bid for bid in with_facts if bid != keeper):
+        new_id = f"{entity['type']}-{uuid.uuid4().hex[:8]}"
+        new_ids.append(new_id)
+        facts_path = root / book_id / "facts.jsonl"
+        rewritten = []
+        for line in facts_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            if record["entity_id"] == entity_id:
+                record["entity_id"] = new_id
+                facts_rewritten += 1
+            rewritten.append(json.dumps(record))
+        facts_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+        entities["entities"].append(
+            {
+                "entity_id": new_id,
+                "canonical_name": entity["canonical_name"],
+                "type": entity["type"],
+                # Deliberately not copied: an alias could have come from
+                # either book, and this cannot know which. Losing an alias
+                # costs a retrieval near-miss; inventing one asserts a name
+                # a book may never have used.
+                "aliases": [],
+                "book_ids": [book_id],
+            }
+        )
+
+    save_entities(entities, root)
+    return SplitResult(entity_id, new_ids, facts_rewritten, dropped)
+
+
+@dataclass
 class DoctorReport:
     orphaned_index_entries: list[str]  # book_id: in index.json, no directory/metadata on disk
     stale_entity_book_refs: list[tuple[str, str]]  # (entity_id, book_id) book_id no longer exists
@@ -325,6 +480,14 @@ class DoctorReport:
     # re-extracting those chapters or accepting the loss - both the user's
     # call, not a cleanup pass's.
     unnamed_fact_refs: list[tuple[str, str]]
+    # Entities claimed by two or more books with no series relationship -
+    # two unrelated books' characters fused into one identity by the
+    # unscoped resolve_entity this library predates. Reported but never
+    # touched by --fix, same posture as duplicate_entity_groups: splitting
+    # rewrites fact records across book files, which is a higher-stakes
+    # action than deleting an orphan. `bookrag doctor --split-cross-book`
+    # applies it.
+    cross_book_entities: list[CrossBookEntity] = field(default_factory=list)
     fixed: bool = False
 
 
@@ -353,6 +516,7 @@ def run_doctor(root: Path | None = None, fix: bool = False) -> DoctorReport:
     ]
 
     duplicate_groups = _duplicate_clusters(entities, root)
+    cross_book = detect_cross_book_entities(root)
 
     known_entity_ids = {e["entity_id"] for e in entities["entities"]}
     unnamed_fact_refs = sorted(
@@ -363,7 +527,13 @@ def run_doctor(root: Path | None = None, fix: bool = False) -> DoctorReport:
 
     if not fix:
         return DoctorReport(
-            orphaned_index_entries, stale_refs, orphaned_entities, duplicate_groups, unnamed_fact_refs, fixed=False
+            orphaned_index_entries,
+            stale_refs,
+            orphaned_entities,
+            duplicate_groups,
+            unnamed_fact_refs,
+            cross_book_entities=cross_book,
+            fixed=False,
         )
 
     for book_id in orphaned_index_entries:
@@ -379,5 +549,11 @@ def run_doctor(root: Path | None = None, fix: bool = False) -> DoctorReport:
     save_entities(entities, root)
 
     return DoctorReport(
-        orphaned_index_entries, stale_refs, orphaned_entities, duplicate_groups, unnamed_fact_refs, fixed=True
+        orphaned_index_entries,
+        stale_refs,
+        orphaned_entities,
+        duplicate_groups,
+        unnamed_fact_refs,
+        cross_book_entities=cross_book,
+        fixed=True,
     )

@@ -13,7 +13,15 @@ from bookrag.extract.pipeline import extract_book, resume_blocker, resume_start_
 from bookrag.ingest import epub_loader, pdf_loader
 from bookrag.ingest.chapter import Chapter
 from bookrag.ingest.consolidate import consolidate_fragments, should_consolidate
-from bookrag.library import detect_duplicate_entities, list_books, merge_entities, remove_book, run_doctor, show_book
+from bookrag.library import (
+    detect_duplicate_entities,
+    list_books,
+    merge_entities,
+    remove_book,
+    run_doctor,
+    show_book,
+    split_cross_book_entity,
+)
 from bookrag.providers.registry import get_provider
 from bookrag.query import facts_as_of, format_context, select_relevant_facts
 from bookrag.storage import incoming_root, library_root, load_chapters, load_metadata, save_book
@@ -113,6 +121,12 @@ def main(argv: list[str] | None = None) -> int:
         "--merge-duplicates",
         action="store_true",
         help="Interactively merge detected duplicate-entity clusters (not applied by --fix - see README)",
+    )
+    doctor.add_argument(
+        "--split-cross-book",
+        action="store_true",
+        help="Split entities wrongly shared by unrelated books into one entity per book "
+        "(not applied by --fix - rewrites fact records)",
     )
     doctor.add_argument(
         "--yes", action="store_true", help="With --merge-duplicates, skip confirmation (keeps the most-facts entity)"
@@ -463,6 +477,7 @@ def _doctor(args: argparse.Namespace) -> int:
         and not report.orphaned_entities
         and not report.duplicate_entity_groups
         and not report.unnamed_fact_refs
+        and not report.cross_book_entities
     )
     if nothing_found:
         print("Library is consistent - no issues found.")
@@ -494,6 +509,17 @@ def _doctor(args: argparse.Namespace) -> int:
             "  --fix deliberately leaves them alone. Re-extracting the affected chapters is\n"
             "  the only way to restore them."
         )
+    if report.cross_book_entities:
+        n = len(report.cross_book_entities)
+        print(f"{n} entit{'y' if n == 1 else 'ies'} shared by unrelated books (wrongly merged identities):")
+        for entity in report.cross_book_entities:
+            where = ", ".join(f"{bid} ({count} facts)" for bid, count in sorted(entity.facts_per_book.items()))
+            print(f"  - {entity.canonical_name} ({entity.type}): {where}")
+        print(
+            "  Entity identity is now scoped to a series, so no new ones form, but a\n"
+            "  re-extraction resolves against this same registry and will not undo these.\n"
+            "  Run `bookrag doctor --split-cross-book` to give each book its own entity."
+        )
     if report.duplicate_entity_groups:
         n = len(report.duplicate_entity_groups)
         print(f"{n} possible duplicate entity cluster(s) (same name, resolved as separate entities):")
@@ -503,11 +529,26 @@ def _doctor(args: argparse.Namespace) -> int:
 
     if args.fix:
         print("Applied fixes: removed orphaned index entries, pruned stale book references, deleted fully orphaned entities.")
-    elif not args.merge_duplicates:
+    elif not args.merge_duplicates and not args.split_cross_book:
         print(
-            "Run `bookrag doctor --fix` to apply the safe cleanups above, or "
-            "`bookrag doctor --merge-duplicates` to merge duplicate entity clusters."
+            "Run `bookrag doctor --fix` to apply the safe cleanups above, "
+            "`bookrag doctor --merge-duplicates` to merge duplicate entity clusters, or "
+            "`bookrag doctor --split-cross-book` to split wrongly-shared identities."
         )
+
+    if args.split_cross_book:
+        for entity in report.cross_book_entities:
+            result = split_cross_book_entity(entity.entity_id)
+            if result.new_entity_ids:
+                print(
+                    f"Split '{entity.canonical_name}' into {len(result.new_entity_ids) + 1} entities"
+                    f" ({result.facts_rewritten} fact(s) rewritten)"
+                )
+            if result.dropped_book_ids:
+                print(
+                    f"  dropped {len(result.dropped_book_ids)} book reference(s) with no facts behind them:"
+                    f" {', '.join(result.dropped_book_ids)}"
+                )
 
     if args.merge_duplicates:
         for group in report.duplicate_entity_groups:

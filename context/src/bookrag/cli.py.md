@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-12T10:54:08-05:00
-source_hash: f08987b81da9b60eac67ba1f35a3ec5a379486ef
+last_synced: 2026-09-12T19:59:49-05:00
+source_hash: 1b7879a11e51af5c6995f6b89f4c2a292817fef4
 ---
 
 ## Purpose
@@ -241,3 +241,12 @@ point: `extract_book` would raise the same mismatch on its own, but only
 after the CLI had already told the user a multi-hour run was under way. On a
 block it prints `Refusing to resume '<book>': <message>` and returns 1
 without touching the provider or the progress file.
+
+## `doctor --split-cross-book`
+
+Reports entities shared by unrelated books and, with the flag, splits them.
+Mirrors `--merge-duplicates`: detection is always shown, the mutation is
+opt-in and never folded into `--fix`, because it rewrites fact records across
+book directories. Unlike `--merge-duplicates` it needs no confirmation
+prompt - there is no judgement call about which entity to keep, since the
+split is determined entirely by which book each fact already lives in.

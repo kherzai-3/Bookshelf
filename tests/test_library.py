@@ -6,8 +6,18 @@ import pytest
 
 from bookrag.extract.resolve import load_entities, save_entities
 from bookrag.ingest.chapter import Chapter
-from bookrag.library import detect_duplicate_entities, list_books, merge_entities, remove_book, run_doctor, show_book
+from bookrag.library import (
+    detect_cross_book_entities,
+    detect_duplicate_entities,
+    list_books,
+    merge_entities,
+    remove_book,
+    run_doctor,
+    show_book,
+    split_cross_book_entity,
+)
 from bookrag.storage import load_index, save_book
+from tests.helpers import NARRATIVE_PADDING
 
 
 def _make_book(tmp_path: Path, root: Path, title: str, chapter_count: int = 3, **kwargs) -> str:
@@ -440,3 +450,144 @@ def test_doctor_fix_never_deletes_facts_with_an_unregistered_entity(tmp_path: Pa
     assert report.unnamed_fact_refs == [(book_id, "character-lost")]
     surviving = (root / book_id / "facts.jsonl").read_text(encoding="utf-8")
     assert "Lady Pauline" in surviving
+
+
+def _book_with_entity(root: Path, tmp_path: Path, title: str, entity_id: str, n_facts: int,
+                       series_name: str | None = None, series_position: int | None = None) -> str:
+    source = tmp_path / f"{title}.epub"
+    source.write_text("x", encoding="utf-8")
+    book_id = save_book(
+        source,
+        [Chapter(0, "One", f"A chapter about someone. {NARRATIVE_PADDING}")],
+        title=title,
+        series_name=series_name,
+        series_position=series_position,
+        root=root,
+    )
+    facts = [
+        json.dumps({"entity_id": entity_id, "chapter_index": 0, "category": "description",
+                    "statement": f"fact {i}", "when": "present"})
+        for i in range(n_facts)
+    ]
+    (root / book_id / "facts.jsonl").write_text("\n".join(facts) + "\n", encoding="utf-8")
+    return book_id
+
+
+def test_doctor_detects_an_entity_shared_by_unrelated_books(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    shared = "character-abc12345"
+    book1 = _book_with_entity(root, tmp_path, "A Sea Story", shared, 3)
+    book2 = _book_with_entity(root, tmp_path, "An Unrelated Novel", shared, 1)
+    save_entities(
+        {"entities": [{"entity_id": shared, "canonical_name": "Michael", "type": "character",
+                       "aliases": [], "book_ids": [book1, book2]}]},
+        root,
+    )
+
+    found = detect_cross_book_entities(root)
+
+    assert len(found) == 1
+    assert found[0].canonical_name == "Michael"
+    assert found[0].facts_per_book == {book1: 3, book2: 1}
+
+
+def test_doctor_does_not_flag_an_entity_shared_within_one_series(tmp_path: Path) -> None:
+    """Sharing identity across a series is the feature, not the bug - book 2
+    must not re-introduce a character book 1 established."""
+    root = tmp_path / "library"
+    shared = "character-abc12345"
+    book1 = _book_with_entity(root, tmp_path, "Saga One", shared, 2, series_name="Saga", series_position=1)
+    book2 = _book_with_entity(root, tmp_path, "Saga Two", shared, 2, series_name="Saga", series_position=2)
+    save_entities(
+        {"entities": [{"entity_id": shared, "canonical_name": "Halt", "type": "character",
+                       "aliases": [], "book_ids": [book1, book2]}]},
+        root,
+    )
+
+    assert detect_cross_book_entities(root) == []
+
+
+def test_split_gives_each_book_its_own_entity_and_rewrites_its_facts(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    shared = "character-abc12345"
+    book1 = _book_with_entity(root, tmp_path, "A Sea Story", shared, 3)
+    book2 = _book_with_entity(root, tmp_path, "An Unrelated Novel", shared, 1)
+    save_entities(
+        {"entities": [{"entity_id": shared, "canonical_name": "Michael", "type": "character",
+                       "aliases": [], "book_ids": [book1, book2]}]},
+        root,
+    )
+
+    result = split_cross_book_entity(shared, root)
+
+    assert len(result.new_entity_ids) == 1
+    assert result.facts_rewritten == 1  # only the smaller book's facts move
+    entities = load_entities(root)["entities"]
+    assert len(entities) == 2
+    assert {e["canonical_name"] for e in entities} == {"Michael"}
+    # The book with the most facts keeps the original id, so fewest records move.
+    by_book = {e["book_ids"][0]: e["entity_id"] for e in entities}
+    assert by_book[book1] == shared
+    assert by_book[book2] != shared
+    # Every fact now points at its own book's entity - nothing left dangling.
+    for book_id, expected in by_book.items():
+        records = [
+            json.loads(line)
+            for line in (root / book_id / "facts.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert records and all(r["entity_id"] == expected for r in records)
+
+
+def test_split_drops_a_book_reference_with_no_facts_behind_it(tmp_path: Path) -> None:
+    """`extract --restart` truncates facts.jsonl but leaves entities.json
+    alone, so a book_id recorded by the pre-restart run can outlive every
+    fact that justified it. Observed in the real library: a "Michael" whose
+    registry row claimed Ranger's Apprentice while zero facts there
+    referenced it. That is a stale reference, not a second character, so it
+    is dropped rather than given an entity of its own."""
+    root = tmp_path / "library"
+    shared = "character-abc12345"
+    book1 = _book_with_entity(root, tmp_path, "A Sea Story", shared, 2)
+    book2 = _book_with_entity(root, tmp_path, "An Unrelated Novel", shared, 0)
+    save_entities(
+        {"entities": [{"entity_id": shared, "canonical_name": "Michael", "type": "character",
+                       "aliases": [], "book_ids": [book1, book2]}]},
+        root,
+    )
+
+    result = split_cross_book_entity(shared, root)
+
+    assert result.new_entity_ids == []
+    assert result.dropped_book_ids == [book2]
+    entities = load_entities(root)["entities"]
+    assert len(entities) == 1
+    assert entities[0]["book_ids"] == [book1]
+
+
+def test_split_preserves_every_fact(tmp_path: Path) -> None:
+    """The repair must be lossless - it only relabels which entity a fact
+    belongs to, never drops or duplicates a record."""
+    root = tmp_path / "library"
+    shared = "concept-abc12345"
+    book1 = _book_with_entity(root, tmp_path, "One Book", shared, 4)
+    book2 = _book_with_entity(root, tmp_path, "Another Book", shared, 3)
+    save_entities(
+        {"entities": [{"entity_id": shared, "canonical_name": "Power", "type": "concept",
+                       "aliases": [], "book_ids": [book1, book2]}]},
+        root,
+    )
+    before = {
+        b: [json.loads(line)["statement"]
+            for line in (root / b / "facts.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+        for b in (book1, book2)
+    }
+
+    split_cross_book_entity(shared, root)
+
+    after = {
+        b: [json.loads(line)["statement"]
+            for line in (root / b / "facts.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+        for b in (book1, book2)
+    }
+    assert after == before
