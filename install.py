@@ -182,16 +182,29 @@ def install_dependencies():
     # first (reproducible), fall back to the pyproject dependency groups
     # (resolvable anywhere) and say clearly which one was used - a silent
     # fallback would quietly cost the reproducibility the lock exists for.
+    #
+    # Retried once before giving up, because the first failure seen in practice
+    # was transient: a network hiccup during repeated installs, with the very
+    # same lock succeeding moments later. Falling back on one bad attempt would
+    # have traded a pinned install for an unpinned one over nothing.
     lock = os.path.join(ROOT, "requirements.txt")
-    if os.path.isfile(lock) and pip_install(["-r", lock], "-r requirements.txt"):
+    installed = False
+    if os.path.isfile(lock):
+        installed = pip_install(["-r", lock], "-r requirements.txt")
+        if not installed:
+            note("that failed - retrying once in case it was transient")
+            installed = pip_install(["-r", lock], "-r requirements.txt (retry)")
+    if installed:
         if not pip_install(["-e", "."], "-e . (bookrag itself)"):
             fail("could not install bookrag itself")
         ok("installed from the pinned lock (requirements.txt)")
         return
 
     warn(
-        "requirements.txt did not install cleanly on this platform; "
-        "falling back to unpinned resolution from pyproject.toml"
+        "requirements.txt did not install after two attempts; falling back to "
+        "unpinned resolution from pyproject.toml. Versions will not be the "
+        "pinned ones - see the pip output above for the reason (a package with "
+        "no wheel for this platform, or a network failure)"
     )
     if not pip_install(["-e", ".[core,providers,dev]"], "-e .[core,providers,dev]"):
         fail(
