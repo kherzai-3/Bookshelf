@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/resolve.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: 0c3dd8a6047d73b8ecd693cc37d7b65c9d67335f
+last_synced: 2026-09-12T19:49:37-05:00
+source_hash: c92dafa104f944f41e7da5830c10141784733b4f
 ---
 
 ## Purpose
@@ -75,3 +75,57 @@ registry's load/save.
   unrelated characters' identities. No real collision has been observed
   yet (the current library's books don't share character names) - flagged
   here so it's not re-discovered from scratch if one ever does.
+
+## Identity is scoped to a series, not to the whole library
+
+`entities.json` is a single global file, but that is storage, not identity.
+Before this, `resolve_entity`'s match loop ran over **every entity from every
+book ever ingested**, keyed only on `(match_key(name), entity_type)` - no
+book or series filter anywhere. `book_id` was used only *after* a match, to
+append to `book_ids`.
+
+So any two unrelated books sharing a common name became one entity. Observed
+live in a real four-book library, not hypothetically:
+
+| entity | books merged |
+|---|---|
+| `George` (character) | Ranger's Apprentice + Atomic Habits |
+| `Michael` (character) | Ranger's Apprentice + Moby Dick |
+| `Power` (concept) | Finite and Infinite Games + Atomic Habits |
+| `Prediction` (concept) | Finite and Infinite Games + Atomic Habits |
+
+**Scope of the damage, stated precisely.** This never leaked facts between
+books: `query.facts_as_of` reads per-book `facts.jsonl` files within
+`series_reading_order`, so Moby Dick's facts about its Michael were never
+loaded into a Ranger's Apprentice conversation. What it corrupted is the
+registry's answer to *"who is this and which books do they appear in"* -
+`canonical_name` and `type` are first-come, so a later book's entity displays
+under an earlier unrelated book's spelling, and `book_ids` claims appearances
+that never happened. That field is exactly what any future cross-book or
+series-catalog feature would be built on.
+
+`match_key` widens the collision surface further (it strips a leading "the"
+and a trailing "s" for matching), and before this it did so against the whole
+library rather than one series.
+
+**The fix**: `resolve_entity(..., scope=[book_ids])` matches only entities
+already claimed by a book in scope. `extract.pipeline` passes
+`series_reading_order(book_id, root)` - computed once and reused for the
+`known_names`/`known_types` seeds too, since all three must agree or the
+pipeline contradicts itself (telling the provider a name is known while
+resolving it to a fresh entity).
+
+**Why the default scope is the narrow one.** `scope=None` means `[book_id]`,
+i.e. no sharing. The two failure directions are not symmetric:
+- too narrow → an entity duplicates *within* a series: visible, and
+  repairable by `bookrag doctor`'s existing merge;
+- too wide → two unrelated books' characters silently fuse into one record:
+  invisible, and not repairable by a merge tool, because merging is the
+  operation that caused it.
+
+A caller who forgets to pass a scope should get the recoverable failure.
+
+**Does not fix existing data.** Entities already merged stay merged - the
+four above survived a full re-extraction, because a re-run resolves against
+the same registry. They need a `doctor` repair (a split, which doctor does
+not currently offer) or a rebuild of the registry.

@@ -51,14 +51,68 @@ def test_same_name_different_type_creates_separate_entities() -> None:
     assert len(entities["entities"]) == 2
 
 
-def test_new_book_id_gets_added_to_existing_entitys_book_ids() -> None:
+def test_a_later_series_book_reuses_the_earlier_books_entity() -> None:
+    """The point of sharing identity across books: book 2 must not
+    re-introduce a character book 1 already established. Requires an
+    explicit scope naming both books - normally
+    storage.series_reading_order(book_id)."""
     entities = {"entities": []}
     entity_id = resolve_entity("Ahab", "character", "moby-dick", entities)
 
-    same_id = resolve_entity("Ahab", "character", "moby-dick-2", entities)
+    same_id = resolve_entity(
+        "Ahab", "character", "moby-dick-2", entities, scope=["moby-dick", "moby-dick-2"]
+    )
 
     assert same_id == entity_id
     assert entities["entities"][0]["book_ids"] == ["moby-dick", "moby-dick-2"]
+
+
+def test_unrelated_books_sharing_a_name_stay_separate_entities() -> None:
+    """entities.json is one global registry, and before identity was scoped
+    the match loop ran over every book ever ingested - so any two books
+    sharing a common first name became one person. Real observed case in a
+    four-book library: a "Michael" in Ranger's Apprentice and a "Michael" in
+    Moby Dick merged into a single entity claiming both books, alongside
+    "George", "Power" and "Prediction".
+
+    A fact's own facts.jsonl is per-book, so this never leaked facts between
+    books - what it corrupted is the registry's answer to "who is this and
+    where do they appear", which is exactly what any cross-book/series
+    feature would be built on."""
+    entities = {"entities": []}
+    rangers_id = resolve_entity("Michael", "character", "rangers-apprentice", entities)
+
+    moby_id = resolve_entity("Michael", "character", "moby-dick", entities)
+
+    assert moby_id != rangers_id
+    assert len(entities["entities"]) == 2
+    assert [e["book_ids"] for e in entities["entities"]] == [["rangers-apprentice"], ["moby-dick"]]
+
+
+def test_scope_defaults_to_the_book_itself_rather_than_every_book() -> None:
+    """The default is the narrow, safe scope on purpose. Too narrow
+    duplicates an entity within a series - visible, and repairable by
+    `bookrag doctor`. Too wide silently fuses two unrelated books'
+    characters into one record. A caller that forgets to pass a scope gets
+    the recoverable failure, not the silent one."""
+    entities = {"entities": []}
+    resolve_entity("Ahab", "character", "moby-dick", entities)
+
+    unscoped_id = resolve_entity("Ahab", "character", "some-other-book", entities)
+
+    assert unscoped_id != entities["entities"][0]["entity_id"]
+
+
+def test_scope_does_not_override_type_scoping() -> None:
+    """Being in scope is necessary, not sufficient - the existing
+    (name, type) rule still applies on top of it."""
+    entities = {"entities": []}
+    scope = ["book-1", "book-2"]
+    character_id = resolve_entity("Nantucket", "character", "book-1", entities, scope=scope)
+
+    setting_id = resolve_entity("Nantucket", "setting", "book-2", entities, scope=scope)
+
+    assert character_id != setting_id
 
 
 def test_plural_and_article_variants_of_the_same_name_unify() -> None:

@@ -799,3 +799,44 @@ def test_an_already_complete_book_says_so_rather_than_reporting_a_mismatch(tmp_p
     result = extract_book(book_id, _IdentifiedProvider("ollama:llama3.2:3b"), root=root)
 
     assert result.already_complete is True
+
+
+def test_extract_book_keeps_unrelated_books_entities_separate(tmp_path: Path) -> None:
+    """The counterpart to the series test above, and the real bug this
+    closes. `entities.json` is one global registry; identity is scoped to
+    `series_reading_order`, so two books with no series relationship that
+    happen to share a character name must end up with two entities, not one
+    record claiming both books.
+
+    Observed in the real four-book library before this was scoped: a
+    "Michael" in Ranger's Apprentice and a "Michael" in Moby Dick were one
+    entity, as were a "George" across two unrelated books and two nonfiction
+    "concept" names. Facts never leaked between books (facts.jsonl is
+    per-book), but the registry misreported who appeared where - the exact
+    signal any cross-book feature would be built on."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+
+    book1 = save_book(
+        source,
+        [Chapter(0, "One", f"Michael set sail. {NARRATIVE_PADDING}")],
+        title="A Sea Story",
+        root=root,
+    )
+    extract_book(book1, FakeProvider(), root=root)
+
+    book2 = save_book(
+        source,
+        [Chapter(0, "One", f"Michael drew his bow. {NARRATIVE_PADDING}")],
+        title="An Unrelated Novel",
+        root=root,
+    )
+    extract_book(book2, FakeProvider(), root=root)
+
+    entities = load_entities(root)["entities"]
+    michaels = [e for e in entities if e["canonical_name"] == "Michael"]
+    assert len(michaels) == 2
+    assert sorted(b for e in michaels for b in e["book_ids"]) == sorted([book1, book2])
+    # No single record claims both books.
+    assert all(len(e["book_ids"]) == 1 for e in michaels)

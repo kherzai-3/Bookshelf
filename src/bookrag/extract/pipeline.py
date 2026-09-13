@@ -206,8 +206,13 @@ def extract_book(
     # run knows about every entity this book has already resolved so far -
     # otherwise the grounding check below would wrongly treat an
     # already-established entity as brand new the moment a run resumes.
-    known_names = _entity_names_for_books(series_reading_order(book_id, root), entities)
-    known_types = _entity_types_for_books(series_reading_order(book_id, root), entities)
+    # One lookup, three uses: the two known-* seeds below and, newly, the
+    # identity scope handed to resolve_entity per fact. All three have to be
+    # the same set of books or the pipeline contradicts itself - telling the
+    # provider a name is already known while resolving it to a fresh entity.
+    reading_order = series_reading_order(book_id, root)
+    known_names = _entity_names_for_books(reading_order, entities)
+    known_types = _entity_types_for_books(reading_order, entities)
     resumed_from_chapter = start_index if start_index > 0 else None
 
     fact_count = 0
@@ -273,7 +278,9 @@ def extract_book(
                         ungrounded_entity_count += 1
                         continue
 
-                    entity_id = resolve_entity(raw.entity_name, raw.entity_type, book_id, entities)
+                    entity_id = resolve_entity(
+                        raw.entity_name, raw.entity_type, book_id, entities, scope=reading_order
+                    )
                     if is_new:
                         known_names.append(raw.entity_name)
                         known_types[raw.entity_name] = raw.entity_type

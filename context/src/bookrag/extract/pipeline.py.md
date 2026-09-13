@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/pipeline.py
-last_synced: 2026-09-12T10:54:08-05:00
-source_hash: c620bfdf47d46c4e793b7a9a2b22a3454fbcd25e
+last_synced: 2026-09-12T19:49:37-05:00
+source_hash: 6dc3e41c011136c35a6e11f3f915c985e8d933c3
 ---
 
 ## Purpose
@@ -306,3 +306,13 @@ promoted ahead of other Phase 1 work.
 - Resuming a progress file that had no identity **stamps the current run's
   identity** onto it. The earlier chapters' model is unknowable at that
   point, and recording the half that is knowable beats recording nothing.
+
+## Entity identity scope (added with `resolve_entity`'s `scope`)
+
+`series_reading_order(book_id, root)` is now computed **once** into
+`reading_order` and used for three things that must agree: the
+`known_names` seed, the `known_types` seed, and the `scope` passed to every
+`resolve_entity` call. If they disagreed the pipeline would contradict
+itself - telling the provider a name is already known while resolving that
+same name to a brand-new entity. See `extract/resolve.py`'s context doc for
+the cross-book merges this closes.

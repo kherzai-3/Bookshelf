@@ -4,7 +4,13 @@ case-insensitive against a canonical name or a known alias, with light
 normalization (a leading "the ", a trailing "s") so simple spelling/plural
 variants of the same entity_type unify - see match_key. No real fuzzy/
 semantic similarity matching or cross-type merging; anything else becomes
-a brand new entity."""
+a brand new entity.
+
+The registry is one global file, but identity is NOT global: resolve_entity
+only ever matches within its `scope` of book_ids (normally a series), so two
+unrelated books can each have their own "Michael" without becoming one
+person. See resolve_entity's docstring for why the default scope is the
+narrow one."""
 
 from __future__ import annotations
 
@@ -52,12 +58,34 @@ def match_key(name: str) -> str:
     return key
 
 
-def resolve_entity(name: str, entity_type: str, book_id: str, entities: dict) -> str:
+def resolve_entity(
+    name: str, entity_type: str, book_id: str, entities: dict, scope: list[str] | None = None
+) -> str:
     """Mutates `entities` in place (adds a new entry, or records book_id
-    against an existing match) and returns the resolved entity_id."""
+    against an existing match) and returns the resolved entity_id.
+
+    `scope` is the set of book_ids allowed to share one identity - normally
+    `storage.series_reading_order(book_id)`, so book 2 of a series reuses
+    book 1's Halt instead of creating a second one. **It defaults to
+    `[book_id]`, i.e. no sharing at all**, because the failure mode of
+    guessing wrong is asymmetric: too narrow a scope duplicates an entity
+    within a series (visible, and fixable by `bookrag doctor`), while too
+    wide a scope silently fuses two unrelated books' characters into one
+    record that then misreports which books they appear in. `entities.json`
+    is a single global registry, so before this existed the match loop ran
+    over every book ever ingested and the wide failure was the default -
+    four real merges in a four-book library (two unrelated "character"
+    names, two unrelated nonfiction "concept" names).
+
+    Note this does not retroactively split entities already merged that way;
+    they need `bookrag doctor` or a re-extraction.
+    """
+    allowed = set(scope) if scope is not None else {book_id}
     name_key = match_key(name)
     for entity in entities["entities"]:
         if entity["type"] != entity_type:
+            continue
+        if not allowed.intersection(entity["book_ids"]):
             continue
         if name_key == match_key(entity["canonical_name"]) or any(
             name_key == match_key(alias) for alias in entity["aliases"]
