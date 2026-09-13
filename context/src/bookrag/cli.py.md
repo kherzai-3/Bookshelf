@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-13T15:24:02Z
-source_hash: 1f5d8f08c380068d9642461dd1d79f11ad8fb0a7
+last_synced: 2026-09-13T18:15:00Z
+source_hash: e1d2985c1ee81d2711405763bef800228dba50e9
 ---
 
 ## Purpose
@@ -25,8 +25,16 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   selects which extraction category/entity-type taxonomy and prompt pair
   `extract`/`eval`/`chat` use for this book - explicit, not auto-detected
   (matches this project's posture elsewhere, e.g. `--series-position`).
+- `default_log_path(book_id) -> Path` — `<tempdir>/extract_<book_id>.log`, the
+  path `--log` uses by default. Public because `ingest` prints it before
+  `extract` ever runs; the command that starts a six-hour run and the command
+  that follows it are typed at different times, often in different terminals.
+- `follow_commands(log_path) -> list[str]` — the shell command(s) for watching
+  a log grow on this platform. Windows returns both `tail -f` (Git Bash, where
+  this project is actually developed) and `Get-Content -Wait` (PowerShell);
+  printing only one would be wrong for about half the readers.
 - CLI: `bookrag extract <book-id> [--provider NAME] [--model NAME]
-  [--restart]` — `--provider` is `"anthropic"`, `"ollama"`, or `"fake"`;
+  [--restart] [--log [PATH]]` — `--provider` is `"anthropic"`, `"ollama"`, or `"fake"`;
   defaults via `providers.registry.get_provider` (`$BOOKRAG_PROVIDER` then
   `registry.DEFAULT_PROVIDER`, currently `"ollama"`). `--model` is a
   one-off override of the provider's own model (e.g. `qwen2.5:7b-instruct`
@@ -43,6 +51,14 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   the run is caught specifically (progress is already saved by
   `extract_book` itself by the time it propagates here) and printed as
   "Interrupted - progress has been saved..." rather than a raw traceback.
+  `--log` **tees** the run's output to a file as well as the console (via
+  `_Tee` + `contextlib.redirect_stdout`), rather than redirecting it — a
+  foreground run must still print progress to the terminal. With no PATH it
+  uses `default_log_path`. The file is **appended**, not truncated, and each
+  run writes a timestamped header: an interrupted run is resumed with the same
+  command, so the earlier attempt's output is exactly the context you want when
+  working out why it stopped. An unusable path is reported and exits 1 rather
+  than raising.
 - CLI: `bookrag eval <book-id> --chapters 0,1,2 [--providers ollama,fake]
   [--model NAME]` — comma-separated chapter indices and provider names;
   malformed `--chapters` is rejected with exit code 1 before running
@@ -88,6 +104,21 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   `library.merge_entities` for exactly what each flag changes.
 
 ## Key Decisions
+- **`ingest` ends by printing the next command** (`_print_next_steps`).
+  Reported gap: nothing anywhere told a user that ingesting does not extract,
+  what to run next, or that the next step takes hours. The guidance names the
+  `extract` command, the `--log`/follow recipe, the fact that Ctrl+C is safe,
+  and the `--provider fake` path for trying the pipeline instantly.
+- **`ingest` does not start the extraction itself**, considered and rejected:
+  a multi-hour, machine-saturating job should not begin as a side effect of
+  reading a file into the library. Ingest works with no Ollama running at all,
+  and ingesting several books in a row would otherwise launch several runs at
+  once. The user chose guidance over auto-start deliberately.
+- **`_Tee` flushes on every write.** Python block-buffers a file, so an
+  unflushed log shows a `tail -f` follower nothing for minutes at a time
+  during a job whose entire purpose is watching it progress. Covered by
+  `test_tee_flushes_every_write_so_a_follower_sees_progress_live`, which reads
+  the log while the handle is still open - exactly what a follower does.
 - Loader is selected by file extension (`.epub` → `epub_loader`, `.pdf` →
   `pdf_loader`) via the `LOADERS` dict — any other extension is rejected.
 - Title/author precedence: explicit `--title`/`--author` flag > metadata

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import statistics
 import sys
+import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 
 from bookrag.eval import run_eval, summarize
@@ -31,6 +34,26 @@ LOADERS = {
     ".epub": epub_loader,
     ".pdf": pdf_loader,
 }
+
+# Sentinel for `--log` given with no path of its own. A distinct object rather
+# than a magic string, so a user who literally passes `--log "<auto>"` gets a
+# file with that name instead of silently hitting the default branch.
+AUTO_LOG = object()
+
+
+def follow_commands(log_path: Path) -> list[str]:
+    """Shell command(s) for watching `log_path` grow, for this platform.
+
+    Windows gets both: `tail` exists under Git Bash (which is where this
+    project is actually developed) but not in PowerShell or cmd, and printing
+    only one of them would be wrong for roughly half the readers.
+    """
+    if sys.platform == "win32":
+        return [
+            f'tail -f "{log_path}"   (Git Bash)',
+            f'Get-Content -Wait "{log_path}"   (PowerShell)',
+        ]
+    return [f'tail -f "{log_path}"']
 
 
 def _use_utf8_output() -> None:
@@ -85,6 +108,19 @@ def main(argv: list[str] | None = None) -> int:
         "--restart",
         action="store_true",
         help="Ignore any saved progress and re-extract from chapter 0, overwriting facts.jsonl",
+    )
+    extract.add_argument(
+        "--log",
+        nargs="?",
+        const=AUTO_LOG,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Also write this run's output to a log file, so a multi-hour run can be "
+            "backgrounded and followed with `tail -f`. With no PATH, uses "
+            "<tempdir>/extract_<book_id>.log and prints where. Appends, so a resumed "
+            "run continues the same log."
+        ),
     )
 
     eval_cmd = subparsers.add_parser("eval", help="Compare provider(s) on the same chapters, read-only")
@@ -219,7 +255,32 @@ def _ingest(args: argparse.Namespace) -> int:
     print(f"  wrote {report_path}")
 
     _remove_if_from_incoming(args.path)
+    _print_next_steps(book_id, len(chapters))
     return 0
+
+
+def _print_next_steps(book_id: str, chapter_count: int) -> None:
+    """Tell the user what to run next, and how to watch it.
+
+    Ingesting a book does not extract anything, and until this existed nothing
+    printed said so - the summary ended on the ingestion report and left the
+    reader to discover both the next command and the fact that it can run for
+    hours. Worse, the honest way to run a job that long is to background it,
+    which is precisely when a user cannot see the progress lines it prints.
+    """
+    print()
+    print(f"Next: extract facts for '{book_id}' ({chapter_count} chapters)")
+    print(f"  bookrag extract {book_id}")
+    print()
+    print("  A local model takes minutes per chapter, so a full-length book runs")
+    print("  for hours. To run it in the background and follow along:")
+    print(f"    bookrag extract {book_id} --log")
+    for line in follow_commands(default_log_path(book_id)):
+        print(f"    {line}")
+    print("  Ctrl+C is safe - progress is saved, and re-running resumes.")
+    print()
+    print(f"  Or try the whole pipeline instantly, no model needed:")
+    print(f"    bookrag extract {book_id} --provider fake")
 
 
 def _remove_if_from_incoming(path: Path) -> None:
@@ -237,7 +298,73 @@ def _remove_if_from_incoming(path: Path) -> None:
         print(f"  (could not remove {path} from data/incoming/: {exc} - remove it yourself when convenient)")
 
 
+def default_log_path(book_id: str) -> Path:
+    """Where `--log` writes when given no path of its own.
+
+    A predictable, per-book path matters more than a clever one: the whole
+    point is that the command which starts a six-hour run and the command that
+    follows it are typed at different times, often in different terminals, and
+    the second one has to be guessable from the first.
+    """
+    return Path(tempfile.gettempdir()) / f"extract_{book_id}.log"
+
+
+class _Tee:
+    """Writes to a stream and a log file at once, flushing both every time.
+
+    The flushing is the point. Python block-buffers a file, so without it a
+    `tail -f` on the log shows nothing for many minutes at a stretch on a job
+    whose entire purpose is watching it make progress.
+    """
+
+    def __init__(self, stream, handle) -> None:
+        self._stream = stream
+        self._handle = handle
+
+    def write(self, text: str) -> int:
+        written = self._stream.write(text)
+        self._handle.write(text)
+        self.flush()
+        return written
+
+    def flush(self) -> None:
+        self._stream.flush()
+        self._handle.flush()
+
+    def isatty(self) -> bool:
+        return self._stream.isatty()
+
+
 def _extract(args: argparse.Namespace) -> int:
+    log = getattr(args, "log", None)
+    if log is None:
+        return _run_extract(args)
+
+    log_path = default_log_path(args.book_id) if log is AUTO_LOG else Path(log)
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        # Appended, not truncated: an interrupted run is resumed with the same
+        # command, and the earlier attempt's output is exactly the context you
+        # want when working out why it stopped. utf-8 explicitly - a book's own
+        # text reaches this file, and the platform default mangles it.
+        handle = log_path.open("a", encoding="utf-8")
+    except OSError as exc:
+        print(f"Could not open log file {log_path}: {exc}")
+        return 1
+
+    with handle:
+        handle.write(
+            f"\n=== bookrag extract {args.book_id} "
+            f"({datetime.now().isoformat(timespec='seconds')}) ===\n"
+        )
+        print(f"Logging to {log_path}")
+        for line in follow_commands(log_path):
+            print(f"  follow it with: {line}")
+        with contextlib.redirect_stdout(_Tee(sys.stdout, handle)):
+            return _run_extract(args)
+
+
+def _run_extract(args: argparse.Namespace) -> int:
     try:
         provider = get_provider(args.provider, model=args.model)
     except Exception as exc:

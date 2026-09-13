@@ -2,12 +2,13 @@ import io
 import json
 import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 import pytest
 
-from bookrag.cli import _print_progress, _use_utf8_output, main
+from bookrag.cli import _print_progress, _Tee, _use_utf8_output, default_log_path, main
 from bookrag.extract.resolve import load_entities, save_entities
 from bookrag.storage import load_chapters
 from tests.helpers import build_fragmented_epub, build_narrative_epub, build_sample_epub
@@ -685,3 +686,138 @@ def test_extract_refuses_a_model_mismatch_before_announcing_a_resume(
     assert _NeverCalledProvider.calls == 0
     # Progress left exactly as it was - a refusal must not be destructive.
     assert json.loads(progress_path.read_text(encoding="utf-8"))["provider"] == "ollama:qwen2.5:7b-instruct"
+
+
+def test_ingest_tells_the_user_how_to_extract(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ingest does not extract anything, and nothing used to say what came
+    next - the reported gap this guidance exists to close."""
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+
+    main(["ingest", str(epub_path)])
+
+    out = capsys.readouterr().out
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    assert f"bookrag extract {book_dir.name}" in out
+    assert "--provider fake" in out
+
+
+def test_ingest_tells_the_user_how_to_follow_a_long_run(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A multi-hour run has to be backgrounded, which is exactly when its
+    progress lines stop being visible."""
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+
+    main(["ingest", str(epub_path)])
+
+    out = capsys.readouterr().out
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    assert "--log" in out
+    assert str(default_log_path(book_dir.name)) in out
+    assert "tail -f" in out or "Get-Content -Wait" in out
+
+
+def test_extract_log_writes_progress_to_a_file(tmp_path: Path, _library_root: Path) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    log_path = tmp_path / "run.log"
+
+    exit_code = main(["extract", book_dir.name, "--provider", "fake", "--log", str(log_path)])
+
+    assert exit_code == 0
+    logged = log_path.read_text(encoding="utf-8")
+    assert "chapter done" in logged
+    assert "Extracted" in logged
+
+
+def test_extract_log_still_prints_to_the_console(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--log tees, it does not redirect - a foreground run must still show
+    progress in the terminal."""
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    capsys.readouterr()
+
+    main(["extract", book_dir.name, "--provider", "fake", "--log", str(tmp_path / "run.log")])
+
+    out = capsys.readouterr().out
+    assert "chapter done" in out
+
+
+def test_extract_log_with_no_path_uses_the_documented_default(
+    tmp_path: Path, _library_root: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The path ingest prints must be the path --log actually writes to, or
+    the follow command is wrong."""
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+
+    main(["extract", book_dir.name, "--provider", "fake", "--log"])
+
+    expected = tmp_path / f"extract_{book_dir.name}.log"
+    assert expected.exists()
+    assert "chapter done" in expected.read_text(encoding="utf-8")
+    assert str(expected) in capsys.readouterr().out
+
+
+def test_extract_log_appends_so_a_resumed_run_keeps_the_earlier_output(
+    tmp_path: Path, _library_root: Path
+) -> None:
+    """An interrupted run is resumed with the same command; the first
+    attempt's output is exactly what you want when working out why it died."""
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    log_path = tmp_path / "run.log"
+
+    main(["extract", book_dir.name, "--provider", "fake", "--log", str(log_path)])
+    main(["extract", book_dir.name, "--provider", "fake", "--restart", "--log", str(log_path)])
+
+    assert log_path.read_text(encoding="utf-8").count("=== bookrag extract") == 2
+
+
+def test_extract_log_reports_an_unusable_path_instead_of_crashing(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    blocked = tmp_path / "a-file"
+    blocked.write_text("not a directory", encoding="utf-8")
+
+    exit_code = main(["extract", book_dir.name, "--provider", "fake", "--log", str(blocked / "run.log")])
+
+    assert exit_code == 1
+    assert "Could not open log file" in capsys.readouterr().out
+
+
+def test_tee_flushes_every_write_so_a_follower_sees_progress_live(tmp_path: Path) -> None:
+    """The reason --log exists at all. Python block-buffers a file, so an
+    unflushed log shows a follower nothing for minutes on end during a run
+    whose entire purpose is watching it progress."""
+    log_path = tmp_path / "run.log"
+    sink = io.StringIO()
+
+    with log_path.open("a", encoding="utf-8") as handle:
+        tee = _Tee(sink, handle)
+        tee.write("  [1/75] chapter done\n")
+        # Deliberately read before the handle is closed - that is what a
+        # `tail -f` running in another terminal is doing.
+        assert log_path.read_text(encoding="utf-8") == "  [1/75] chapter done\n"
+
+    assert sink.getvalue() == "  [1/75] chapter done\n"

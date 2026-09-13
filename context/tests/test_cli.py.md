@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
-last_synced: 2026-09-13T16:40:00Z
-source_hash: 9d98b2d844b8c64eb327550a8dff54608d1c6cc8
+last_synced: 2026-09-13T18:15:00Z
+source_hash: f84d3bf8fbb71d913e33048de7baa00ca51959dc
 ---
 
 ## Purpose
@@ -59,6 +59,19 @@ Also covers, added since the above:
   (`test_ingest_consolidates_many_small_fragments`).
 - `chat`'s remaining argument handling: an out-of-range `--chapter` and an
   unknown `book_id` both fail cleanly.
+- **Post-ingest guidance and `--log`** — the two halves of "how do I follow the
+  extraction?": `test_ingest_tells_the_user_how_to_extract` and
+  `..._how_to_follow_a_long_run` assert ingest names the next command and the
+  log/follow recipe, with the second pinning that the path ingest *prints* is
+  the path `--log` actually *writes* (`..._uses_the_documented_default`) - if
+  those diverge the printed follow command is simply wrong.
+  `..._still_prints_to_the_console` pins that `--log` tees rather than
+  redirects, `..._appends_so_a_resumed_run_keeps_the_earlier_output` pins
+  append-not-truncate, and an unusable path exits 1 instead of raising.
+  `test_tee_flushes_every_write_so_a_follower_sees_progress_live` reads the log
+  while its handle is still open - what a `tail -f` in another terminal does -
+  and is the one test that would catch the log going silent for minutes at a
+  time. Sabotage-verified by removing `_Tee`'s flush.
 
 ## Key Decisions
 - The `_library_root` autouse fixture points `BOOKRAG_LIBRARY_ROOT` at a

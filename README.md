@@ -212,11 +212,17 @@ One book, start to finish. `bookrag ingest` prints the `book_id` it assigns
 ```bash
 bookrag ingest path/to/some-book.epub
 # -> Ingested 'Some Book' as 'some-book' (12 chapters)
+#    ...then prints the exact extract command to run next, and how to watch it
 
 bookrag extract some-book --provider fake   # instant, no setup - swap in "ollama" for real extraction
 
 bookrag chat some-book --chapter 3 --question "Who has appeared so far?"
 ```
+
+`ingest` only reads the book into the library — it does not extract anything.
+It ends by naming the `bookrag extract` command to run next, since that is a
+separate step and a much longer one (see
+[Following a long run](#following-a-long-run)).
 
 Everything below is the full reference for each of these commands.
 
@@ -260,7 +266,13 @@ meaningful recurring story *settings*. `--content-type nonfiction` gives
 `setting`), with their own extraction/answer prompts. Set once at ingest
 time, in `metadata.json` - not something you choose again later.
 
-Each ingest prints a **sanity summary** (chapter count, word-count spread,
+Each ingest ends by printing the **next command to run** — `bookrag extract
+<book-id>`, with a warning about how long it takes and the exact commands for
+backgrounding it and following the log (see
+[Following a long run](#following-a-long-run)). Ingesting never extracts
+anything itself, so this is a separate step you have to run.
+
+Each ingest also prints a **sanity summary** (chapter count, word-count spread,
 first/last chapter titles) and writes it, plus a **classification**, to
 `data/library/<book_id>/ingestion_report.txt` for later review:
 - `chapter-bound` — most chapters carry a real title (a heading/TOC signal
@@ -303,6 +315,7 @@ bookrag extract <book-id> --provider anthropic        # if you have a real API k
 bookrag extract <book-id> --provider fake             # instant, deterministic, for trying the pipeline
 bookrag extract <book-id> --model qwen2.5:7b-instruct # one-off model override (see LLM provider setup)
 bookrag extract <book-id> --restart                   # ignore saved progress, re-extract from chapter 0
+bookrag extract <book-id> --log                       # also tee output to a log you can tail (see below)
 ```
 
 **Resumable.** If a run gets interrupted - Ctrl+C, a dropped connection, a
@@ -323,6 +336,51 @@ models' extractions side by side without overwriting each other (e.g. a
 fast local model now, a better model later, defaulting to the better
 one's facts) is a separate, bigger feature that needs its own design pass
 - not yet built (see Future ideas).
+
+#### Following a long run
+
+Extraction is the slow step: a local model takes on the order of minutes per
+chapter, and a real 75-chapter novel measured **5h27m** end to end on a
+mid-range laptop. That is long enough that you will want it in the background —
+which is exactly when the per-chapter progress lines stop being visible.
+
+`--log` tees this run's output to a file as well as the console, so you can
+background it and still watch:
+
+```bash
+bookrag extract <book-id> --log
+# -> Logging to <tempdir>/extract_<book-id>.log
+```
+
+Then, in another terminal:
+
+```bash
+tail -f "$TMPDIR/extract_<book-id>.log"            # macOS/Linux
+tail -f "$TEMP/extract_<book-id>.log"              # Windows, Git Bash
+Get-Content -Wait "$env:TEMP\extract_<book-id>.log"  # Windows, PowerShell
+```
+
+`bookrag ingest` prints the resolved path for you, so you don't have to
+construct it. Pass `--log PATH` to choose a different file. The log is
+**appended**, not truncated — an interrupted run is resumed with the same
+command, and the earlier attempt's output is usually what you want when working
+out why it stopped.
+
+Each line is flushed as it's written, so a follower sees progress as it
+happens rather than in buffered bursts.
+
+To detach the run entirely:
+
+```bash
+# macOS/Linux, Git Bash
+bookrag extract <book-id> --log &
+
+# PowerShell
+Start-Process bookrag -ArgumentList "extract","<book-id>","--log" -NoNewWindow
+```
+
+Ctrl+C in a foreground run is safe — progress is saved after every chapter and
+re-running the same command resumes (see **Resumable** above).
 
 For a series, extract books **in series order** — each book's extraction
 seeds its "already-known entities" context from every earlier book in the
