@@ -73,8 +73,19 @@ Unresolved items, deliberately deferred decisions.
 Omit sections that don't apply (a pure config file has no "Public Interface").
 Get the hash with `sha1sum <file>` (Git Bash).
 
+**Hash LF content, not CRLF.** `.gitattributes` is `* text=auto eol=lf`, so
+git stores every file with LF and any checkout that rewrites a file gives the
+working tree LF. A file newly written on Windows may be CRLF, and a hash taken
+from it will mismatch the moment a checkout normalizes the file — which is
+what happened to seven context docs at once when a `git checkout master`/merge
+rewrote files during a push. Convert to LF first if `file <path>` reports CRLF.
+
 ## Project layout
 ```
+install.py          one-step installer (venv + deps + .env + Ollama check).
+                     Stdlib-only and deliberately 3.6-parseable, so a
+                     too-old interpreter gets a readable message rather than
+                     a SyntaxError. Not under src/, so not hook-tracked.
 src/bookrag/        Python package: ingest/ (epub/pdf -> Chapter), storage.py
                      (data/library/ persistence), cli.py (`bookrag ingest ...`)
 context/            mirrored context docs, see above

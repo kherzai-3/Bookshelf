@@ -16,6 +16,35 @@ Requires Python 3.11+.
 git clone https://github.com/kherzai-3/Bookshelf.git Book_RAG
 cd Book_RAG
 
+python install.py        # Windows
+python3 install.py       # macOS/Linux
+```
+
+That's the whole install. `install.py` creates `.venv`, installs the pinned
+dependencies and `bookrag` itself, copies `.env.example` to `.env`, creates
+`data/incoming/` and `data/library/`, verifies the `bookrag` command runs,
+then reports whether Ollama is reachable and whether the default model is
+pulled — offering to download it if not. It never installs Python or Ollama
+themselves.
+
+It is safe to re-run, and re-running is how you update after a `git pull`. An
+existing `.venv` and an existing `.env` are reused, never overwritten.
+
+```bash
+python install.py --run-tests      # also run the test suite afterwards
+python install.py --pull-model     # download the default model without asking
+python install.py --no-pull-model  # never download it, don't even ask
+python install.py --skip-ollama    # skip the Ollama check entirely
+python install.py --recreate       # delete and rebuild .venv from scratch
+```
+
+Ollama being absent is a warning, not a failure — `bookrag ingest` and
+`--provider fake` work without it.
+
+<details>
+<summary>Installing by hand instead</summary>
+
+```bash
 # Windows
 python -m venv .venv
 .venv\Scripts\activate
@@ -31,7 +60,9 @@ run from the project root):
 ```bash
 pip install -r requirements.txt
 pip install -e .
+cp .env.example .env            # optional; every setting in it is optional too
 ```
+</details>
 
 From here on, every command in this README assumes the venv is activated,
 so `python`/`pip`/`bookrag` all resolve to the venv's own copies. If you'd
