@@ -14,7 +14,8 @@ API) with an eval harness to compare their output.
 
 ## Context-file convention (read this before editing any source file)
 
-Every file under `src/` has a mirrored context doc at `context/<path>.md` — e.g.
+Every file under `src/` and every `.py` under `tests/` has a mirrored context doc
+at `context/<path>.md` — e.g.
 `src/bookrag/ingest/epub_parser.py` → `context/src/bookrag/ingest/epub_parser.py.md`.
 Read the context doc instead of the full source file when you just need to know
 what a file does or how it fits together; only open the real source when you're
@@ -22,8 +23,10 @@ about to change it or the context doc is insufficient.
 
 **This is hook-enforced, not just a convention to remember:**
 - A `PostToolUse` hook (`.claude/hooks/track_dirty.sh`) logs every file under `src/`
-  touched via Edit/Write/NotebookEdit into `.claude/context_state/dirty.txt` —
-  and also logs `pyproject.toml` itself (see below).
+  and every `.py` under `tests/` touched via Edit/Write/NotebookEdit into
+  `.claude/context_state/dirty.txt` — and also logs `pyproject.toml` itself (see
+  below). A non-`.py` file under `tests/` (fixture data) is deliberately not
+  tracked: it has no context doc, so blocking on it would be a dead end.
 - A `Stop` hook (`.claude/hooks/check_dirty.sh`) blocks the turn from ending while
   that file is non-empty, naming which files still need attention and what kind.
 - A `SessionStart` hook (`.claude/hooks/check_drift.sh`) checks, once per session,
@@ -31,17 +34,21 @@ about to change it or the context doc is insufficient.
   `source_hash` recorded in its context doc (catches edits made outside
   Edit/Write, e.g. a manual save) and reports it as informational context — it
   does not block. It hashes CR-stripped content and ignores `__pycache__`.
-  Note the asymmetry: drift is *detected* for `tests/` but only *blocked* for
-  `src/`, since `track_dirty.sh` logs `src/` alone. A stale test doc is
-  reported at session start rather than stopping the turn it happened in.
+  This is the safety net for edits the `PostToolUse` hook never saw; the
+  blocking path above is the primary enforcement, and the two now cover the
+  same set of files.
 - `install.py` runs the same check (`--skip-doc-check` opts out), so a
   contributor not using Claude Code still sees stale docs. The hook stays
   authoritative; keep the two consistent if either changes.
 
-**So: whenever you create or edit a file under `src/`, before ending your turn,
-update its `context/<path>.md` and update `context/_INDEX.md` if the file's
-one-line purpose changed** — the Stop hook will otherwise block you and tell you
-exactly which files are pending.
+**So: whenever you create or edit a file under `src/` — or a `.py` under
+`tests/` — before ending your turn, update its `context/<path>.md` and update
+`context/_INDEX.md` if the file's one-line purpose changed** — the Stop hook
+will otherwise block you and tell you exactly which files are pending.
+
+Adding a test counts. The most likely stale doc is one describing behaviour a
+*renamed* test used to cover: the rename looks harmless, and the prose
+describing the old behaviour survives it.
 
 **Editing `pyproject.toml` (dependencies or `[project.scripts]`) is tracked the
 same way**, but the required follow-up is different: regenerate `requirements.txt`

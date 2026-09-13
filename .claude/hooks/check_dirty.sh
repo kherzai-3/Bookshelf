@@ -16,6 +16,11 @@ if [[ -s "$dirty" ]]; then
   src_files=()
   pyproject_flagged=0
   while IFS= read -r line; do
+    # Strip a trailing CR. A CRLF-written dirty.txt would otherwise embed a raw
+    # control character in the JSON below, making the block decision
+    # unparseable - i.e. failing open and not blocking at all, which is the
+    # one failure mode this hook must not have.
+    line="${line%$'\r'}"
     [[ -z "$line" ]] && continue
     if [[ "$line" == "pyproject.toml" ]]; then
       pyproject_flagged=1

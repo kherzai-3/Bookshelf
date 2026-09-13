@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# PostToolUse hook (Edit|Write|NotebookEdit): records any touched file under src/,
-# or pyproject.toml itself, into .claude/context_state/dirty.txt so check_dirty.sh
-# can enforce a sync before the turn is allowed to end - a context/<path>.md
-# regeneration for src/ files, or a requirements.txt/README.md review for
-# pyproject.toml (its dependencies/entry points are what those two describe).
+# PostToolUse hook (Edit|Write|NotebookEdit): records any touched file under src/
+# or tests/, or pyproject.toml itself, into .claude/context_state/dirty.txt so
+# check_dirty.sh can enforce a sync before the turn is allowed to end - a
+# context/<path>.md regeneration for src//tests/ files, or a
+# requirements.txt/README.md review for pyproject.toml (its dependencies/entry
+# points are what those two describe).
+#
+# tests/ was added 2026-09-13. It had been detected-but-not-blocked: check_drift.sh
+# noticed stale test docs at session start, but nothing stopped the turn that
+# created one, so eleven accumulated unnoticed - one of them describing entity
+# behaviour that had been removed. Only *.py under tests/ is tracked; a fixture
+# data file there has no context doc and must not block anything.
 # No jq/node/python available on this machine, so JSON extraction is done with
 # grep/sed against the known flat tool_input shape.
 set -euo pipefail
@@ -37,6 +44,7 @@ rel="${path:${#root}+1}"
 
 case "$rel" in
   src/*|pyproject.toml) ;;
+  tests/*.py) ;;
   *) exit 0 ;;
 esac
 

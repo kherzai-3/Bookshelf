@@ -10,7 +10,25 @@ actually read (via `bookrag.query.facts_as_of`).
 
 ## Setup
 
-Requires Python 3.11+.
+### Prerequisites
+
+Install these yourself first — no script here installs them for you:
+
+1. **Python 3.11 or newer** — [python.org/downloads](https://www.python.org/downloads/).
+   Anything older fails immediately with a message saying so.
+2. **[Ollama](https://ollama.com/download)** — *optional, but needed for real
+   extraction and chat*. `winget install Ollama.Ollama` (Windows),
+   `brew install ollama` (macOS), or the install script (Linux). It starts
+   automatically after installing; confirm with
+   `curl http://localhost:11434/api/version`.
+
+Without Ollama you can still ingest books and exercise the whole pipeline with
+`--provider fake`. You can also add it later — nothing has to be redone.
+
+Then pick **either** setup path below. They produce the same result; the
+installer is a convenience, not a requirement.
+
+### Option A — one command
 
 ```bash
 git clone https://github.com/kherzai-3/Bookshelf.git Book_RAG
@@ -20,57 +38,42 @@ python install.py        # Windows
 python3 install.py       # macOS/Linux
 ```
 
-That's the whole install. `install.py` creates `.venv`, installs the pinned
-dependencies and `bookrag` itself, copies `.env.example` to `.env`, creates
-`data/incoming/` and `data/library/`, verifies the `bookrag` command runs,
-then reports whether Ollama is reachable and whether the default model is
-pulled — offering to download it if not. It never installs Python or Ollama
-themselves.
+`install.py` creates `.venv`, installs the pinned dependencies and `bookrag`
+itself, copies `.env.example` to `.env`, creates `data/incoming/` and
+`data/library/`, verifies the `bookrag` command runs, then reports whether
+Ollama is reachable and whether the default model is pulled — offering to
+download it if not.
 
-**One command, at most one question.** The only thing it ever asks is whether
-to download the default model, and only when Ollama is running and that model
-isn't pulled yet — because that is a multi-GB download that shouldn't start
-without you saying so. Pass `--pull-model` to answer it in advance and make the
-whole run unattended, or `--no-pull-model` to decline it. Everything else is
-automatic.
-
-### Updating
+**The model download is the only thing it ever asks you.** It prompts only when
+Ollama is running and `qwen2.5:7b-instruct` isn't pulled yet, because that is a
+multi-GB download that shouldn't start unasked. Answer `y` and it downloads;
+everything else is automatic. So the full path is: install Python, install
+Ollama, run `install.py`, accept the download.
 
 ```bash
-git pull
-python install.py
-```
-
-Re-running is the update path. `.venv` and `.env` are reused, never
-overwritten; dependencies are re-resolved, so a change to `requirements.txt`
-is picked up; and because `bookrag` is installed in editable mode, changed
-Python source is already live without reinstalling anything. Your library
-under `data/` is never touched — it is not part of the install.
-
-You only need `--recreate` if the venv itself is broken or the required Python
-version changed.
-
-```bash
-python install.py --run-tests      # also run the test suite afterwards
-python install.py --pull-model     # download the default model without asking
+python install.py --pull-model     # answer yes in advance (fully unattended)
 python install.py --no-pull-model  # never download it, don't even ask
 python install.py --skip-ollama    # skip the Ollama check entirely
+python install.py --run-tests      # also run the test suite afterwards
 python install.py --recreate       # delete and rebuild .venv from scratch
 python install.py --skip-doc-check # skip the context-doc freshness check
 ```
 
-It also checks that every `context/<path>.md` still matches the source file it
-describes (see "For future development sessions" below) and names any that
-drifted. That is a contributor-facing check — it never affects the install, and
-a clean checkout simply reports that all of them match.
+It never touches anything outside the project directory, never installs Python
+or Ollama, and never writes outside `.venv`, `.env`, and `data/`. Ollama being
+absent is a warning, not a failure. It also checks that every
+`context/<path>.md` still matches the source file it describes (see "For future
+development sessions" below) — a contributor-facing check that never affects
+the install.
 
-Ollama being absent is a warning, not a failure — `bookrag ingest` and
-`--provider fake` work without it.
+### Option B — by hand
 
-<details>
-<summary>Installing by hand instead</summary>
+Exactly what Option A automates, if you'd rather run it yourself:
 
 ```bash
+git clone https://github.com/kherzai-3/Bookshelf.git Book_RAG
+cd Book_RAG
+
 # Windows
 python -m venv .venv
 .venv\Scripts\activate
@@ -87,8 +90,25 @@ run from the project root):
 pip install -r requirements.txt
 pip install -e .
 cp .env.example .env            # optional; every setting in it is optional too
+mkdir -p data/incoming data/library
+ollama pull qwen2.5:7b-instruct # only if you installed Ollama
 ```
-</details>
+
+### Updating
+
+```bash
+git pull
+python install.py       # or, for Option B: pip install -r requirements.txt
+```
+
+Re-running the installer is the update path — `.venv` and `.env` are reused,
+never overwritten, and dependencies are re-resolved so a changed
+`requirements.txt` is picked up. Because `bookrag` is installed in editable
+mode, changed Python source is already live without reinstalling anything. Your
+library under `data/` is never touched; it is not part of the install.
+
+You only need `--recreate` if the venv itself is broken or the required Python
+version changed.
 
 From here on, every command in this README assumes the venv is activated,
 so `python`/`pip`/`bookrag` all resolve to the venv's own copies. If you'd
@@ -683,7 +703,13 @@ pytest tests/ -v
 
 This project keeps a **mirrored context doc** under `context/<path>.md` for
 every file under `src/` and `tests/`, summarizing purpose/interface/decisions
-so you don't have to re-read full source just to know what a file does. For
-files under `src/`, this is hook-enforced (a Claude Code `Stop` hook blocks
-ending a turn while any file's context doc is out of sync) — see `CLAUDE.md`
-for the full convention and template before editing source.
+so you don't have to re-read full source just to know what a file does. This is
+hook-enforced for `src/` and for `.py` files under `tests/`: a Claude Code
+`Stop` hook blocks ending a turn while any touched file's context doc is out of
+sync, and a `SessionStart` hook catches edits made outside the editor tools.
+`python install.py` runs the same check for anyone not using Claude Code. See
+`CLAUDE.md` for the full convention and template before editing source.
+
+`tests/` was originally detected-but-not-blocked, and eleven test docs drifted
+before anyone noticed — one of them still describing entity behaviour that had
+been removed. Adding a test counts as a change that needs its doc updated.
