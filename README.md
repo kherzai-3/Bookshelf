@@ -379,6 +379,29 @@ pytest tests/ -v
   though chapter boundaries may still be roughly right.
 - No de-duplication across repeated ingests of the same book — re-ingesting
   the same file creates a second `book_id` (e.g. `the-hobbit-2`).
+- **Facts can be truncated on dense chapters.** The extraction schema caps a
+  chapter at 40 facts (`parsing.py`'s `maxItems`), which exists to make the
+  runaway-generation failure structurally impossible - a real incident
+  generated 8,490+ output tokens before Ollama's own server gave up. On a
+  real 75-chapter run two chapters hit that cap exactly, meaning genuine
+  content was cut. Raising it trades the guard against completeness over a
+  multi-hour run, so it is a deliberate open decision rather than a knob to
+  nudge. Per-chapter fact volume also grows with the known-entities list, so
+  the cap binds most in a book's later chapters.
+- **Facts extracted before a field existed simply lack it**, and nothing
+  backfills them. A book extracted before story-time tracking has no `when`
+  on any fact, so its backstory is indistinguishable from its present-tense
+  events; a book extracted before provider identities were recorded cannot
+  have a resumed run verified against the model that wrote it. Both are
+  resolved only by re-extracting that book. When judging library-wide
+  behaviour, check *when* each book was extracted before concluding anything
+  - a missing field in an old book is evidence about its extraction date.
+- **Two distinct occurrences can still be fused into one claim.** The
+  recency rule ("a later chapter supersedes an earlier one") is only valid
+  for standing attributes, not for events. Answer-layer rendering now
+  separates the two (see `query.format_context`), which removed the known
+  trigger from real data, but the underlying rule is unfixed and there is
+  currently no live reproduction of it.
 - **No cleanup/trim tool exists yet.** The sanity summary printed after
   ingest is diagnostic only - if it reveals bad chapters (front/back-matter
   noise, junk titles), there is currently no command to fix them up; the
@@ -518,12 +541,24 @@ pytest tests/ -v
   - A self-hosted integration (e.g. Stable Diffusion), consistent with the
     project's "no API key required" local-first posture (`ollama` is the
     default LLM provider for the same reason).
+- **A planning pass on multi-book libraries, once several books have been
+  re-extracted under current code.** The library has held four books for a
+  while, but only one of them was extracted recently enough to carry the
+  current fact shape, so there is no way today to tell a real multi-book
+  problem from one book simply being older than a feature. Once two or three
+  books are comparable, the questions worth working through are: whether
+  entity identity behaves across a genuine multi-book series as opposed to
+  across unrelated books (four wrong cross-book merges were found and
+  repaired once - see `bookrag doctor --split-cross-book`), whether
+  `series_reading_order` seeding holds up over a real series, and whether
+  retrieval and context size stay bounded as the registry spans more books.
 - **Multiple fact-library "versions" per book, keyed by which model
   produced them.** Today, extracting a book a second time with a different
-  provider/model overwrites (`--restart`) or silently mixes with
-  (resuming) the first run's facts in the same `facts.jsonl` - there's no
-  way to run a fast local model now and a bigger/better model later
-  without losing the first result. The idea: keep both, default reads
+  provider/model overwrites the first run's facts (`--restart`); resuming
+  into them is now refused outright rather than silently mixing two models'
+  output (see `extraction_progress.json`'s recorded `provider`). Either way
+  there's still no way to run a fast local model now and a bigger/better
+  model later without losing the first result. The idea: keep both, default reads
   (`bookrag chat`, `library.py`'s summaries) to whichever is considered
   "best" (assumed to be the larger/better model), and eventually support
   LLM-assisted comparison/consolidation between two models' takes on the
