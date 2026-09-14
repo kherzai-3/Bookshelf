@@ -198,3 +198,76 @@ def test_nothing_is_printed_when_placement_cannot_be_determined() -> None:
     before its model is loaded. Silence beats a misleading guess."""
     assert placement_notes(Stub(None)) == []
     assert placement_notes(object()) == []
+
+
+# --- forcing layer placement with num_gpu --------------------------------
+
+
+def sent_options(monkeypatch: pytest.MonkeyPatch, provider: OllamaProvider) -> dict:
+    """The `options` dict the provider actually POSTs to Ollama."""
+    import urllib.request
+
+    captured: dict = {}
+
+    def fake_urlopen(request, timeout=None):
+        captured.update(json.loads(request.data.decode("utf-8")))
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.close()
+
+        return Response(json.dumps({"message": {"content": "answer"}}).encode("utf-8"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    provider.answer_question("q", "context")
+    return captured["options"]
+
+
+def test_num_gpu_is_omitted_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ollama decides how many layers fit using free VRAM at load time, which
+    this process cannot see. Sending a number by default would replace a
+    better-informed decision with a worse one."""
+    monkeypatch.delenv("OLLAMA_NUM_GPU", raising=False)
+
+    assert "num_gpu" not in sent_options(monkeypatch, OllamaProvider())
+
+
+def test_num_gpu_is_sent_when_the_env_var_asks_for_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OLLAMA_NUM_GPU", "28")
+
+    assert sent_options(monkeypatch, OllamaProvider())["num_gpu"] == 28
+
+
+def test_a_blank_num_gpu_env_var_still_means_let_ollama_decide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`.env.example` ships it blank, same as every other optional setting."""
+    monkeypatch.setenv("OLLAMA_NUM_GPU", "")
+
+    assert "num_gpu" not in sent_options(monkeypatch, OllamaProvider())
+
+
+def test_an_explicit_num_gpu_argument_beats_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OLLAMA_NUM_GPU", "10")
+
+    assert sent_options(monkeypatch, OllamaProvider(num_gpu=28))["num_gpu"] == 28
+
+
+def test_num_gpu_zero_is_honoured_not_treated_as_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """0 means "no layers on the GPU" - a legitimate way to force CPU, and the
+    value most easily lost to a falsy check."""
+    monkeypatch.setenv("OLLAMA_NUM_GPU", "0")
+
+    assert sent_options(monkeypatch, OllamaProvider())["num_gpu"] == 0
+
+
+def test_a_non_numeric_num_gpu_names_the_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OLLAMA_NUM_GPU", "all")
+
+    with pytest.raises(ValueError) as error:
+        OllamaProvider()
+
+    assert "OLLAMA_NUM_GPU" in str(error.value)

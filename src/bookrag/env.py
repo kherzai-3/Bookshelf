@@ -45,16 +45,11 @@ def env_str(name: str, default: str | None = None) -> str | None:
     return value or default
 
 
-def env_int(name: str, default: int) -> int:
-    """The integer value of `name`, or `default` if it is unset or blank.
-
-    A non-numeric value raises naming the variable and its offending value -
-    `int()`'s own "invalid literal for int() with base 10: 'lots'" says
-    nothing about *which* setting is wrong or where it was read from.
+def _parse_int(name: str, raw: str) -> int:
+    """A non-numeric value raises naming the variable and its offending value -
+    `int()`'s own "invalid literal for int() with base 10: 'lots'" says nothing
+    about *which* setting is wrong or where it was read from.
     """
-    raw = env_str(name)
-    if raw is None:
-        return default
     try:
         return int(raw)
     except ValueError:
@@ -62,3 +57,22 @@ def env_int(name: str, default: int) -> int:
             f"{name} must be a whole number, got {raw!r} "
             f"(checked the environment and .env)"
         ) from None
+
+
+def env_int(name: str, default: int) -> int:
+    """The integer value of `name`, or `default` if it is unset or blank."""
+    raw = env_str(name)
+    return default if raw is None else _parse_int(name, raw)
+
+
+def env_optional_int(name: str) -> int | None:
+    """The integer value of `name`, or None if it is unset or blank.
+
+    Distinct from `env_int` because some settings have no sensible default to
+    invent. `OLLAMA_NUM_GPU` is the case this exists for: absent means "let
+    Ollama decide how many layers fit", and any number chosen here would
+    override a judgement the runtime makes with information this process does
+    not have (actual free VRAM at load time).
+    """
+    raw = env_str(name)
+    return None if raw is None else _parse_int(name, raw)

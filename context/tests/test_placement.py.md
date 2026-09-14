@@ -1,7 +1,7 @@
 ---
 source: tests/test_placement.py
-last_synced: 2026-09-13T19:30:00Z
-source_hash: 33c244e38b69a08e018689a18273305fb026c78c
+last_synced: 2026-09-13T20:30:00Z
+source_hash: 2bb1823845a4af73597e26c339d4f0d25d06cd75
 ---
 
 ## Purpose

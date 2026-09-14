@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/ollama_provider.py
-last_synced: 2026-09-13T19:30:00Z
-source_hash: 08550e05b58b59f91b1d7a6e95dc182b293ccf4b
+last_synced: 2026-09-13T20:30:00Z
+source_hash: 4e0fed878973887d769fe3ec47c7fcec69ff9125
 ---
 
 ## Purpose
@@ -48,6 +48,16 @@ locally-running `llama3.2:3b` and `qwen2.5:7b-instruct` models.
   `extract_facts`'s call doesn't pass it and gets `self._model` as before).
 
 ## Key Decisions
+- **`num_gpu` is sent only when explicitly set, never by default.** Ollama
+  decides how many of the model's layers fit using the free VRAM it observes at
+  load time; this process cannot see that number, so shipping a default would
+  replace a better-informed decision with a worse one. `$OLLAMA_NUM_GPU` (or
+  the constructor argument) exists for the case where Ollama's headroom
+  estimate is conservative and a full offload nearly fits. Read via
+  `env_optional_int`, not `env_int`, precisely because "unset" is meaningful
+  here rather than a stand-in for a default. `0` is a legitimate value
+  (force CPU) and is deliberately not treated as unset - a falsy check would
+  lose it.
 - **`model_placement()` reads `/api/ps`, which lists only models loaded *right
   now*** - so it returns `None` until a real call has loaded one, and callers
   check after a chapter completes rather than up front. Forcing a multi-GB load

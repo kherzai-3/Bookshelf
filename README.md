@@ -413,8 +413,18 @@ A split like that is not 70% of GPU speed: the CPU-resident layers gate every
 token, so partial offload lands much closer to CPU speed than to GPU speed.
 Getting to a full offload is worth real effort.
 
-If you're partially or entirely on CPU, the levers are all about fitting the
-model plus its context into VRAM:
+**Is a full offload even possible on this machine?** One number decides it:
+free VRAM versus the ~4.7 GB of model weights.
+
+- **Free VRAM comfortably above ~5.2 GB** — a full offload is reachable
+  *without touching the model at all*. Everything that has to shrink is cache
+  and overhead; see the levers below.
+- **Free VRAM below ~4.7 GB** — the weights alone don't fit. No amount of cache
+  tuning changes that, and a smaller model (or more VRAM) is the only path.
+
+Check with `nvidia-smi` / `rocm-smi`, or Task Manager → Performance → GPU →
+*Dedicated GPU memory* (see the warning below about which numbers there are
+trustworthy). If you're partially or entirely on CPU, the levers are:
 
 - **Lower `$OLLAMA_NUM_CTX`.** This is the only knob on bookrag's side that
   moves the needle, because it sizes the KV cache. Measured on a 7B model:
@@ -425,8 +435,21 @@ model plus its context into VRAM:
   silently overflowed an 8192 window, so the model never saw most of what it
   was asked about. `select_relevant_facts` now caps that, which makes a lower
   value safer than it used to be — but test it rather than assuming.
+- **Force the layer count with `$OLLAMA_NUM_GPU`.** Ollama works out how many
+  of the model's 28 layers fit and keeps headroom back; when that estimate is
+  conservative and a full offload nearly fits, setting the layer count
+  explicitly (`OLLAMA_NUM_GPU=28`) can close the gap. Left blank by default,
+  deliberately — Ollama decides from the actual free VRAM at load time, which
+  bookrag cannot see, so overriding it by default would replace a
+  better-informed judgement with a worse one. Asking for more layers than
+  genuinely fit fails with an out-of-memory error rather than falling back, so
+  raise it in steps. `0` forces CPU.
+- **Free VRAM elsewhere.** Browsers and Electron apps hold hundreds of MB;
+  another model left loaded in Ollama holds gigabytes (`ollama ps` shows
+  everything resident).
 - **Use a smaller or more heavily quantized model** — `--model llama3.2:3b`, or
-  a `q4` build of the same 7B.
+  a `q4` build of the same 7B. This is the *last* resort, not the first: it is
+  the only lever here that costs output quality.
 - **Close other GPU consumers**, and check the driver: Ollama needs CUDA
   (NVIDIA) or a ROCm-supported AMD card. Most integrated GPUs are unsupported —
   the machine this project is developed on has an AMD Radeon 840M and reports

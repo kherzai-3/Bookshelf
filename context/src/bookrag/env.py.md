@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/env.py
-last_synced: 2026-09-13T15:24:02Z
-source_hash: d2d800b7e9de40f04a2aba5a579234fe18b3627a
+last_synced: 2026-09-13T20:30:00Z
+source_hash: a77c5c73a70dd1dda501b6c097c7d06c1e6a59d1
 ---
 
 ## Purpose
@@ -16,6 +16,11 @@ instructions breaks the tool.
   `default` if unset, empty, or whitespace-only.
 - `env_int(name, default) -> int` — same, parsed as an integer; a non-numeric
   value raises a `ValueError` naming both the variable and the bad value.
+- `env_optional_int(name) -> int | None` — an integer setting with no default
+  worth inventing. `OLLAMA_NUM_GPU` is the case it exists for: absent means
+  "let Ollama decide how many layers fit", a judgement the runtime makes from
+  actual free VRAM at load time, which this process cannot see. Returning a
+  number here would silently override it.
 
 ## Key Decisions
 - **Blank means unset.** `.env.example` ships a blank line for every optional
