@@ -434,6 +434,47 @@ model plus its context into VRAM:
 - **Use a different machine entirely** without moving your library: point
   `$OLLAMA_BASE_URL` at an Ollama running on a GPU box on your network.
 
+##### The VRAM budget, concretely
+
+For the default `qwen2.5:7b-instruct`, what has to fit is:
+
+| | |
+|---|---|
+| weights (already `Q4_K_M`) | ~4.7 GB — fixed unless you change model or quantization |
+| KV cache | 56 KB per token of `num_ctx` |
+
+So `num_ctx=16384` costs **0.94 GB** of cache on top of the weights (~5.9 GB
+total, matching the measured figure above), 8192 costs 0.47 GB, and 4096 costs
+0.23 GB. A 6 GB card is borderline at 16384 and comfortable at 8192; 8 GB fits
+with room to spare.
+
+Note the model is **already quantized to Q4_K_M** — "quantize it further" is not
+the easy win it sounds like, since Q3 and below start visibly degrading output.
+The cache is the part worth shrinking. Recent Ollama versions can quantize the
+KV cache itself (`OLLAMA_FLASH_ATTENTION=1` plus `OLLAMA_KV_CACHE_TYPE=q8_0`,
+set on the **server**, not in bookrag's `.env`), roughly halving those cache
+figures without touching the weights at all. Check your Ollama version supports
+both before relying on it.
+
+##### Task Manager will lie to you about this
+
+Windows Task Manager's GPU graphs show **3D / Copy / Video Encode / Video
+Decode** by default. LLM inference runs on the **Compute** engine, which isn't
+one of them — so a GPU doing plenty of work commonly reads **0%**. Click a
+graph's dropdown and pick `Compute_0` (and check you're looking at the right
+adapter, if the machine has both integrated and discrete).
+
+The reliable signal is **memory, not utilization**: Performance → GPU →
+*Dedicated GPU memory* should show several GB in use if layers are offloaded,
+regardless of which engine graph you picked. `nvidia-smi` (NVIDIA) or
+`rocm-smi` (AMD) report both correctly.
+
+High CPU and high system RAM alongside a partial offload are expected, not
+contradictory — the CPU-resident layers are real work, and their weights live
+in system RAM. If system memory is near capacity the machine will start paging,
+which slows everything down and is its own reason to get the model fully onto
+the GPU.
+
 For a series, extract books **in series order** — each book's extraction
 seeds its "already-known entities" context from every earlier book in the
 series (via `series_reading_order`), so book 2 doesn't re-introduce a
