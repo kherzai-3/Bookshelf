@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-13T18:15:00Z
-source_hash: e1d2985c1ee81d2711405763bef800228dba50e9
+last_synced: 2026-09-13T19:30:00Z
+source_hash: 7ac49710c05a85099dd5a5d49e5fb33098e10ae4
 ---
 
 ## Purpose
@@ -29,6 +29,10 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   path `--log` uses by default. Public because `ingest` prints it before
   `extract` ever runs; the command that starts a six-hour run and the command
   that follows it are typed at different times, often in different terminals.
+- `placement_notes(provider) -> list[str]` — human-readable lines describing
+  where the model is running (fully on GPU / partially / CPU-only), or `[]`
+  when it can't be determined. Reported once per run by
+  `_progress_and_placement`, after the first completed chapter.
 - `follow_commands(log_path) -> list[str]` — the shell command(s) for watching
   a log grow on this platform. Windows returns both `tail -f` (Git Bash, where
   this project is actually developed) and `Get-Content -Wait` (PowerShell);
@@ -114,6 +118,16 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   reading a file into the library. Ingest works with no Ollama running at all,
   and ingesting several books in a row would otherwise launch several runs at
   once. The user chose guidance over auto-start deliberately.
+- **`extract` reports GPU/CPU placement once, after the first chapter**
+  (`_progress_and_placement` → `placement_notes`). A run that is silently
+  CPU-bound looks identical to a fast one until hours have gone by; this is the
+  cheapest possible warning. Deferred to after chapter 1 because Ollama can
+  only answer once it has loaded a model, and forcing a multi-GB load before
+  any work starts is the worse trade — chapter 1 of 75 is still early enough to
+  act on. A full offload prints one reassuring line and warns about nothing;
+  an undeterminable placement prints nothing at all, since silence beats a
+  misleading guess. bookrag does not *choose* GPU or CPU and cannot — see
+  `providers/base.py`'s context doc.
 - **`_Tee` flushes on every write.** Python block-buffers a file, so an
   unflushed log shows a `tail -f` follower nothing for minutes at a time
   during a job whose entire purpose is watching it progress. Covered by

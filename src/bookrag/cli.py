@@ -25,6 +25,7 @@ from bookrag.library import (
     show_book,
     split_cross_book_entity,
 )
+from bookrag.providers.base import model_placement
 from bookrag.providers.registry import get_provider
 from bookrag.query import facts_as_of, format_context, select_relevant_facts
 from bookrag.storage import incoming_root, library_root, load_chapters, load_metadata, save_book
@@ -385,7 +386,7 @@ def _run_extract(args: argparse.Namespace) -> int:
         result = extract_book(
             args.book_id,
             provider,
-            on_chapter_done=_print_progress(time.monotonic(), start_index),
+            on_chapter_done=_progress_and_placement(time.monotonic(), start_index, provider),
             restart=args.restart,
         )
     except KeyboardInterrupt:
@@ -729,6 +730,57 @@ def sanity_summary(chapters: list[Chapter], edge_count: int = 3) -> list[str]:
     if len(chapters) > edge_count:
         lines.append("  last: " + " | ".join(label(c) for c in chapters[-edge_count:]))
     return lines
+
+
+def _progress_and_placement(start_time: float, start_index: int, provider: object):
+    """Per-chapter progress, plus a one-time note on where the model is running.
+
+    Reported after the *first* completed chapter rather than up front, because
+    Ollama can only say where a model sits once it has actually loaded one, and
+    forcing a multi-GB load before any work starts would be a worse trade than
+    waiting one chapter. Chapter 1 of 75 is still early enough to act on.
+    """
+    progress = _print_progress(start_time, start_index)
+    announced: list[bool] = []
+
+    def report(done: int, total: int) -> None:
+        progress(done, total)
+        if not announced:
+            announced.append(True)
+            for line in placement_notes(provider):
+                print(line, flush=True)
+
+    return report
+
+
+def placement_notes(provider: object) -> list[str]:
+    """Lines describing GPU/CPU placement, or none if it can't be determined.
+
+    A run that is silently CPU-bound is the expensive failure here: it looks
+    identical to a fast one until hours have passed. bookrag never picks GPU or
+    CPU - Ollama does, when it weighs free VRAM against the model plus its KV
+    cache - so this reports rather than fixes, and points at the levers that
+    actually exist.
+    """
+    placement = model_placement(provider)
+    if placement is None:
+        return []
+    if placement.is_fully_on_gpu:
+        return ["  model is loaded fully on the GPU"]
+    if placement.is_cpu_only:
+        return [
+            "  NOTE: this run is on CPU only - no part of the model is on a GPU.",
+            "  Expect hours for a full-length book. If this machine has a supported",
+            "  GPU, check `ollama ps` and its driver; otherwise $OLLAMA_BASE_URL can",
+            "  point bookrag at another machine that has one.",
+        ]
+    percent = round(100 * placement.gpu_fraction)
+    return [
+        f"  NOTE: only {percent}% of the model is on the GPU; the rest is on CPU.",
+        "  Partial offload runs much closer to CPU speed than GPU speed, since the",
+        "  CPU-resident layers gate every token. Freeing VRAM may fit the rest: a",
+        "  lower $OLLAMA_NUM_CTX, or a smaller/more-quantized model.",
+    ]
 
 
 def _print_progress(start_time: float, start_index: int = 0):

@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/ollama_provider.py
-last_synced: 2026-09-13T15:24:02Z
-source_hash: f1abbc5d6c692ba7d81e9ea5f0096bc72f18efbb
+last_synced: 2026-09-13T19:30:00Z
+source_hash: 08550e05b58b59f91b1d7a6e95dc182b293ccf4b
 ---
 
 ## Purpose
@@ -48,6 +48,13 @@ locally-running `llama3.2:3b` and `qwen2.5:7b-instruct` models.
   `extract_facts`'s call doesn't pass it and gets `self._model` as before).
 
 ## Key Decisions
+- **`model_placement()` reads `/api/ps`, which lists only models loaded *right
+  now*** - so it returns `None` until a real call has loaded one, and callers
+  check after a chapter completes rather than up front. Forcing a multi-GB load
+  purely to ask the question would cost more than waiting one chapter.
+  `num_ctx` is the only thing on this side that affects the answer, since it
+  sizes the KV cache: measured at ~0.9GB between 4096 and 16384 for a 7B, which
+  is enough to decide whether a model fits VRAM at all.
 - **Every env-var read goes through `bookrag.env`, not `os.environ.get`.** All
   four settings here (`OLLAMA_MODEL`, `OLLAMA_ANSWER_MODEL`, `OLLAMA_BASE_URL`,
   `OLLAMA_NUM_CTX`) used to read `os.environ.get(name, DEFAULT)`, which returns

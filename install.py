@@ -419,6 +419,40 @@ def model_is_present(tags, wanted):
     return False
 
 
+def report_placement(model):
+    """Say whether Ollama has this model on the GPU or the CPU.
+
+    Reads /api/ps, which lists only models loaded *right now*, and stays quiet
+    when nothing is loaded rather than forcing a multi-GB load during an
+    install to answer a question `bookrag extract` will answer for free after
+    its first chapter. bookrag never chooses GPU or CPU - Ollama does - so this
+    only reports.
+    """
+    running = ollama_get("/api/ps")
+    if not running:
+        return
+    for entry in running.get("models") or []:
+        name = entry.get("name") or entry.get("model") or ""
+        if name != model and name.split(":")[0] != model.split(":")[0]:
+            continue
+        size = entry.get("size") or 0
+        vram = entry.get("size_vram") or 0
+        if not size:
+            return
+        percent = 100.0 * vram / size
+        if percent >= 99:
+            ok("loaded fully on the GPU")
+        elif vram <= 0:
+            warn("%s is loaded on the CPU, with nothing on a GPU - extraction "
+                 "will take hours rather than minutes" % model)
+            note("see README, 'GPU or CPU', for what actually moves this")
+        else:
+            warn("only %d%% of %s is on the GPU; the rest is on CPU"
+                 % (round(percent), model))
+            note("partial offload runs close to CPU speed - see README, 'GPU or CPU'")
+        return
+
+
 def install_ollama_hint():
     if sys.platform == "win32":
         return "  winget install Ollama.Ollama"
@@ -527,6 +561,7 @@ def check_ollama(model, pull_flag):
         return
     if model_is_present(tags, model):
         ok("the %s model is already pulled" % model)
+        report_placement(model)
         return
 
     note("the %s model is not pulled yet" % model)

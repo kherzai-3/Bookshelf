@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/base.py
-last_synced: 2026-09-12T10:54:08-05:00
-source_hash: 638b56f37f1caed9118619dfa5c4843354d2b10c
+last_synced: 2026-09-13T19:30:00Z
+source_hash: 782f9de70b0e810c70e12a2a09949cebf61ae456
 ---
 
 ## Purpose
@@ -74,3 +74,22 @@ never be what takes one down.
 
 Callers must read `None` as **"unknown, so unverifiable"**, never as "a
 different model".
+
+## `ModelPlacement` / `model_placement(provider)` (optional capability)
+Where a loaded model is resident: `model`, `size_bytes`, `vram_bytes`, plus
+`gpu_fraction`, `is_cpu_only`, and `is_fully_on_gpu`. Probed exactly like
+`extraction_identity` above and for the same two reasons - the many minimal
+test stand-ins implement `extract_facts` and nothing else, and a *diagnostic*
+must never be the thing that takes a run down (a capability that raises is
+treated as absent).
+
+- `is_fully_on_gpu` is `>= 0.99`, not `== 1.0`: runtimes report a little
+  non-layer overhead outside VRAM, so an effectively-complete offload lands a
+  shade under, and flagging that would cry wolf on the good case.
+- `None` means "can't tell", never "CPU". A hosted provider has no local
+  placement to report, and a local one cannot answer before its model is
+  loaded.
+- bookrag never *chooses* GPU or CPU - Ollama does, when it weighs free VRAM
+  against the model plus its KV cache. This type exists only to report that
+  choice, because a silently CPU-bound run looks identical to a fast one until
+  hours have passed.

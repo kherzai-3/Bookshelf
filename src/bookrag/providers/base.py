@@ -59,6 +59,56 @@ def extraction_identity(provider: object) -> str | None:
     return str(identity) if identity else None
 
 
+@dataclass(frozen=True)
+class ModelPlacement:
+    """How much of a loaded model is resident on the GPU.
+
+    `vram_bytes` is what the runtime reports as GPU-resident; the remainder of
+    `size_bytes` is running on CPU. Partial offload is not proportionally fast:
+    the CPU-resident layers gate every token, so "70% on GPU" is far closer to
+    CPU speed than to GPU speed.
+    """
+
+    model: str
+    size_bytes: int
+    vram_bytes: int
+
+    @property
+    def gpu_fraction(self) -> float:
+        if self.size_bytes <= 0:
+            return 0.0
+        return max(0.0, min(1.0, self.vram_bytes / self.size_bytes))
+
+    @property
+    def is_cpu_only(self) -> bool:
+        return self.vram_bytes <= 0
+
+    @property
+    def is_fully_on_gpu(self) -> bool:
+        # Not == 1.0: runtimes report a little non-layer overhead outside VRAM,
+        # so an effectively-full offload lands a shade under.
+        return self.gpu_fraction >= 0.99
+
+
+def model_placement(provider: object) -> ModelPlacement | None:
+    """Whether the provider's model is running on GPU or CPU, if it can say.
+
+    Same optional-capability shape as extraction_identity() above, and for the
+    same reason: this is diagnostics, so it must never be the thing that takes
+    a run down, and the many minimal test stand-ins must not have to implement
+    it. None means "can't tell" - a hosted provider has no local placement to
+    report, and a local one can't answer before the model is loaded.
+    """
+    describe = getattr(provider, "model_placement", None)
+    if not callable(describe):
+        return None
+    try:
+        placement = describe()
+    except Exception:  # noqa: BLE001 - diagnostics must never break a run
+        return None
+    return placement if isinstance(placement, ModelPlacement) else None
+
+
 class Provider(Protocol):
     def extract_facts(
         self,
@@ -71,5 +121,5 @@ class Provider(Protocol):
     def answer_question(self, question: str, context: str, content_type: str = "fiction") -> str: ...
 
     # Optional, intentionally not declared here: extraction_identity() ->
-    # str. Read it through the module-level extraction_identity() above,
-    # which tolerates its absence.
+    # str, and model_placement() -> ModelPlacement. Read them through the
+    # module-level functions above, which tolerate their absence.

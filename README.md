@@ -341,8 +341,9 @@ one's facts) is a separate, bigger feature that needs its own design pass
 
 Extraction is the slow step: a local model takes on the order of minutes per
 chapter, and a real 75-chapter novel measured **5h27m** end to end on a
-mid-range laptop. That is long enough that you will want it in the background —
-which is exactly when the per-chapter progress lines stop being visible.
+mid-range laptop — **CPU-only** (see [GPU or CPU](#gpu-or-cpu)). That is long
+enough that you will want it in the background — which is exactly when the
+per-chapter progress lines stop being visible.
 
 `--log` tees this run's output to a file as well as the console, so you can
 background it and still watch:
@@ -381,6 +382,57 @@ Start-Process bookrag -ArgumentList "extract","<book-id>","--log" -NoNewWindow
 
 Ctrl+C in a foreground run is safe — progress is saved after every chapter and
 re-running the same command resumes (see **Resumable** above).
+
+#### GPU or CPU
+
+**bookrag never chooses this.** It does no inference of its own — it POSTs to
+Ollama and Ollama decides, weighing free VRAM against the model plus its KV
+cache when it loads. There is no "use the GPU" setting here to turn on.
+
+What bookrag does do is **tell you**, once, after the first chapter:
+
+```
+  [1/75] chapter done - elapsed 59s, ~72m remaining
+  NOTE: this run is on CPU only - no part of the model is on a GPU.
+  Expect hours for a full-length book. ...
+```
+
+It reports after chapter 1 rather than up front because Ollama can only say
+where a model sits once it has loaded one, and forcing a multi-GB load before
+any work starts would be the worse trade. A run fully on the GPU says so in one
+line and warns about nothing.
+
+To check yourself, while a run is going:
+
+```bash
+ollama ps
+```
+
+Read the **label after the numbers** — `30%/70% CPU/GPU` means 70% on the GPU.
+A split like that is not 70% of GPU speed: the CPU-resident layers gate every
+token, so partial offload lands much closer to CPU speed than to GPU speed.
+Getting to a full offload is worth real effort.
+
+If you're partially or entirely on CPU, the levers are all about fitting the
+model plus its context into VRAM:
+
+- **Lower `$OLLAMA_NUM_CTX`.** This is the only knob on bookrag's side that
+  moves the needle, because it sizes the KV cache. Measured on a 7B model:
+  **5.94 GB at `num_ctx=16384`** (the default) versus **5.06 GB at 4096** — so
+  nearly a gigabyte of VRAM. If the model *almost* fits, this is the first
+  thing to try. It is a real tradeoff, not a free win: 16384 exists because a
+  full book's assembled context was measured at 26,000–30,000 tokens and
+  silently overflowed an 8192 window, so the model never saw most of what it
+  was asked about. `select_relevant_facts` now caps that, which makes a lower
+  value safer than it used to be — but test it rather than assuming.
+- **Use a smaller or more heavily quantized model** — `--model llama3.2:3b`, or
+  a `q4` build of the same 7B.
+- **Close other GPU consumers**, and check the driver: Ollama needs CUDA
+  (NVIDIA) or a ROCm-supported AMD card. Most integrated GPUs are unsupported —
+  the machine this project is developed on has an AMD Radeon 840M and reports
+  `size_vram = 0`, which is why the 5h27m figure above is a CPU number.
+- **Use a different machine entirely** without moving your library: point
+  `$OLLAMA_BASE_URL` at an Ollama running on a GPU box on your network.
 
 For a series, extract books **in series order** — each book's extraction
 seeds its "already-known entities" context from every earlier book in the

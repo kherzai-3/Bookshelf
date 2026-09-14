@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 
 from bookrag.env import env_int, env_str
-from bookrag.providers.base import ExtractedFact
+from bookrag.providers.base import ExtractedFact, ModelPlacement
 from bookrag.providers.parsing import extraction_response_schema, parse_facts
 from bookrag.providers.prompts import (
     ANSWER_SYSTEM_PROMPTS,
@@ -113,6 +113,35 @@ class OllamaProvider:
             temperature=DEFAULT_EXTRACTION_TEMPERATURE,
         )
         return parse_facts(content, content_type)
+
+    def model_placement(self) -> ModelPlacement | None:
+        """Where Ollama currently has this model loaded: GPU, CPU, or split.
+
+        Reads /api/ps, which reports only models loaded *right now* - so this
+        returns None until the first real call has loaded one. That is why the
+        caller checks after a chapter completes rather than up front: forcing a
+        load just to ask would cost a multi-GB read before any work starts.
+
+        bookrag never chooses GPU or CPU itself; Ollama does that when it loads
+        the model, weighing free VRAM against the model plus its KV cache. The
+        only thing on this side that moves the needle is num_ctx, which sizes
+        that cache - measured here at ~0.9GB between 4096 and 16384 for a 7B.
+        """
+        try:
+            with urllib.request.urlopen(f"{self._base_url}/api/ps", timeout=5) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except Exception:  # noqa: BLE001 - a diagnostic must never break a run
+            return None
+        for entry in body.get("models") or []:
+            name = entry.get("name") or entry.get("model") or ""
+            if name != self._model and name.split(":")[0] != self._model.split(":")[0]:
+                continue
+            size = entry.get("size")
+            vram = entry.get("size_vram")
+            if not isinstance(size, int) or not isinstance(vram, int):
+                return None
+            return ModelPlacement(model=name, size_bytes=size, vram_bytes=vram)
+        return None
 
     def extraction_identity(self) -> str:
         # self._model, not self._answer_model - this labels who wrote a
