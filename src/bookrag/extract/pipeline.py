@@ -4,6 +4,7 @@ entities and appending facts - the actual extraction pipeline."""
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,6 +60,17 @@ class ExtractionResumeMismatch(Exception):
 # non-narrative fragment, e.g. a table of contents or author bio, can be too
 # long for this floor to catch, which is why both defenses exist).
 MIN_NARRATIVE_WORDS = 20
+
+# Entity types whose names *can* be proper nouns, and so may be required to
+# appear in the chapter capitalized. Themes and concepts are deliberately
+# excluded: a model routinely title-cases them ("Courage", "Anchoring") where
+# the prose only ever says "courage", so demanding the capitalized form there
+# would reject perfectly good facts.
+_PROPER_NOUN_ENTITY_TYPES = {"character", "setting"}
+
+# Words that may appear lowercase inside an otherwise capitalized name
+# ("The Ruins of Gorlan") without making it a common-noun description.
+_NAME_CONNECTORS = {"of", "the", "a", "an", "and", "de", "du", "di", "la", "le", "van", "von"}
 
 
 @dataclass
@@ -288,12 +300,12 @@ def extract_book(
                     # A *new* entity's name should appear somewhere in the
                     # chapter that supposedly introduced it - real, observed
                     # failure: a small local model attached a real line
-                    # about Will to a name ("Arthur Penhaligon") that never
-                    # occurs anywhere in that chapter, from an entirely
-                    # different book series. This only gates NEW entities -
-                    # a fact about an already-known one is fine even if
-                    # this chapter only refers to them by pronoun.
-                    if is_new and raw.entity_name.lower() not in chapter.text.lower():
+                    # about the protagonist to a name ("Arthur Penhaligon")
+                    # that never occurs anywhere in that chapter, from an
+                    # entirely different book series. This only gates NEW
+                    # entities - a fact about an already-known one is fine
+                    # even if this chapter only refers to them by pronoun.
+                    if is_new and not _entity_is_grounded(raw.entity_name, raw.entity_type, chapter.text):
                         ungrounded_entity_count += 1
                         continue
 
@@ -387,6 +399,74 @@ def extract_book(
         duplicate_fact_count=duplicate_fact_count,
         resumed_from_chapter=resumed_from_chapter,
     )
+
+
+def _entity_is_grounded(entity_name: str, entity_type: str, chapter_text: str) -> bool:
+    """Whether a brand-new entity's name really occurs in the chapter that
+    supposedly introduced it.
+
+    This was a plain case-insensitive substring test, which fails open on
+    exactly the names most likely to be hallucinated: a short name that is
+    also an ordinary English word. "Will" is a substring of "he will go", so
+    a hallucinated "Will" was grounded by 111 of Moby Dick's 147 chapters -
+    the guard was effectively off for the very name the extraction prompt's
+    own worked example used to be written around (see prompts.py, which no
+    longer names any real book's characters). "Halt"/"halt", "May"/"may",
+    "Art"/"art" and "Rose"/"rose" all fail the same way.
+
+    Two changes close it. The name must match on word boundaries, so "Art"
+    no longer rides in on "start"; and a proper noun must appear capitalized
+    as written, not merely as some lowercase word, which is the only thing
+    that separates the name "Will" from the verb. The second rule is safe
+    because a character or place genuinely introduced in a chapter is
+    capitalized there - and it is applied only to the entity types that are
+    actually proper nouns.
+    """
+    name = entity_name.strip()
+    if not name:
+        return False
+
+    # Singular/plural is not a grounding failure: the chapter that introduces
+    # "Waste Person" writes "Waste persons are those...", and "Wargals" is
+    # the same entity as "Wargal". Matching the stem with an optional
+    # inflection covers both directions. Measured on the real library, a
+    # trailing word boundary without this rejected 4 legitimate entities.
+    stem = name
+    if len(name) > 3 and name.lower().endswith("es"):
+        stem = name[:-2]
+    elif len(name) > 2 and name.lower().endswith("s"):
+        stem = name[:-1]
+    pattern = re.escape(stem) + r"(?:e?s)?"
+
+    # `\b` only asserts a boundary next to a word character, so a name that
+    # starts with punctuation would never match if anchored blindly.
+    if name[0].isalnum() or name[0] == "_":
+        pattern = r"\b" + pattern
+    if stem[-1:].isalnum() or stem[-1:] == "_":
+        pattern = pattern + r"\b"
+
+    flags = re.IGNORECASE
+    if entity_type in _PROPER_NOUN_ENTITY_TYPES and _looks_like_a_proper_noun(name):
+        flags = 0
+    return re.search(pattern, chapter_text, flags) is not None
+
+
+def _looks_like_a_proper_noun(name: str) -> bool:
+    """Whether a name is a real name ("Will", "Castle Araluen") rather than a
+    common-noun description a model sometimes files as a character ("Old
+    man", "The rowers", "Two intruders").
+
+    Only the former gets the case-sensitive treatment in _entity_is_grounded.
+    That keeps the fix aimed squarely at the bug - a name that doubles as an
+    everyday word - instead of also dropping the descriptor-style entities,
+    which are grounded honestly enough even though the prose keeps them
+    lowercase. Measured on the real library, this is the difference between
+    14 newly-rejected entities and 0.
+    """
+    tokens = [t for t in re.split(r"[\s\-']+", name) if t and t[0].isalpha()]
+    if not tokens or not tokens[0][0].isupper():
+        return False
+    return all(t[0].isupper() or t.lower() in _NAME_CONNECTORS for t in tokens)
 
 
 def _entity_names_for_books(book_ids: list[str], entities: dict) -> list[str]:

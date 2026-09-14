@@ -1,7 +1,7 @@
 ---
 source: tests/test_extraction_pipeline.py
-last_synced: 2026-09-13T16:40:00Z
-source_hash: 240f36de102b4567202c5e2dad479d15ed5f5300
+last_synced: 2026-09-14T14:10:38Z
+source_hash: 48a507d46083daa3d1f62811256c9b451cee4a7c
 ---
 
 ## Purpose
@@ -14,6 +14,28 @@ test double) found running a real 75-chapter book, that `on_chapter_done`
 fires once per chapter with `(1-indexed position, total)`, and the
 new-entity grounding-check regression (`_FixedResponseProvider` test
 double) found in the same real run.
+
+Five tests pin `pipeline._entity_is_grounded`'s matching rules (see that
+file's context doc for the measurements behind them). Four are new, added
+with the fix for a user-reported hallucination:
+- `..._rejects_a_name_that_only_appears_as_an_ordinary_word` - the headline
+  case. A name is not grounded by the everyday word it happens to spell:
+  `"Will"` must not be accepted by *"he will go to the tower"*. Under the
+  old substring check it was, which is why a leaked Ranger's Apprentice
+  name reached a user's unrelated book.
+- `..._grounding_requires_a_whole_word_not_a_substring` - the other half,
+  independent of capitalization: `"Art"` must not ride in on `"Start"`.
+- `..._grounds_a_name_the_chapter_states_in_the_plural` - the guard must not
+  overcorrect: `"Waste Person"` is grounded by *"Waste persons are..."*.
+- `..._still_grounds_a_lowercase_descriptor_entity` - the case-sensitivity
+  rule fires only on real names, so a common-noun description a model files
+  as a character (`"Old man"` against *"The old man cackled"*) still passes.
+- `..._grounds_a_theme_case_insensitively` - `"Courage"` is grounded by
+  *"courage"*, because themes/concepts are exempt from the capital rule.
+
+The last three exist because the first version of the fix was too strict and
+the real library caught it - they are the regression tests for the
+overcorrection, not just for the original bug.
 
 Also covers resumable extraction (`resume_start_index` +
 `extract_book(..., restart=)`): a simulated crash (`_FailsAfterNChapters`)

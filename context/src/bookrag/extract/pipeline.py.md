@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/pipeline.py
-last_synced: 2026-09-13T15:24:02Z
-source_hash: 059b7d65a6674dc11ebe609199730b980e7b5d09
+last_synced: 2026-09-14T14:10:38Z
+source_hash: fd88d7b987103aa1a58c02cb638f23cca4e5f3c3
 ---
 
 ## Purpose
@@ -132,14 +132,15 @@ isolation (7.9s, not a hang) after the file appeared frozen.
   Apprentice omnibus against `llama3.2:3b`: a real line about the
   protagonist got attached to "Arthur Penhaligon," a character from an
   entirely different book series, whose name never appears anywhere in
-  that chapter's text. The check (`raw.entity_name.lower() in
-  chapter.text.lower()`) only applies when `raw.entity_name not in
+  that chapter's text. The check only applies when `raw.entity_name not in
   known_names` - a fact about an *already-known* entity is accepted even
   if this specific chapter only refers to them by pronoun, since requiring
   the name to reappear in every chapter would reject perfectly good facts.
   Rejected facts are counted in `ungrounded_entity_count`, not silently
   dropped. See `test_extract_book_rejects_a_new_entity_never_named_in_its_chapter`
   and `..._does_not_reject_an_already_known_entity_referred_to_by_pronoun`.
+  The matching rule itself is `_entity_is_grounded`, which is more than a
+  substring test - see the next section for why it had to be.
 - **A single chapter's `ExtractionParseError` is caught and skipped, not
   fatal** - real bug found running the full 75-chapter Ranger's Apprentice
   omnibus against `llama3.2:3b`: chapter 1 ("For Michael", a two-word
@@ -306,6 +307,65 @@ promoted ahead of other Phase 1 work.
 - Resuming a progress file that had no identity **stamps the current run's
   identity** onto it. The earlier chapters' model is unknowable at that
   point, and recording the half that is knowable beats recording nothing.
+
+## `_entity_is_grounded`: why the substring check had to go
+
+The grounding check above was `raw.entity_name.lower() in
+chapter.text.lower()` for most of its life. It failed open on exactly the
+names most likely to be hallucinated: **a short name that is also an
+ordinary English word.** `"Will"` is inside `"he will go"`.
+
+This was found investigating a user-reported hallucination - a freshly
+cloned install extracted an unrelated book and reported its protagonist was
+*"nervous about the Choosing Day"*. The leak's source was
+`providers/prompts.py`, whose worked example was written around Ranger's
+Apprentice (fixed there, guarded by `tests/test_prompts.py`). But this check
+is what should have caught the leak on the way out, and did not: measured
+against the real Moby Dick chapters in the library, a hallucinated `"Will"`
+was "grounded" by **111 of 147 chapters**, `"Art"` by 136, `"May"` by 100.
+The guard was effectively off for the whole class.
+
+`_entity_is_grounded(entity_name, entity_type, chapter_text)` replaces it
+with three rules, each added to fix a measured problem rather than on
+principle:
+
+1. **Word boundaries.** `"Art"` no longer rides in on `"start"`.
+2. **A proper noun must appear capitalized as written.** This is the only
+   thing that separates the name `"Will"` from the verb, and it is safe
+   because a character or place genuinely introduced in a chapter is
+   capitalized there. Applied only to `_PROPER_NOUN_ENTITY_TYPES`
+   (`character`, `setting`) - a model routinely title-cases a theme or
+   concept (`"Courage"`, `"Anchoring"`) where the prose only ever says
+   `"courage"`, so demanding the capital there would reject good facts.
+3. **Singular/plural is not a grounding failure.** The stem is matched with
+   an optional `(?:e?s)?` inflection, in both directions.
+
+Rules 2 and 3 were *not* in the first version, and the real library is what
+caught that. A naive word-boundary + case-sensitive check rejected 14
+legitimate entities: `"Waste Person"` (the chapter says *"Waste persons
+are..."*), `"academic field"` (*"Academic fields are such territories"*),
+and descriptor-style names a model sometimes files as characters -
+`"Old man"`, `"The rowers"`, `"Two intruders"` - which the prose honestly
+keeps lowercase. So `_looks_like_a_proper_noun` narrows rule 2 to names that
+actually look like names: first token capitalized, and every token either
+capitalized or a connector (`of`, `the`, `de`, ...), so `"Castle Araluen"`
+and `"The Ruins of Gorlan"` qualify while `"Old man"` does not.
+
+**Measured on the real library** (4 books, 2,035 facts), final version:
+
+| | old check | new check |
+|---|---|---|
+| chapters accepting a hallucinated "Will" | 111/147 | **11/147** |
+| ... "Art" | 136/147 | **1/147** |
+| ... "May" | 100/147 | **10/147** |
+| ... "Halt" | 11/147 | **0/147** |
+| real facts newly rejected | - | **6 / 1,857 (0.32%)** |
+
+The residual `"Will"` acceptances are sentence-initial `"Will you..."`; this
+is a heuristic guard, not a parser, and the prompt no longer contains that
+name anyway. The 0.32% are all facts about entities grounded elsewhere in
+the same book, which the check does not gate (it only gates *new* entities),
+so the real-run impact is smaller still.
 
 ## Entity identity scope (added with `resolve_entity`'s `scope`)
 

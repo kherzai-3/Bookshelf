@@ -255,6 +255,112 @@ def test_extract_book_accepts_a_new_entity_named_in_its_chapter(tmp_path: Path) 
     assert result.ungrounded_entity_count == 0
 
 
+def test_extract_book_rejects_a_name_that_only_appears_as_an_ordinary_word(tmp_path: Path) -> None:
+    """Regression test for a user-reported hallucination: a freshly cloned
+    install extracted an unrelated book and reported that its protagonist
+    "was nervous about the Choosing Day" - content from Ranger's Apprentice,
+    which that user never ingested. Two defects combined. The extraction
+    prompt's worked example was written around that book (fixed in
+    prompts.py, guarded by test_prompts.py), and the grounding check that
+    should have caught the leak was a case-insensitive *substring* test:
+    "Will" is inside "he will go", so the hallucinated name was "grounded"
+    by almost any English chapter - 111 of Moby Dick's 147, measured.
+
+    A name that occurs only as a lowercase everyday word is not a character
+    appearing in the chapter."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [
+        Chapter(0, "One", f"He will go to the tower when the bell rings. {NARRATIVE_PADDING}"),
+    ]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+
+    leaked = ExtractedFact(
+        entity_name="Will",
+        entity_type="character",
+        category="personality",
+        statement="Will felt nervous about the Choosing Day.",
+    )
+    result = extract_book(book_id, _FixedResponseProvider([leaked]), root=root)
+
+    assert result.fact_count == 0
+    assert result.new_entity_count == 0
+    assert result.ungrounded_entity_count == 1
+
+
+def test_extract_book_grounding_requires_a_whole_word_not_a_substring(tmp_path: Path) -> None:
+    """The other half of the substring bug, independent of capitalization:
+    "Art" is a case-sensitive substring of "Start", so a short name could be
+    grounded by a longer unrelated word. Word boundaries are required."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [Chapter(0, "One", f"Start the fire before dusk. {NARRATIVE_PADDING}")]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+
+    fact = ExtractedFact("Art", "character", "development", "Art lit the fire.")
+    result = extract_book(book_id, _FixedResponseProvider([fact]), root=root)
+
+    assert result.fact_count == 0
+    assert result.ungrounded_entity_count == 1
+
+
+def test_extract_book_grounds_a_theme_case_insensitively(tmp_path: Path) -> None:
+    """The proper-noun rule must NOT extend to themes. A model routinely
+    title-cases a theme ("Courage") where the prose only ever writes
+    "courage" - demanding the capitalized form there would reject good
+    facts, so themes stay case-insensitive (word-boundary still applies)."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [Chapter(0, "One", f"He spoke quietly of courage and duty. {NARRATIVE_PADDING}")]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+
+    fact = ExtractedFact("Courage", "theme", "description", "Courage is presented as a quiet, daily choice.")
+    result = extract_book(book_id, _FixedResponseProvider([fact]), root=root)
+
+    assert result.fact_count == 1
+    assert result.ungrounded_entity_count == 0
+
+
+def test_extract_book_grounds_a_name_the_chapter_states_in_the_plural(tmp_path: Path) -> None:
+    """Singular/plural is not a grounding failure. Real cases from the
+    library: the chapter introducing "Waste Person" writes "Waste persons
+    are those...", and "Wargals"/"Wargal" are one entity. A bare trailing
+    word boundary rejected four legitimate entities over the real books."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [Chapter(0, "One", f"Waste persons are those no longer useful. {NARRATIVE_PADDING}")]
+    book_id = save_book(source, chapters, title="Test Book", root=root)
+
+    fact = ExtractedFact("Waste Person", "concept", "definition", "A waste person is no longer useful.")
+    result = extract_book(book_id, _FixedResponseProvider([fact]), root=root)
+
+    assert result.fact_count == 1
+    assert result.ungrounded_entity_count == 0
+
+
+def test_extract_book_still_grounds_a_lowercase_descriptor_entity(tmp_path: Path) -> None:
+    """The proper-noun rule must fire only on actual names. A model
+    sometimes files a common-noun description as a character ("Old man",
+    "The rowers"), and the prose keeps those lowercase - they are grounded
+    honestly, so the case-sensitive rule deliberately skips them rather than
+    quietly dropping 14 such entities from the real library."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [Chapter(0, "One", f"The old man cackled at the question. {NARRATIVE_PADDING}")]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+
+    fact = ExtractedFact("Old man", "character", "personality", "The old man cackled at the question.")
+    result = extract_book(book_id, _FixedResponseProvider([fact]), root=root)
+
+    assert result.fact_count == 1
+    assert result.ungrounded_entity_count == 0
+
+
 def test_extract_book_does_not_reject_an_already_known_entity_referred_to_by_pronoun(
     tmp_path: Path,
 ) -> None:
