@@ -630,6 +630,24 @@ pytest tests/ -v
   though chapter boundaries may still be roughly right.
 - No de-duplication across repeated ingests of the same book — re-ingesting
   the same file creates a second `book_id` (e.g. `the-hobbit-2`).
+- **A single file containing several books is ingested as one long book.**
+  An omnibus/bindup (or several books stitched together by hand before
+  ingesting) has no boundary detection at all, so its chapters are numbered
+  continuously across every book it contains, and repeated "Chapter 1"s are
+  just more chapters. `--series`/`--series-position` do not help: they group
+  separate *files*, and the stitching already happened. This project's own
+  `ranger-s-apprentice-1-2-bindup` is 75 chapters spanning two books. Facts
+  and spoiler-scoping are still internally consistent - `--chapter N` means
+  the Nth chapter of the *file* - but N no longer corresponds to anything the
+  reader sees on the page. Ingest each book as its own file where you can.
+  See Future ideas.
+- **An answer sometimes lists facts instead of answering the question.**
+  `bookrag chat` can return something close to the fact context it was given
+  rather than a reply, which is most confusing when two facts genuinely
+  conflict (a character wounded in one chapter and well in a later one reads
+  as a contradiction rather than as recovery). The facts themselves are
+  correct and correctly chapter-scoped; this is an answer-layer problem. See
+  Future ideas.
 - **Facts can be truncated on dense chapters.** The extraction schema caps a
   chapter at 40 facts (`parsing.py`'s `maxItems`), which exists to make the
   runaway-generation failure structurally impossible - a real incident
@@ -862,6 +880,115 @@ pytest tests/ -v
   progression isn't a wrong answer even when the underlying facts disagree.
   Wants the timeline work below to land first, so "progression" can mean
   ordered events rather than same-category facts that merely share an entity.
+- **Facts record only what is true, never what is absent.** Reported from
+  real use: in *The Magic Thief*, magisters carry a stone called a locus
+  magicalicus. Asked what a magister's stone looks like, `chat` answers well.
+  Asked what a *non*-magister's stone looks like, it says "I don't have
+  enough information" - honest, not a hallucination, but the correct answer
+  is **"he doesn't have one."** Same shape as asking what Horace's cloak
+  looks like: he has none, because he isn't a Ranger. There are two separate
+  problems hiding here, and they differ enormously in cost:
+  - **Stated absence** - the text literally says someone lacks something.
+    Extraction can capture this today; it needs a polarity notion on a fact
+    (or a category) so "has no cloak" doesn't render as a cloak fact. Cheap,
+    and worth doing first.
+  - **Inferred absence** - nothing states it; it follows from a class rule
+    ("only Rangers wear that cloak") plus a membership fact ("Horace is a
+    Battleschool apprentice"). This is the hard half, and the reported
+    framing - per-book "important details" identified at ingest or during
+    the first few chapters - is one way, but probably not the cheapest.
+    Worth testing first: the catalog may already hold both halves as
+    ordinary facts, and the gap may be that `select_relevant_facts` never
+    retrieves the *class-level* entity alongside the character, so the model
+    is never given the rule it would need to reason from. If so this is a
+    retrieval + prompt change rather than a new extraction construct. Needs
+    a planning pass, starting with that experiment.
+- **A single file containing several books ("omnibus"/"bindup") is treated
+  as one long book.** Reported from real use: a 5-book epub, stitched
+  together before ingestion, so the text contains five separate "Chapter 1"s.
+  `--series`/`--series-position` do not help - they group *separate files*,
+  and by ingest time the stitching has already happened. This project's own
+  library has the same shape (`ranger-s-apprentice-1-2-bindup`: 75 chapters
+  spanning two books). Consequences are real, not cosmetic: `--chapter 40`
+  means nothing to a reader who is on chapter 6 of book 3, spoiler scoping is
+  coarser than it looks, and any future citation feature is unusable until
+  this is solved. Design questions: detect the boundaries at ingest (a
+  repeated title pattern, a restarting chapter numbering, a title-page
+  signal) or offer an explicit `--split-at` flag; then decide whether to
+  write N separate `book_id`s wired together with the existing series
+  metadata (reuses everything, costs a re-ingest) or keep one book with a
+  sub-book field on each chapter (cheaper, but every consumer of
+  `chapter_index` has to learn about it). The first is probably right,
+  because it makes the rest of the system need no changes at all.
+- **Nicknames and alternate names for one character.** Reported from real
+  use: *The Magic Thief*'s protagonist appears as Conn, Connwaer, "the boy"
+  and "bird", and facts scattered across all of them. Note this is **not a
+  greenfield feature** - `entities.json` already carries an `aliases` list on
+  every entity, `extract.resolve.resolve_entity` already matches against it,
+  and `query.select_relevant_facts` already searches it. What's missing is
+  anything that *populates* it from the text: only 2 of 493 entities in the
+  real library have an alias, and both came from
+  `bookrag doctor --merge-duplicates`, not from reading a book. So the
+  question is narrower than it first appears - where does alias detection
+  run (an extraction-time field, a separate cheap pass over chapters, or a
+  `doctor`-style offline pass over existing facts), and how is a false merge
+  avoided, since wrongly fusing two characters is invisible and hard to undo
+  (the same asymmetry that made `resolve_entity`'s scope deliberately
+  narrow). An epithet like "the boy" is also chapter-scoped in a way a real
+  name isn't - it may refer to someone else entirely later.
+- **Book-level facts: protagonist, antagonist, cast, main plotline.**
+  Requested as a way to ask "who is in this book?" without naming anyone
+  first. Today every fact hangs off one entity and there is no book-level
+  layer at all (`metadata.json` holds only bibliographic fields). **This is
+  the most spoiler-dangerous idea on this list and must not be built before
+  the spoiler-safety tests below.** "Antagonist" and "main plotline" are
+  close to a definition of what spoils a book: a cast list rendered at
+  chapter 3 that names the chapter-60 villain is a leak, and so is an
+  antagonist field that is populated at all before the reader meets them.
+  Anything here has to be chapter-scoped exactly like `facts_as_of`, which
+  means it is derived per-query, not stored once at extraction time. Some of
+  it is also nearly free without a model: "protagonist" is well approximated
+  by the most-referenced character so far, and "cast" by the entity list
+  already filtered to the current chapter. Worth separating the cheap
+  derived half from the genuinely model-authored half (plotline) before
+  designing.
+- **Citations back to where a fact came from.** Requested so a reader can
+  open their own copy and find the passage - e.g. a physical description of
+  a character, traced to the page that states it. Facts already carry
+  `chapter_index`, so the coarse version exists; what's missing is anything
+  finer, and the finer version is harder than it looks. `extract_book` passes
+  whole chapter text to the model and stores only the returned statement - no
+  character offset, no sentence anchor - so locating the source text again
+  means either re-finding it after the fact (fuzzy match of the statement
+  back against the chapter, cheap and approximate) or capturing an offset at
+  extraction time (exact, but a schema change, and a small local model
+  quoting offsets reliably is an open question). Two things also degrade the
+  output regardless of mechanism: a `text-bound` book's "chapters" are
+  self-created fragments a human cannot find in a printed copy, and a
+  stitched omnibus (above) makes even a correct chapter number meaningless.
+  Fuzzy-matching the statement back to a sentence, then reporting
+  "chapter N, about 60% through", is likely the best available answer for
+  those books and should be designed for explicitly rather than treated as a
+  degraded case.
+- **Answers that read as answers, not as a list of facts.** Reported from
+  real use: `chat` sometimes returns what is effectively the fact dump it was
+  given rather than a reply to the question. This is partly a prompt problem
+  and partly a missing feature, and the two halves want splitting:
+  - **The reply should be prose by default.** Cheap: an answer-prompt change,
+    measurable the same way the Background-leak fix was (see
+    `context/src/bookrag/providers/prompts.py.md`).
+  - **Seeing the underlying facts should be opt-in, not accidental** - a
+    flag, or a marker in the question, that appends the facts actually used.
+    This is genuinely useful for checking an answer, which is why the
+    behaviour shouldn't just be suppressed.
+  - **Conflicting facts confuse a reader precisely because they arrive
+    without a narrative.** The reported example is the existing Halt/Kalkara
+    case: wounded in one chapter, well in a later one, presented as a flat
+    contradiction rather than as recovery over time. The reported intuition
+    is right - `when`/`time_phrase` already exist to carry exactly that
+    ordering - but the durable fix is the timeline construct above, not more
+    prompt text, and this is the same defect as the cross-event conflation
+    limitation. Do the cheap prose fix now; do this part with the timeline.
 - **Configurable cross-category answer eagerness.** `ANSWER_SYSTEM_PROMPT`
   tells the model to read across *all* of an entity's categories rather than
   only the one whose name matches the question, which is what lets "what does
