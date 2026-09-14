@@ -40,8 +40,8 @@ appearance details anywhere in the text, not only in obvious introduction/ \
 description passages.
 - relationship: how one entity relates to another (ally, enemy, family, etc).
 - status: a concrete, factual change in role, rank, allegiance, or \
-life-condition (e.g. "became Halt's apprentice", "was accepted into \
-Battleschool", "is now the King's champion") - reserve this for milestone \
+life-condition (e.g. "became the archivist's apprentice", "was accepted into \
+the academy", "is now the captain of the guard") - reserve this for milestone \
 changes, not fleeting reactions or feelings.
 - description: a general fact about a setting or theme, or anything that \
 doesn't fit the other categories.
@@ -51,7 +51,7 @@ that doesn't itself change their status.
 Every statement must be self-contained and understandable on its own, \
 without needing the surrounding chapter text - name the entity or clearly \
 state what happened, rather than a bare pronoun with no context (write \
-"Will felt nervous about the Choosing Day" rather than "he knew it all too \
+"Lira felt nervous about the trial" rather than "she knew it all too \
 well"). Do not respond with sentence fragments, single words, or \
 unattributed dialogue quotes with no context.
 
@@ -69,10 +69,10 @@ unspecific filler.
 
 If a single sentence or moment reveals more than one kind of fact, report \
 it as separate facts, one per relevant category, rather than filing it \
-under only one (e.g. "he stroked his grey-flecked beard thoughtfully" is \
-BOTH an appearance detail - he has a grey-flecked beard - AND a \
-personality/mood cue - he was being thoughtful; report both, don't pick \
-just one).
+under only one (e.g. "he scratched his close-cropped white beard \
+thoughtfully" is BOTH an appearance detail - he has a close-cropped white \
+beard - AND a personality/mood cue - he was being thoughtful; report both, \
+don't pick just one).
 
 Only report something if it is directly and explicitly stated or shown in \
 the chapter text below - never invent a detail, and never introduce an \
@@ -81,36 +81,41 @@ part of the story's narrative (e.g. a copyright notice, dedication, table \
 of contents, or author biography), or if nothing about a character, \
 setting, or theme is revealed, return {"facts": []}.
 
+The example below is an ILLUSTRATION OF THE OUTPUT FORMAT ONLY. It is not \
+part of the book you are reading, and its invented names (Lira, Marek) and \
+details must never appear in your output. Extract only from the chapter \
+text you are actually given.
+
 Example:
-Chapter text: "Will scrambled over the wall, breathing hard. Halt handed \
-him the silver oakleaf without a word - the mark of a fully fledged \
-Ranger. Will's hands trembled as he took it. Halt stroked his grey-flecked \
-beard thoughtfully, his cloak already blending into the shadows of the \
-trees as he turned away. He had earned that cloak twenty years earlier, in \
-the war against Morgarath, and he meant to ride for Celtica at first light."
+Chapter text: "Lira climbed the last of the steps, breathing hard. Marek \
+handed her the iron key without a word - the mark of a full keeper of the \
+archive. Lira's hands shook as she took it. Marek scratched his \
+close-cropped white beard thoughtfully, his long canvas coat already dusted \
+with ash as he turned away. He had earned his own key thirty years earlier, \
+during the siege, and he meant to leave for the coast at dawn."
 
 {"facts": [
-  {"entity_name": "Will", "entity_type": "character", "category": "status", \
-"statement": "Will received the silver oakleaf from Halt, marking him as a \
-fully fledged Ranger.", "when": "present"},
-  {"entity_name": "Will", "entity_type": "character", "category": \
-"personality", "statement": "Will's hands trembled with emotion as he \
-received the oakleaf.", "when": "present"},
-  {"entity_name": "Halt", "entity_type": "character", "category": \
-"appearance", "statement": "Halt has a grey-flecked beard.", "when": \
-"present"},
-  {"entity_name": "Halt", "entity_type": "character", "category": \
-"personality", "statement": "Halt stroked his beard thoughtfully.", \
+  {"entity_name": "Lira", "entity_type": "character", "category": "status", \
+"statement": "Lira received the iron key from Marek, marking her as a full \
+keeper of the archive.", "when": "present"},
+  {"entity_name": "Lira", "entity_type": "character", "category": \
+"personality", "statement": "Lira's hands shook with emotion as she \
+received the key.", "when": "present"},
+  {"entity_name": "Marek", "entity_type": "character", "category": \
+"appearance", "statement": "Marek has a close-cropped white beard.", \
 "when": "present"},
-  {"entity_name": "Halt", "entity_type": "character", "category": \
-"appearance", "statement": "Halt wears a grey cloak that blends into \
-shadows.", "when": "present"},
-  {"entity_name": "Halt", "entity_type": "character", "category": "status", \
-"statement": "Halt earned his Ranger cloak in the war against Morgarath.", \
-"when": "past", "time_phrase": "twenty years earlier"},
-  {"entity_name": "Halt", "entity_type": "character", "category": \
-"development", "statement": "Halt intended to ride for Celtica.", "when": \
-"future", "time_phrase": "at first light"}
+  {"entity_name": "Marek", "entity_type": "character", "category": \
+"personality", "statement": "Marek scratched his beard thoughtfully.", \
+"when": "present"},
+  {"entity_name": "Marek", "entity_type": "character", "category": \
+"appearance", "statement": "Marek wears a long canvas coat dusted with \
+ash.", "when": "present"},
+  {"entity_name": "Marek", "entity_type": "character", "category": \
+"status", "statement": "Marek earned his keeper's key during the siege.", \
+"when": "past", "time_phrase": "thirty years earlier"},
+  {"entity_name": "Marek", "entity_type": "character", "category": \
+"development", "statement": "Marek intended to leave for the coast.", \
+"when": "future", "time_phrase": "at dawn"}
 ]}"""
 
 
@@ -142,12 +147,12 @@ estimated or invented.
 
 category must be one of:
 - definition: what a concept or technique fundamentally is, in the \
-author's own terms (e.g. "a habit is a routine or behavior performed \
-automatically").
+author's own terms (e.g. "deliberate practice is training aimed at a \
+specific weakness rather than general repetition").
 - claim: an assertion about cause and effect, human behavior, or the \
 world - not itself an instruction to act.
 - technique: a concrete, actionable instruction the reader is told to do \
-(e.g. "pair a new habit with an existing one").
+(e.g. "write down the single hardest step before starting").
 - example: an illustrative anecdote, case study, or real-world instance \
 supporting a claim, technique, or definition.
 - relationship: how one concept relates to, builds on, or is a component \
@@ -183,17 +188,27 @@ copyright notice, dedication, table of contents, index, acknowledgments, \
 or promotional material for another book), or if nothing about a concept, \
 person, or theme is revealed, return {"facts": []}.
 
+The example below is an ILLUSTRATION OF THE OUTPUT FORMAT ONLY. It is not \
+part of the book you are reading, and its invented names (Anchoring, Sam \
+Ortiz) and details must never appear in your output. Extract only from the \
+chapter text you are actually given.
+
 Example:
-Chapter text: "One of the most effective ways to build a new habit is to \
-pair it with one you already do every day. James Clear calls this habit \
-stacking."
+Chapter text: "One of the most reliable ways to start a new routine is to \
+attach it to something you already do every day - a technique this book \
+calls anchoring. Sam Ortiz, a reader who wrote in, attached ten minutes of \
+reading to his after-dinner coffee two years ago and has not missed a night \
+since."
 
 {"facts": [
-  {"entity_name": "Habit Stacking", "entity_type": "concept", "category": \
-"technique", "statement": "Pair a new habit with an existing daily habit \
-using the formula: after the current habit, do the new habit."},
-  {"entity_name": "James Clear", "entity_type": "character", "category": \
-"description", "statement": "James Clear coined the term habit stacking."}
+  {"entity_name": "Anchoring", "entity_type": "concept", "category": \
+"technique", "statement": "Attach a new routine to something you already do \
+every day, performing the new routine immediately after the existing one.", \
+"when": "present"},
+  {"entity_name": "Sam Ortiz", "entity_type": "character", "category": \
+"example", "statement": "Sam Ortiz attached ten minutes of reading to his \
+after-dinner coffee and has kept the routine every night since.", "when": \
+"past", "time_phrase": "two years ago"}
 ]}"""
 
 EXTRACTION_SYSTEM_PROMPTS = {"fiction": EXTRACTION_SYSTEM_PROMPT, "nonfiction": EXTRACTION_SYSTEM_PROMPT_NONFICTION}
@@ -227,8 +242,8 @@ so they must never be supplemented with outside knowledge, which could spoil \
 something not yet reached.
 
 Facts are grouped by character/setting/theme, and each individual fact is \
-tagged by the chapter it came from, e.g. "[ch 9] has completed the Choosing \
-Day." Chapters are always listed in increasing order. Within each entity the \
+tagged by the chapter it came from, e.g. "[ch 9] was promoted to captain of \
+the guard." Chapters are always listed in increasing order. Within each entity the \
 facts are split into up to four sections under their own headings, and each \
 section must be read DIFFERENTLY. A rule stated for one section NEVER \
 applies to another:
@@ -303,8 +318,8 @@ claim in a way the reader hasn't reached yet.
 
 Facts are grouped by concept/person/theme under a "Standing description" \
 heading, then by category (e.g. technique, definition, claim), with each \
-individual fact tagged by the chapter it came from, e.g. "[ch 9] pair a new \
-habit with an existing one." Chapters are always listed in increasing order \
+individual fact tagged by the chapter it came from, e.g. "[ch 9] write down \
+the single hardest step before starting." Chapters are always listed in increasing order \
 within a group. When two facts in the SAME category for the SAME entity \
 describe conflicting or updated information (e.g. a claim refined or \
 corrected later in the book), trust the fact from the LATER chapter as the \

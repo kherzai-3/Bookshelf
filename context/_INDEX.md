@@ -46,5 +46,6 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [tests/test_eval.py](../tests/test_eval.py.md) — covers `groundedness_score`, `run_eval`'s read-only guarantee, and `summarize`.
 - [tests/test_ingestion_report.py](../tests/test_ingestion_report.py.md) — covers `classify_ingestion`/`write_ingestion_report`.
 - [tests/test_parsing.py](../tests/test_parsing.py.md) — covers `providers.parsing.parse_facts`.
+- [tests/test_prompts.py](../tests/test_prompts.py.md) — guards the shipped prompt text against embedding real books' content, which a model copies into its output.
 - [tests/test_ollama_provider.py](../tests/test_ollama_provider.py.md) — real integration smoke test against a running Ollama, skipped when unreachable.
 - [tests/test_registry.py](../tests/test_registry.py.md) — covers `get_provider`'s model-override/env-var resolution and unknown-provider error.

@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/prompts.py
-last_synced: 2026-09-12T19:14:46-05:00
-source_hash: 979b74e700912e53cccd08f3c6ee7d7982161563
+last_synced: 2026-09-14T14:10:38Z
+source_hash: a8b2639964b6cbe68d85bd11a5d6882292f9872d
 ---
 
 ## Purpose
@@ -20,7 +20,8 @@ book's `content_type` (see `storage.py`/`extract/pipeline.py`).
 - `EXTRACTION_SYSTEM_PROMPT_NONFICTION: str` — a full parallel prompt (not
   an interpolated template), for `parsing.ALLOWED_CATEGORIES_NONFICTION`/
   `ALLOWED_ENTITY_TYPES_NONFICTION`'s taxonomy - its own worked example
-  ("habit stacking", not Will/Halt), and its "return `{"facts": []}`"
+  (the invented "Anchoring"/"Sam Ortiz", not the fiction cast), and its
+  "return `{"facts": []}`"
   condition is framed around front/back matter (copyright notice,
   dedication, index, acknowledgments) rather than "not part of the story's
   narrative" - the fiction wording would misfire on a nonfiction book's
@@ -55,6 +56,40 @@ book's `content_type` (see `storage.py`/`extract/pipeline.py`).
   unchanged by both content types.
 
 ## Key Decisions
+- **Every worked example uses invented content. No prompt may name a real
+  book's characters, places, or coined terms.** This is the fix for a
+  user-reported hallucination, and it is the single most important rule in
+  this file. A user cloned the repo, ran `install.py`, ingested a book of
+  their own, and got back a fact saying the protagonist *"was nervous about
+  the Choosing Day"* - a Ranger's Apprentice plot point, from a book they
+  had never ingested. Nothing leaked from anyone's library: `data/` is
+  gitignored, so their clone contained no books at all. The sentence was
+  shipped **in this file**, as the self-containment rule's style example
+  ("write *"Will felt nervous about the Choosing Day"* rather than *"he
+  knew it all too well"*"), and a 7B model copied it. The whole fiction
+  worked example was Ranger's Apprentice (Will, Halt, the silver oakleaf,
+  Morgarath, Celtica), `status`'s category examples were too
+  ("became Halt's apprentice", "Battleschool"), `ANSWER_SYSTEM_PROMPT`
+  illustrated its chapter tag with *"[ch 9] has completed the Choosing
+  Day"*, and the nonfiction pair used James Clear and habit stacking - a
+  real author and a real book.
+  A worked example is worth keeping (it measurably improves a small local
+  model's output), so the examples were rewritten rather than deleted, with
+  every teaching property preserved: the mentor/apprentice pair, the
+  dual-category split from one sentence, the mid-action appearance detail,
+  and the `past`/`future` facts with `time_phrase`. Invented content makes a
+  leak *always wrong about a book* rather than plausibly right about a
+  different one - which is also what lets `extract/pipeline.py`'s grounding
+  check catch it. Both extraction prompts now additionally label the example
+  "an ILLUSTRATION OF THE OUTPUT FORMAT ONLY" whose names "must never appear
+  in your output", to discourage the next leak whatever names it uses.
+  Guarded by `tests/test_prompts.py`, which fails on a denylist of the real
+  proper nouns that were once shipped here.
+- **The nonfiction example's facts now carry `when`.** They previously had
+  none, which contradicted `parsing.extraction_response_schema()`, where
+  `when` is a required field - the example was demonstrating output the
+  same request's own schema would reject. Caught while decontaminating it;
+  pinned by `test_extraction_prompt_example_facts_carry_a_when_field`.
 - **`build_user_message` renders each known entity's established type
   alongside its name, when available.** Real root cause found chasing a
   confirmed entity-duplication bug (5 separate "Wargal(s)" entities in one
@@ -116,10 +151,10 @@ book's `content_type` (see `storage.py`/`extract/pipeline.py`).
   tall" was ever extracted - `appearance` already existed as a category
   and wasn't schema/cap-blocked in that chapter, so this was inconsistent
   model salience, not a missing instruction slot. The worked example was
-  updated to match: it now includes an appearance detail mentioned
-  mid-action ("Halt's grey cloak shifted... blending into the shadows"),
-  not just a dedicated description sentence, since that's the exact shape
-  of detail being missed.
+  updated to match: it includes an appearance detail mentioned mid-action
+  (the mentor's coat "already dusted with ash as he turned away"), not just
+  a dedicated description sentence, since that's the exact shape of detail
+  being missed.
 - **Two more instructions added together, and needed together**: "never
   report the same fact twice" and "stop once every concretely-stated fact
   is reported - don't invent generic/vague filler just to report more."
@@ -148,7 +183,7 @@ book's `content_type` (see `storage.py`/`extract/pipeline.py`).
 - **Nonfiction gets full parallel prompts, not a parameterized shared
   template.** Considered and rejected: the fiction prompt is fiction-
   specific well beyond its category list ("a single chapter of a novel,"
-  a worked example about Will/Halt/the oakleaf, category definitions
+  a narrative worked example, category definitions
   phrased narratively) - interpolating mode-specific vocabulary into one
   shared template would produce a harder-to-tune result than two clean
   prompts. Confirmed the taxonomy mismatch was real, not just
@@ -166,7 +201,8 @@ book's `content_type` (see `storage.py`/`extract/pipeline.py`).
   question's topic.** Real root cause found investigating the same "what
   does Halt look like?" complaint a second time, after the appearance-
   category fix above: a fact schema only allows one category per fact, so
-  a sentence like "Halt stroked his beard gravely" - both a personality/
+  a sentence like "he scratched his close-cropped white beard thoughtfully"
+  - both a personality/
   mood cue AND a physical detail (he has a beard) - could only ever be
   filed one way, silently starving the other question type. The
   extraction-side fix (split into two facts, one worked example added to
@@ -202,9 +238,9 @@ book's `content_type` (see `storage.py`/`extract/pipeline.py`).
   The extraction instruction stresses that `when` describes when the thing
   *happened*, not which chapter it was read in, and that `time_phrase` must be
   the text's own words copied exactly - never estimated, calculated, or
-  invented. Fiction's worked example gained a `past` fact ("earned that cloak
-  twenty years earlier, in the war against Morgarath") and a `future` one
-  ("meant to ride for Celtica at first light") so the model sees all three
+  invented. Fiction's worked example carries a `past` fact ("earned his own
+  key thirty years earlier, during the siege") and a `future` one ("meant to
+  leave for the coast at dawn") so the model sees all three
   values demonstrated rather than described. Nonfiction gets a compact version:
   `present` for anything the book states as being the case (nearly
   everything), `past` only for a historical anecdote, `future` for a
