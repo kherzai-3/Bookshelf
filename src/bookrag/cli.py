@@ -212,10 +212,15 @@ def _ingest(args: argparse.Namespace) -> int:
         return 1
 
     raw_chapter_count = len(chapters)
+    # Collected rather than printed as they occur. These describe the parse, so
+    # they belong under a heading *after* the result line - printing them inline
+    # put indented detail above the un-indented headline it was qualifying,
+    # which read backwards.
+    parse_notes: list[str] = []
     if should_consolidate(chapters):
         chapters = consolidate_fragments(chapters)
-        print(
-            f"  consolidated {raw_chapter_count} raw fragments into {len(chapters)} chapters"
+        parse_notes.append(
+            f"consolidated {raw_chapter_count} raw fragments into {len(chapters)} chapters"
             " (they were too small to extract well independently)"
         )
 
@@ -224,9 +229,9 @@ def _ingest(args: argparse.Namespace) -> int:
     author = args.author or metadata.get("author") or guessed_author
 
     if not args.title and not metadata.get("title"):
-        print(f"  (no title in file metadata - guessed '{title}' from filename)")
+        parse_notes.append(f"no title in file metadata - guessed '{title}' from filename")
     if not args.author and not metadata.get("author") and author:
-        print(f"  (no author in file metadata - guessed '{author}' from filename)")
+        parse_notes.append(f"no author in file metadata - guessed '{author}' from filename")
 
     try:
         book_id = save_book(
@@ -247,56 +252,65 @@ def _ingest(args: argparse.Namespace) -> int:
     print(f"Ingested '{title}' as '{book_id}' ({len(chapters)} chapters)")
     if args.series:
         print(f"  series: {args.series} #{args.series_position}")
-    for line in sanity_summary(chapters):
-        print(line)
+
+    _print_section("Parsing", parse_notes)
+    _print_section("Sanity check", sanity_summary(chapters))
 
     report_path = write_ingestion_report(
         book_id, chapters, raw_chapter_count=raw_chapter_count if raw_chapter_count != len(chapters) else None
     )
-    print(f"  wrote {report_path}")
-
-    _remove_if_from_incoming(args.path)
-    _print_next_steps(book_id, len(chapters))
+    _print_section("Files", [f"wrote {report_path}", *_incoming_cleanup_notes(args.path)])
+    _print_section("Next steps", next_step_lines(book_id, len(chapters)))
     return 0
 
 
-def _print_next_steps(book_id: str, chapter_count: int) -> None:
-    """Tell the user what to run next, and how to watch it.
+def next_step_lines(book_id: str, chapter_count: int) -> list[str]:
+    """What to run next, and how to watch it.
 
     Ingesting a book does not extract anything, and until this existed nothing
     printed said so - the summary ended on the ingestion report and left the
     reader to discover both the next command and the fact that it can run for
     hours. Worse, the honest way to run a job that long is to background it,
     which is precisely when a user cannot see the progress lines it prints.
+
+    Returns lines rather than printing them, so `_print_section` owns the
+    heading and the outer indent; the relative indentation here is real
+    structure (a command sits under the sentence that introduces it).
     """
-    print()
-    print(f"Next: extract facts for '{book_id}' ({chapter_count} chapters)")
-    print(f"  bookrag extract {book_id}")
-    print()
-    print("  A local model takes minutes per chapter, so a full-length book runs")
-    print("  for hours. To run it in the background and follow along:")
-    print(f"    bookrag extract {book_id} --log")
-    for line in follow_commands(default_log_path(book_id)):
-        print(f"    {line}")
-    print("  Ctrl+C is safe - progress is saved, and re-running resumes.")
-    print()
-    print(f"  Or try the whole pipeline instantly, no model needed:")
-    print(f"    bookrag extract {book_id} --provider fake")
+    return [
+        f"Extract facts for '{book_id}' ({chapter_count} chapters):",
+        f"  bookrag extract {book_id}",
+        "",
+        "A local model takes minutes per chapter, so a full-length book runs",
+        "for hours. To run it in the background and follow along:",
+        f"  bookrag extract {book_id} --log",
+        *(f"  {line}" for line in follow_commands(default_log_path(book_id))),
+        "Ctrl+C is safe - progress is saved, and re-running resumes.",
+        "",
+        "Or try the whole pipeline instantly, no model needed:",
+        f"  bookrag extract {book_id} --provider fake",
+    ]
 
 
-def _remove_if_from_incoming(path: Path) -> None:
+def _incoming_cleanup_notes(path: Path) -> list[str]:
+    """Deletes the staging copy under data/incoming/ and reports what happened.
+
+    Returns notes instead of printing them so the result lands in the same
+    "Files" section as the ingestion report - both are statements about what
+    this command did to files on disk, and they read as one thought.
+    """
     try:
         resolved = path.resolve()
         incoming = incoming_root().resolve()
     except OSError:
-        return
+        return []
     if incoming not in resolved.parents:
-        return
+        return []
     try:
         resolved.unlink()
-        print(f"  removed {path.name} from data/incoming/ (safely stored in the library)")
+        return [f"removed {path.name} from data/incoming/ (safely stored in the library)"]
     except OSError as exc:
-        print(f"  (could not remove {path} from data/incoming/: {exc} - remove it yourself when convenient)")
+        return [f"could not remove {path} from data/incoming/: {exc} - remove it yourself when convenient"]
 
 
 def default_log_path(book_id: str) -> Path:
@@ -388,6 +402,9 @@ def _run_extract(args: argparse.Namespace) -> int:
         # confusion this is meant to remove.
         for line in extract_start_notes(args.book_id, chapter_count, start_index, provider):
             print(line, flush=True)
+        # Separates the banner from the progress lines that follow it at the
+        # same indent, so the two don't read as one block.
+        print(flush=True)
         result = extract_book(
             args.book_id,
             provider,
@@ -408,30 +425,39 @@ def _run_extract(args: argparse.Namespace) -> int:
         return 0
 
     chapters_this_run = result.chapter_count - (result.resumed_from_chapter or 0)
+    # The result used to run straight on from the last of up to 75 progress
+    # lines, which is exactly where it is hardest to find - especially in a
+    # `--log` file read by scrolling back through hours of them.
+    print()
     print(
         f"Extracted {result.fact_count} facts from {chapters_this_run} chapters "
         f"of '{result.book_id}' ({result.new_entity_count} new entities)"
     )
+    # One category - what did not make it into the library - rather than four
+    # loose warnings at the same indent as each other and as the result.
+    # Usually empty, and an empty section prints nothing at all.
+    dropped: list[str] = []
     if result.parse_failure_count:
-        print(
-            f"  {result.parse_failure_count} chapter(s) had unparseable provider output"
+        dropped.append(
+            f"{result.parse_failure_count} chapter(s) had unparseable provider output"
             " and were skipped (see entities/facts written for the rest)"
         )
     if result.ungrounded_entity_count:
-        print(
-            f"  {result.ungrounded_entity_count} fact(s) named a new entity that never"
+        dropped.append(
+            f"{result.ungrounded_entity_count} fact(s) named a new entity that never"
             " appears in its chapter's text and were rejected as likely hallucinated"
         )
     if result.skipped_chapter_count:
-        print(
-            f"  {result.skipped_chapter_count} chapter(s) were too short to plausibly"
+        dropped.append(
+            f"{result.skipped_chapter_count} chapter(s) were too short to plausibly"
             " contain narrative content and were skipped without calling the provider"
         )
     if result.duplicate_fact_count:
-        print(
-            f"  {result.duplicate_fact_count} fact(s) exactly repeated an earlier fact"
+        dropped.append(
+            f"{result.duplicate_fact_count} fact(s) exactly repeated an earlier fact"
             " in the same chapter and were dropped"
         )
+    _print_section("Skipped and rejected", dropped)
     return 0
 
 
@@ -715,6 +741,28 @@ def _doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_section(header: str, lines: list[str]) -> None:
+    """A titled, indented block preceded by a blank line.
+
+    Both commands used to print everything they had to say as one dense run,
+    with two-space indentation doing all the work of separation - so a reader
+    could not tell where the sanity summary ended and housekeeping began, and
+    `extract`'s closing result ran straight on from the last of 75 progress
+    lines. Nothing here adds information; it only groups what was already said.
+
+    **An empty section prints nothing at all**, header included, which is what
+    lets callers pass a list that is usually empty (nothing was skipped, no
+    parse notes) without guarding every call site. Blank lines inside a section
+    are passed through unindented rather than becoming trailing whitespace.
+    """
+    if not lines:
+        return
+    print()
+    print(f"{header}:")
+    for line in lines:
+        print(f"  {line}" if line else "")
+
+
 def sanity_summary(chapters: list[Chapter], edge_count: int = 3) -> list[str]:
     """Chapter-count and title-boundary extraction is heuristic (see
     epub_loader/pdf_loader) and can silently misfire on an unusual book.
@@ -723,20 +771,22 @@ def sanity_summary(chapters: list[Chapter], edge_count: int = 3) -> list[str]:
     if something looks wrong (e.g. a title page or license text showing up
     as its own "chapter")."""
     if not chapters:
-        return ["  0 chapters extracted - nothing to review."]
+        return ["0 chapters extracted - nothing to review."]
 
     word_counts = [len(c.text.split()) for c in chapters]
     lines = [
-        f"  chapter length (words): min {min(word_counts)}, "
+        f"chapter length (words): min {min(word_counts)}, "
         f"median {round(statistics.median(word_counts))}, max {max(word_counts)}"
     ]
 
     def label(chapter: Chapter) -> str:
         return chapter.title or f"(untitled chapter {chapter.index})"
 
-    lines.append("  first: " + " | ".join(label(c) for c in chapters[:edge_count]))
+    lines.append("first: " + " | ".join(label(c) for c in chapters[:edge_count]))
     if len(chapters) > edge_count:
-        lines.append("  last: " + " | ".join(label(c) for c in chapters[-edge_count:]))
+        lines.append("last: " + " | ".join(label(c) for c in chapters[-edge_count:]))
+    # Returns content, not formatting - indentation belongs to whoever renders
+    # it (`_print_section` on the console, `write_ingestion_report` in the file).
     return lines
 
 
@@ -885,7 +935,13 @@ def write_ingestion_report(
     here too so this is visible on later review, not just at ingest time."""
     root = root or library_root()
     classification = classify_ingestion(chapters)
-    lines = [f"book_id: {book_id}", f"classification: {classification}", *sanity_summary(chapters)]
+    # sanity_summary returns unindented content; the report indents it under
+    # its own two header lines, the same way _print_section does on the console.
+    lines = [
+        f"book_id: {book_id}",
+        f"classification: {classification}",
+        *(f"  {line}" for line in sanity_summary(chapters)),
+    ]
     if raw_chapter_count is not None:
         lines.append(
             f"  consolidated {raw_chapter_count} raw fragments into {len(chapters)} chapters"

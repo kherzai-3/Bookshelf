@@ -10,6 +10,7 @@ import pytest
 
 from bookrag.cli import (
     _print_progress,
+    _print_section,
     _Tee,
     _use_utf8_output,
     default_log_path,
@@ -381,6 +382,76 @@ def test_extract_start_notes_name_the_model_and_omit_it_when_unknown() -> None:
 
     resumed = extract_start_notes("some-book", 75, 31, _Identified())
     assert "44 remaining chapter(s)" in resumed[0]
+
+
+def test_print_section_omits_an_empty_section_entirely(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The reason callers can pass a usually-empty list without guarding every
+    call site. A header with nothing under it is worse than no header - and
+    `extract`'s "Skipped and rejected" is empty on a healthy run, which is the
+    common case, not the exception."""
+    _print_section("Skipped and rejected", [])
+    assert capsys.readouterr().out == ""
+
+
+def test_print_section_renders_a_heading_and_indents_its_content(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _print_section("Files", ["wrote report.txt", "", "removed staged copy"])
+    out = capsys.readouterr().out
+    # Leading blank line separates it from whatever came before.
+    assert out.startswith("\nFiles:\n")
+    assert "  wrote report.txt" in out
+    assert "  removed staged copy" in out
+    # A blank line inside a section stays blank rather than becoming two
+    # spaces of trailing whitespace.
+    assert "  \n" not in out
+
+
+def test_ingest_groups_its_output_under_headings(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ingest used to print four unrelated concerns as one run, separated only
+    by indentation. The parse notes were the worst of it: they printed as they
+    occurred, which put indented detail *above* the un-indented headline it was
+    qualifying. Assert the ordering, not just that the sections exist."""
+    epub_path = tmp_path / "fragmented.epub"
+    build_fragmented_epub(epub_path)
+    main(["ingest", str(epub_path)])
+
+    out = capsys.readouterr().out
+    for header in ("Parsing:", "Sanity check:", "Files:", "Next steps:"):
+        assert header in out, f"missing section {header!r}"
+    # Sections in a deliberate order: what happened, then how it was read,
+    # then what was touched on disk, then what to do next.
+    assert (
+        out.index("Ingested ")
+        < out.index("Parsing:")
+        < out.index("Sanity check:")
+        < out.index("Files:")
+        < out.index("Next steps:")
+    )
+    # The consolidation note is a parse note now, not a line above the headline.
+    assert out.index("consolidated 40 raw fragments into") > out.index("Parsing:")
+
+
+def test_extract_separates_its_result_from_the_progress_lines(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The closing result used to run straight on from the last progress line,
+    which on a 75-chapter book is exactly where it is hardest to find - and
+    worse in a `--log` file read by scrolling back through hours of them."""
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    capsys.readouterr()
+
+    main(["extract", book_dir.name, "--provider", "fake"])
+
+    out = capsys.readouterr().out
+    assert "\n\nExtracted " in out
 
 
 def test_eval_with_fake_provider(tmp_path: Path, _library_root: Path) -> None:

@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-15T13:37:32Z
-source_hash: b8cfbc4fb0546fc7b55114e965ff4ca525c0a175
+last_synced: 2026-09-15T13:48:32Z
+source_hash: 6bce1c6e3582844f21d49c70f3e147d93af96377
 ---
 
 ## Purpose
@@ -33,6 +33,14 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   where the model is running (fully on GPU / partially / CPU-only), or `[]`
   when it can't be determined. Reported once per run by
   `_progress_and_placement`, after the first completed chapter.
+- `_print_section(header, lines) -> None` — a titled, indented block preceded
+  by a blank line. Prints **nothing at all** for an empty `lines`, header
+  included; see Key Decisions.
+- `next_step_lines(book_id, chapter_count) -> list[str]` — the post-ingest
+  guidance (the `extract` command, the `--log`/follow recipe, that Ctrl+C is
+  safe, the `--provider fake` path). Returns lines so `_print_section` owns
+  the heading; the relative indent within them is real structure, a command
+  sitting under the sentence that introduces it.
 - `extract_start_notes(book_id, chapter_count, start_index, provider) ->
   list[str]` — what the run is about to do, printed *before* the first chapter
   rather than after it. Names the book, how many chapters this call will
@@ -145,7 +153,31 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   mystery. The hint is read by someone with an empty library, i.e. precisely
   the person about to type their first book filename. Same change in
   `install.py`'s post-install instructions and throughout `README.md`.
-- **`ingest` ends by printing the next command** (`_print_next_steps`).
+- **Both commands group their output into titled sections** (`_print_section`).
+  Ingest ran four unrelated concerns together - the result line, the sanity
+  summary, housekeeping, and next steps - with two-space indentation doing all
+  the work of separation, and `extract`'s closing result ran straight on from
+  the last of up to 75 progress lines. Ingest is now **Parsing / Sanity check
+  / Files / Next steps** under the headline; extract is the result, then
+  **Skipped and rejected**. Nothing here adds information; it only groups what
+  was already said.
+  - **An empty section prints nothing at all**, header included. That is what
+    lets a caller pass a usually-empty list without guarding the call site -
+    "Skipped and rejected" is empty on a healthy run, which is the common
+    case, and "Parsing" is empty for a well-formed book.
+  - The parse notes (consolidation, guessed title/author) are **collected and
+    printed after the headline** rather than as they occur. Printing them
+    inline put indented detail *above* the un-indented result line it was
+    qualifying, which read backwards. Pinned by
+    `test_ingest_groups_its_output_under_headings`, which asserts the ordering
+    rather than merely that the sections exist.
+  - Renamed with this change: `_print_next_steps` → `next_step_lines` and
+    `_remove_if_from_incoming` → `_incoming_cleanup_notes`. Both now **return
+    lines instead of printing them**, so `_print_section` owns the heading and
+    the outer indent, and the cleanup note lands in the same "Files" section
+    as the ingestion report - both are statements about what the command did
+    to files on disk.
+- **`ingest` ends by printing the next command** (`next_step_lines`).
   Reported gap: nothing anywhere told a user that ingesting does not extract,
   what to run next, or that the next step takes hours. The guidance names the
   `extract` command, the `--log`/follow recipe, the fact that Ctrl+C is safe,
@@ -185,7 +217,7 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   traceback (real-world epubs from unofficial sources are not guaranteed
   well-formed). `save_book` failing leaves nothing to clean up here since
   it rolls back its own partial `book_dir` (see `storage.py`).
-- On successful ingest, `_remove_if_from_incoming` deletes the source file
+- On successful ingest, `_incoming_cleanup_notes` deletes the source file
   **only if** it resolves to a path under `storage.incoming_root()` -
   deliberately narrow, since auto-deleting an arbitrary user file outside
   the designated staging folder would be a surprising, unrequested
@@ -276,8 +308,11 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   spoiler-safe querying still work correctly against the fragment
   boundaries - they just won't align with the book's real chapters/TOC.
 - `sanity_summary(chapters: list[Chapter], edge_count: int = 3) -> list[str]`
-  — printed after every ingest: min/median/max chapter word count, plus the
-  first and last `edge_count` chapter titles. Chapter extraction is
+  — printed after every ingest under the "Sanity check" heading:
+  min/median/max chapter word count, plus the first and last `edge_count`
+  chapter titles. **Returns content, not formatting** — the lines are
+  unindented, and each consumer applies its own (`_print_section` on the
+  console, `write_ingestion_report` in the file). Chapter extraction is
   heuristic (see `epub_loader`/`pdf_loader`) and can misfire quietly on an
   unusual book; this is deliberately a human-reviewable summary rather than
   an attempt to auto-detect every failure mode (validated against real

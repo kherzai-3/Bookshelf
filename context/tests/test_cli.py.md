@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
-last_synced: 2026-09-15T13:19:07Z
-source_hash: e69944fe06b00ecb7470460148852f5db0259fbc
+last_synced: 2026-09-15T13:48:32Z
+source_hash: 31a355524d9bc84823ce7010757640062d7aec9d
 ---
 
 ## Purpose
@@ -46,6 +46,16 @@ Also covers, added since the above:
   never told a resume is happening that is then refused. It now also asserts
   `"Extracting" not in out` — the start-of-run banner has to be withheld by
   the same refusal, for the same reason.
+- **Output sectioning** (`test_print_section_omits_an_empty_section_entirely`,
+  `..._renders_a_heading_and_indents_its_content`,
+  `test_ingest_groups_its_output_under_headings`,
+  `test_extract_separates_its_result_from_the_progress_lines`): the ingest
+  test asserts the *order* of the four headings and that the consolidation
+  note now falls below "Parsing:", which is the actual regression — the parse
+  notes used to print above the headline they qualified. The empty-section
+  test pins the invariant the rest depends on: a header with nothing under it
+  is worse than no header, and "Skipped and rejected" is empty on a healthy
+  run.
 - **The start-of-run banner**
   (`test_extract_announces_the_run_before_the_first_chapter_completes`):
   asserts on the *ordering* (`output.index("Extracting") <

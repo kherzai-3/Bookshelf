@@ -14,7 +14,7 @@ listing/grouping books without ever merging their chapter numbering.
   `BOOKRAG_LIBRARY_ROOT` env var (used by tests, and by anyone running the CLI
   from outside the project root).
 - `incoming_root() -> Path` — `data/incoming` by default, overridable via
-  `BOOKRAG_INCOMING_ROOT`. Used by `cli._remove_if_from_incoming` to decide
+  `BOOKRAG_INCOMING_ROOT`. Used by `cli._incoming_cleanup_notes` to decide
   whether a successfully-ingested source file is safe to auto-delete (only
   files actually under this root are removed - an arbitrary path elsewhere
   is never touched).
