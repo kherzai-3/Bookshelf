@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
-last_synced: 2026-09-15T13:48:32Z
-source_hash: 31a355524d9bc84823ce7010757640062d7aec9d
+last_synced: 2026-09-15T14:49:45Z
+source_hash: e16b95a6018dd86598394cf067960789661f6a25
 ---
 
 ## Purpose
@@ -26,6 +26,16 @@ book prints "already fully extracted" and exits 0 without re-running,
 `--restart` forces a real re-extraction anyway, and a book with
 hand-written `extraction_progress.json` state (simulating a real crash)
 prints "Resuming '<book_id>' from chapter N" before the run starts.
+
+Also covers `doctor --merge-name-variants`'s CLI plumbing (the detection logic
+is `test_library.py`'s job): `test_doctor_reports_a_name_variant_cluster_with_
+its_evidence` asserts the report says *why* and not just which names - the user
+is approving a permanent rewrite of fact ownership, so the evidence is the
+basis for saying yes; `..._with_yes_records_the_other_name_as_an_alias` pins the
+actual payoff (the survivor gains "Arald" as an alias, the field
+`select_relevant_facts` has always searched and nothing populated from a book);
+`..._declined_leaves_both_entities_alone` and
+`test_doctor_fix_never_merges_a_name_variant` pin the two refusal paths.
 
 Also covers `doctor --merge-duplicates`'s CLI-level confirmation flow
 (the actual detection/merge logic is `test_library.py`'s job): a seeded

@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/library.py
-last_synced: 2026-09-13T15:24:02Z
-source_hash: 6e120d7eea0fc99bbc166d2f6c446e378718dbdc
+last_synced: 2026-09-15T14:49:45Z
+source_hash: 33bc218aa163f3e724e4941e1e932ef8d6151491
 ---
 
 ## Purpose
@@ -44,6 +44,13 @@ module's functions.
   merges 2+ existing entities into one (see Key Decisions for exactly
   what it rewrites). Raises `ValueError` if fewer than two of
   `entity_ids` actually exist, or if `keep` isn't one of them.
+- `NameVariant` (dataclass) — `entity_id, canonical_name, type, book_ids,
+  fact_count` - deliberately the same four display fields as
+  `DuplicateEntity`, so `cli.py`'s `_confirm_and_merge` handles both.
+- `NameVariantCluster` (dataclass) — `members: list[NameVariant], reasons:
+  list[str], book_id: str`.
+- `detect_name_variants(root=None) -> list[NameVariantCluster]` — one person
+  under several names (see "Name-variant detection" below).
 - `DoctorReport` (dataclass) — `orphaned_index_entries: list[str],
   stale_entity_book_refs: list[tuple[entity_id, book_id]],
   orphaned_entities: list[str], duplicate_entity_groups:
@@ -208,3 +215,82 @@ they merged precisely because they spell alike.
 exact copy of the four-book library, then the copy re-checked - 2,035 facts
 before and after, zero dangling references, zero cross-book entities
 remaining. Applied to the real library with the same result.
+
+## Name-variant detection (`detect_name_variants`)
+
+The third sibling of `detect_duplicate_entities` and
+`detect_cross_book_entities`, and the answer to "what populates `aliases`
+from a book?". Nothing did: 2 of 493 entities in the real library had one,
+and both came from a hand-run `doctor --merge-duplicates`. **The storage and
+retrieval halves were already built** - `resolve_entity` matches aliases,
+`query.select_relevant_facts` searches them - and `merge_entities` already
+folds a merged-away name into the survivor's alias list. So this adds
+detection only; applying a cluster goes through the existing merge.
+
+`detect_duplicate_entities` structurally cannot find these: it groups by
+`match_key`, and "Baron Arald" / "Arald" do not share one.
+
+**Three rules, each scoped to one book and one entity type. All three were
+chosen by measuring candidate precision on the real 493-entity library, not
+by reasoning about what ought to work** - the survey lives at
+`_title_variant_pairs` / `_fuller_name_pairs` / `_prefix_shaped_pairs`:
+
+1. **`_title_variant_pairs` — a rank in front of a name.** "Baron Arald" ≡
+   "Arald". 10 candidates on real data, **10/10 correct**. Needs almost no
+   guarding because it compares the remainder *after* stripping the title, so
+   two people sharing a rank ("King Duncan", "King Swyddned") never collide.
+   `_TITLES` is a closed list plus `_MASTER_RANK`, a shape rule for the
+   productive `-master` compound (Battlemaster, Craftmaster, Harbourmaster) so
+   that part isn't overfitted to one book's vocabulary.
+2. **`_fuller_name_pairs` — a given name and a fuller form.** "Alyss" ≡
+   "Alyss Mainwaring". Raw containment across all types gave **44 candidates,
+   ~8 right**; four guards separate them: characters only, no conjunction in
+   the longer name, the shorter name must not reduce to a bare rank, and the
+   shorter name must sit inside **exactly one** longer name.
+3. **`_stated_variant_pairs` — the book says so.** "Connwaer, called Conn".
+
+**The prefix shape is not evidence.** `_prefix_shaped_pairs` alone proposed 6
+pairs on the real library and **every one was wrong** (`Machine`/`Machinery`,
+`King`/`Kingdom`, `Skandia`/`Skandians` - a place and its people). It is only
+a shortlist; `_states_they_are_one` then requires the text to link the two
+names with a naming connector ("called", "known as", "short for"). This is
+what makes rule 3 safe, and it is why the reported Conn/Connwaer case needs
+the book to state the link rather than being inferred from the spelling.
+
+**Guards, and why each is a veto rather than a tie-break:**
+- **Ambiguity vetoes.** A short name inside two longer ones is the shape of
+  two people sharing a given name. Saying nothing costs a retrieval near-miss;
+  guessing costs an invisible, unmergeable wrong identity - the same asymmetry
+  that made `resolve_entity`'s scope deliberately narrow.
+- **Conjunctions.** "Tug and Blaze" is two horses the extractor filed as one
+  entity. Both halves are contained in it, so without the guard each merges
+  *into the compound*, which is the wrong survivor.
+- **Characters only.** In a book about the difference between a finite game
+  and an infinite one, "Finite Game" contains "Game" and is not a longer name
+  for it.
+
+`_connected_clusters` is union-find over the proposed pairs, so
+"Battlemaster David" / "Sir David" / "David" arrives as **one** decision.
+Three overlapping pair-prompts would be worse than useless: answering the
+first changes what the other two mean.
+
+**Measured on the real library: 16 clusters, 34 entities, 0.16s, 16/16
+correct.** The one that looked wrong on inspection wasn't - Moby Dick's
+"Coffin" (12 facts) is Peter Coffin the innkeeper, not Queequeg's coffin;
+all 12 are the same statement repeated, which is the separate duplicate-spike
+bug showing through.
+
+**Reported but never applied by `--fix`**, same posture as duplicate clusters
+and cross-book splits: merging picks a winner and permanently rewrites fact
+ownership. `bookrag doctor --merge-name-variants` applies it, per cluster,
+with the reason shown before the question.
+
+**Open question deliberately left:** epithets ("the boy", "bird" for Conn)
+are out of reach of all three rules, since they share no string relationship
+with the real name and are chapter-scoped in a way a name isn't - "the boy"
+may mean someone else two chapters later. An idea considered and not built:
+scan chapter text once for naming constructions and take *whatever* pair they
+name, which is O(text) rather than O(pairs²) and would catch epithets. It was
+dropped because "Will, known as the Ranger's apprentice" yields the pair
+(Will, Ranger) from a sentence that asserts nothing of the kind; the string
+relationship is what currently makes the text evidence trustworthy.

@@ -13,7 +13,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/query.py](src/bookrag/query.py.md) — `facts_as_of`: the spoiler-safety filter primitive; `format_context` renders facts for a provider.
 - [src/bookrag/eval.py](src/bookrag/eval.py.md) — read-only provider comparison: side-by-side report + groundedness score.
 - [src/bookrag/cli.py](src/bookrag/cli.py.md) — `bookrag ingest|extract|eval|chat|list|show|remove|doctor` CLI entry point.
-- [src/bookrag/library.py](src/bookrag/library.py.md) — library-wide list/show/remove/doctor: extraction-status summaries and index/entities.json consistency cleanup.
+- [src/bookrag/library.py](src/bookrag/library.py.md) — library-wide list/show/remove/doctor: extraction-status summaries, index/entities.json consistency cleanup, and the duplicate/cross-book/name-variant entity detectors.
 - [src/bookrag/titles.py](src/bookrag/titles.py.md) — last-resort title/author guess from a filename.
 - [src/bookrag/env.py](src/bookrag/env.py.md) — reads settings from the environment/`.env`; a blank value counts as unset, not as an empty-string override.
 - [src/bookrag/providers/__init__.py](src/bookrag/providers/__init__.py.md) — `providers` subpackage marker.

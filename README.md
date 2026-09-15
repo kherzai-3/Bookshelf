@@ -580,6 +580,7 @@ bookrag remove <book-id> --yes  # skip the confirmation prompt
 
 bookrag doctor                  # read-only consistency check
 bookrag doctor --fix            # apply the safe, obvious cleanups it finds
+bookrag doctor --merge-name-variants   # merge "Baron Arald" and "Arald" into one person
 ```
 
 `list`/`show` report extraction status as *how far the run reached*, not
@@ -598,6 +599,40 @@ more than once): an `index.json` entry whose directory is gone, an entity
 still listing a `book_id` that no longer exists, and an entity with zero
 facts referencing it in any book that's still around. It's read-only unless
 you pass `--fix`.
+
+`doctor` also reports three things `--fix` deliberately never touches,
+because each one picks a winner and permanently rewrites which entity owns a
+fact — a judgment call, not a cleanup. Each has its own opt-in flag:
+`--merge-duplicates` (the same name spelled differently),
+`--split-cross-book` (two unrelated books' characters fused into one), and
+`--merge-name-variants` (below).
+
+**One character under several names.** If a book calls someone both "Baron
+Arald" and "Arald", they end up as two entities with their facts split
+between them, and a question about one finds only half the story.
+`--merge-name-variants` finds these and offers them one at a time, with the
+evidence shown before the question:
+
+```
+2 entities that look like one name under several forms:
+  - Baron Arald (39 facts), Arald (10 facts)
+      same name with and without a title or rank (in ranger-s-apprentice-1-2-bindup)
+```
+
+Merging records every other spelling as an **alias**, which is what makes a
+question about any of them find all the facts. Three kinds of evidence count,
+and nothing is proposed without one of them:
+
+- a rank in front of a name — "Baron Arald" and "Arald";
+- a given name and a fuller form — "Alyss" and "Alyss Mainwaring";
+- the book saying so itself — "Connwaer, but everyone called him Conn".
+
+It is deliberately cautious, and it stays silent rather than guessing. A name
+inside *two* longer ones (two characters sharing a given name) is refused
+outright, because a wrong merge is invisible and cannot be undone by merging
+again. Similar spelling alone is never enough: "Skandia" and "Skandians" are
+a place and its people, and nothing but the book's own words will link two
+names that merely start alike.
 
 ### Where books end up
 
@@ -966,22 +1001,32 @@ only guards what it is pointed at.
   sub-book field on each chapter (cheaper, but every consumer of
   `chapter_index` has to learn about it). The first is probably right,
   because it makes the rest of the system need no changes at all.
-- **Nicknames and alternate names for one character.** Reported from real
-  use: *The Magic Thief*'s protagonist appears as Conn, Connwaer, "the boy"
-  and "bird", and facts scattered across all of them. Note this is **not a
-  greenfield feature** - `entities.json` already carries an `aliases` list on
-  every entity, `extract.resolve.resolve_entity` already matches against it,
-  and `query.select_relevant_facts` already searches it. What's missing is
-  anything that *populates* it from the text: only 2 of 493 entities in the
-  real library have an alias, and both came from
-  `bookrag doctor --merge-duplicates`, not from reading a book. So the
-  question is narrower than it first appears - where does alias detection
-  run (an extraction-time field, a separate cheap pass over chapters, or a
-  `doctor`-style offline pass over existing facts), and how is a false merge
-  avoided, since wrongly fusing two characters is invisible and hard to undo
-  (the same asymmetry that made `resolve_entity`'s scope deliberately
-  narrow). An epithet like "the boy" is also chapter-scoped in a way a real
-  name isn't - it may refer to someone else entirely later.
+- ~~Nicknames and alternate names for one character~~ **Partially resolved.**
+  Reported from real use: *The Magic Thief*'s protagonist appears as Conn,
+  Connwaer, "the boy" and "bird", with facts scattered across all of them.
+  `bookrag doctor --merge-name-variants` (see "Managing your library") now
+  finds and merges the *name* half of this, which is what finally populates
+  the `aliases` field from a book rather than from a hand-run merge. Chosen as
+  an offline `doctor`-style pass rather than an extraction field so it needs
+  no re-extraction. Run against this project's own 493-entity library it found
+  **16 clusters covering 34 entities, all 16 correct** - including "Baron
+  Arald"/"Arald" (39 + 10 facts) and a three-way "Battlemaster David"/"Sir
+  David"/"David".
+  **What's still open is the epithet half** - "the boy", "bird". All three
+  detection rules rest on a string relationship between the two names, and an
+  epithet has none; it is also chapter-scoped in a way a real name isn't, so
+  "the boy" may mean someone else entirely two chapters later. That needs
+  either a model pass over each book's cast or a naming-construction scan of
+  the text, and both were deliberately deferred - see
+  `context/src/bookrag/library.py.md` for why the cheap version of the second
+  one was tried and rejected.
+  Worth recording what the design survey found, since it is counter-intuitive:
+  **similar spelling is not evidence of anything.** Proposing a merge whenever
+  one name is a prefix of another was 0-for-6 on real data
+  ("Machine"/"Machinery", "King"/"Kingdom", "Skandia"/"Skandians"), and
+  generic containment across all entity types was right about 8 times in 44 -
+  in a book about the difference between a finite game and an infinite one,
+  "Finite Game" contains "Game" and means something else entirely.
 - **Book-level facts: protagonist, antagonist, cast, main plotline.**
   Requested as a way to ask "who is in this book?" without naming anyone
   first. Today every fact hangs off one entity and there is no book-level

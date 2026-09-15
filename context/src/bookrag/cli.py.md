@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-15T13:48:32Z
-source_hash: 6bce1c6e3582844f21d49c70f3e147d93af96377
+last_synced: 2026-09-15T14:49:45Z
+source_hash: a7a979a549d73e4f5f8a0210150e34c8e07236fa
 ---
 
 ## Purpose
@@ -110,10 +110,11 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   `--yes` is given; an unconfirmable prompt (EOF, e.g. non-interactive
   stdin) aborts rather than silently proceeding. Works even on a
   directory-only-orphaned or index-only-orphaned book.
-- CLI: `bookrag doctor [--fix] [--merge-duplicates] [--yes]` — reports (or,
-  with `--fix`, also repairs) three kinds of library drift: orphaned
-  `index.json` entries, stale `entity_id -> book_id` references, and
-  entities with zero facts referencing them in any book that still exists.
+- CLI: `bookrag doctor [--fix] [--merge-duplicates] [--merge-name-variants]
+  [--split-cross-book] [--yes]` — reports (or, with `--fix`, also repairs)
+  three kinds of library drift: orphaned `index.json` entries, stale
+  `entity_id -> book_id` references, and entities with zero facts referencing
+  them in any book that still exists.
   Also always reports possible-duplicate entity clusters (same name across
   types/spellings - see `library.detect_duplicate_entities`), but `--fix`
   never touches them - that needs the separate `--merge-duplicates` flag,
@@ -121,6 +122,20 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   unless `--yes` is given, defaulting to the most-facts entity in each
   cluster as the one kept. Read-only by default - see `library.run_doctor`/
   `library.merge_entities` for exactly what each flag changes.
+- `--merge-name-variants` is the same shape for a different detector
+  (`library.detect_name_variants`): one person under several names, e.g.
+  "Baron Arald" and "Arald". The report prints the cluster's *reasons*
+  underneath it, and the confirmation prompt repeats them, because the user is
+  approving a permanent rewrite of fact ownership and the evidence is the
+  whole basis for saying yes.
+- `_confirm_and_merge(groups, assume_yes) -> int | None` — the per-cluster
+  decision shared by `--merge-duplicates` and `--merge-name-variants`. Both end
+  in the same question and the same `merge_entities` call; only the evidence
+  line differs. Returns an exit code **only** when the run aborts (an
+  unconfirmable prompt), so a caller can tell "finished" from "gave up" -
+  hence `int | None` rather than a plain int. `DuplicateEntity` and
+  `NameVariant` deliberately carry the same four display fields so one helper
+  formats both.
 
 ## Key Decisions
 - **`extract` announces the run before starting it, not after the first

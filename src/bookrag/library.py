@@ -9,13 +9,14 @@ across any book that still exists."""
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from bookrag.extract.resolve import load_entities, match_key, prune_book_from_entities, save_entities
-from bookrag.storage import library_root, load_index, load_metadata, remove_from_index
+from bookrag.storage import library_root, load_chapters, load_index, load_metadata, remove_from_index
 
 
 @dataclass
@@ -233,6 +234,285 @@ def detect_duplicate_entities(root: Path | None = None) -> list[list[DuplicateEn
     orphan."""
     root = root or library_root()
     return _duplicate_clusters(load_entities(root), root)
+
+
+# Honorifics and ranks that sit in front of a name without changing who it
+# refers to, so "Baron Arald" and "Arald" are one person. Nothing else in the
+# codebase strips these: match_key deliberately handles only a leading "the "
+# and a trailing "s", which is why every one of these pairs survives
+# detect_duplicate_entities untouched.
+_TITLES = frozenset(
+    """sir lady lord king queen prince princess duke duchess baron baroness
+    count countess earl master mistress mister mr mrs ms miss dr doctor
+    professor father mother brother sister uncle aunt cousin captain commander
+    lieutenant sergeant colonel general admiral ranger squire apprentice
+    cadet senior junior saint st""".split()
+)
+
+# Compound ranks of the "-master" shape (Battlemaster, Craftmaster,
+# Swordmaster, Harbourmaster) are a productive English pattern rather than a
+# closed list, so they are matched by shape. The length floor stops it from
+# re-matching the bare word "master", which _TITLES already covers.
+_MASTER_RANK = re.compile(r"^\w{4,}master$", re.IGNORECASE)
+
+# A name containing one of these is a compound of two entities, not a longer
+# form of one. Real observed cases: "Tug and Blaze" (two horses), "Bart and
+# Carney" (two men). Without this guard both halves look like short forms of
+# the compound and merge into it.
+_CONJUNCTIONS = frozenset({"and", "&", "or", "plus", "with"})
+
+# The book stating the link itself, in its own words. Required before any
+# prefix-shaped pair is proposed - see _stated_variant_pairs for why the
+# prefix shape alone is not evidence of anything.
+_NAMING_CONNECTOR = r"(?:called|nicknamed|known as|goes by|went by|short for|or just|or simply)"
+
+
+def _name_tokens(name: str) -> list[str]:
+    return [token for token in re.split(r"\s+", name.strip()) if token]
+
+
+def _is_title(token: str) -> bool:
+    bare = token.lower().strip(".")
+    return bare in _TITLES or bool(_MASTER_RANK.match(bare))
+
+
+def _strip_titles(name: str) -> str:
+    """"Battlemaster David" -> "David". Returns "" for a name that is nothing
+    but a title, which is the signal that it names a role rather than a
+    person - "King" belongs to three different kings in one real book."""
+    tokens = _name_tokens(name)
+    while tokens and _is_title(tokens[0]):
+        tokens = tokens[1:]
+    return " ".join(tokens)
+
+
+def _contains_token_run(haystack: list[str], needle: list[str]) -> bool:
+    """Contiguous token-subsequence containment: "Arald" in "Baron Arald",
+    but not "Baron Caraway" in "Baron Fergus of Caraway"."""
+    span = len(needle)
+    return any(haystack[i : i + span] == needle for i in range(len(haystack) - span + 1))
+
+
+@dataclass
+class NameVariant:
+    entity_id: str
+    canonical_name: str
+    type: str
+    book_ids: list[str]
+    fact_count: int
+
+
+@dataclass
+class NameVariantCluster:
+    members: list[NameVariant]
+    reasons: list[str]  # why these are believed to be one entity, shown before merging
+    book_id: str  # the book whose entities (and text, for a stated link) supplied the evidence
+
+
+def _entities_by_book(entities: dict) -> dict[str, list[dict]]:
+    by_book: dict[str, list[dict]] = {}
+    for entity in entities["entities"]:
+        for book_id in entity["book_ids"]:
+            by_book.setdefault(book_id, []).append(entity)
+    return by_book
+
+
+def _title_variant_pairs(members: list[dict]) -> list[tuple[str, str, str]]:
+    """One name with and without a rank in front of it. The highest-precision
+    rule available and the only one that needs no guards beyond a non-empty
+    remainder: it compares what is left *after* the title, so two people who
+    merely share a rank ("King Duncan", "King Swyddned") never collide."""
+    by_stripped: dict[tuple[str, str], list[dict]] = {}
+    for entity in members:
+        stripped = _strip_titles(entity["canonical_name"])
+        if len(stripped) < 3:
+            continue
+        by_stripped.setdefault((entity["type"], match_key(stripped)), []).append(entity)
+
+    pairs = []
+    for group in by_stripped.values():
+        # Entities that already agree under match_key are detect_duplicate_
+        # entities's cluster, not this one. Only claim what a title separates.
+        if len({match_key(e["canonical_name"]) for e in group}) < 2:
+            continue
+        first = group[0]
+        for other in group[1:]:
+            pairs.append((first["entity_id"], other["entity_id"], "same name with and without a title or rank"))
+    return pairs
+
+
+def _fuller_name_pairs(members: list[dict]) -> list[tuple[str, str, str]]:
+    """A given name and a fuller form of it - "Alyss" and "Alyss Mainwaring".
+
+    Characters only, and deliberately so. The same containment test applied to
+    concepts is close to worthless: in a book whose whole subject is the
+    difference between a finite game and an infinite one, "Finite Game"
+    contains "Game" and means something else entirely. Measured on the real
+    library, containment across all types proposed 44 pairs of which roughly 8
+    were right; the three guards below plus the character restriction are what
+    separate those 8 from the rest."""
+    people = [e for e in members if e["type"] == "character"]
+    tokens_by_id = {e["entity_id"]: [t.lower() for t in _name_tokens(e["canonical_name"])] for e in people}
+
+    pairs = []
+    for short in people:
+        short_tokens = tokens_by_id[short["entity_id"]]
+        # A bare rank is not a short form of anyone: "King" is contained in
+        # three different kings' names in one real book, and "Battlemaster" in
+        # "Battlemaster David" names the job, not the man.
+        if len(_strip_titles(short["canonical_name"])) < 3:
+            continue
+        if not short["canonical_name"][:1].isupper():
+            continue
+
+        longer = []
+        for other in people:
+            other_tokens = tokens_by_id[other["entity_id"]]
+            if other["entity_id"] == short["entity_id"] or len(other_tokens) <= len(short_tokens):
+                continue
+            if any(token.strip(".,") in _CONJUNCTIONS for token in other_tokens):
+                continue
+            if _contains_token_run(other_tokens, short_tokens):
+                longer.append(other)
+
+        # Ambiguity is a veto, not a tie-break. A short name inside two longer
+        # ones is the shape of two different people who share a given name,
+        # and guessing between them is the invisible, hard-to-undo failure
+        # this whole feature has to avoid.
+        if len(longer) == 1:
+            pairs.append((short["entity_id"], longer[0]["entity_id"], "a given name and a fuller form of it"))
+    return pairs
+
+
+def _prefix_shaped_pairs(members: list[dict]) -> list[tuple[dict, dict]]:
+    """Single-token names where one is a prefix of the other - "Conn" and
+    "Connwaer". **On its own this is not evidence of anything**: measured on
+    the real library it proposed 6 pairs and every one was wrong
+    ("Machine"/"Machinery", "King"/"Kingdom", "Skandia"/"Skandians"). It is
+    only ever a shortlist for _stated_variant_pairs to check against the text.
+    """
+    single_token = [e for e in members if len(_name_tokens(e["canonical_name"])) == 1]
+    pairs = []
+    for i, a in enumerate(single_token):
+        for b in single_token[i + 1 :]:
+            if a["type"] != b["type"]:
+                continue
+            short, long = sorted([a, b], key=lambda e: len(e["canonical_name"]))
+            short_name, long_name = short["canonical_name"].lower(), long["canonical_name"].lower()
+            if len(short_name) >= 3 and short_name != long_name and long_name.startswith(short_name):
+                pairs.append((short, long))
+    return pairs
+
+
+def _states_they_are_one(text: str, first_name: str, second_name: str) -> bool:
+    for first, second in ((first_name, second_name), (second_name, first_name)):
+        pattern = (
+            r"\b" + re.escape(first) + r"\b[^.!?]{0,40}?\b" + _NAMING_CONNECTOR
+            + r"\b[^.!?]{0,25}?\b" + re.escape(second) + r"\b"
+        )
+        if re.search(pattern, text, re.IGNORECASE):
+            return True
+    return False
+
+
+def _stated_variant_pairs(book_id: str, members: list[dict], root: Path) -> list[tuple[str, str, str]]:
+    """A prefix-shaped pair that the book itself links: "Connwaer, called
+    Conn". The text is doing the asserting, not the string shape, which is the
+    only reason this rule is safe at all - see _prefix_shaped_pairs.
+
+    Chapters are read only when a prefix-shaped pair exists, so the common
+    case costs nothing."""
+    candidates = _prefix_shaped_pairs(members)
+    if not candidates:
+        return []
+    try:
+        text = "\n".join(chapter.text for chapter in load_chapters(book_id, root))
+    except FileNotFoundError:
+        return []
+
+    return [
+        (short["entity_id"], long["entity_id"], "the book states one name is another's")
+        for short, long in candidates
+        if _states_they_are_one(text, short["canonical_name"], long["canonical_name"])
+    ]
+
+
+def _connected_clusters(pairs: list[tuple[str, str, str]]) -> list[tuple[list[str], list[str]]]:
+    """Union-find over the proposed pairs, so three names for one person
+    ("Battlemaster David", "Sir David", "David") arrive as one decision rather
+    than three overlapping ones. Returns (entity_ids, reasons) per cluster."""
+    parent: dict[str, str] = {}
+
+    def find(node: str) -> str:
+        parent.setdefault(node, node)
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    for a, b, _ in pairs:
+        root_a, root_b = find(a), find(b)
+        if root_a != root_b:
+            parent[root_b] = root_a
+
+    grouped: dict[str, tuple[list[str], list[str]]] = {}
+    for a, b, reason in pairs:
+        ids, reasons = grouped.setdefault(find(a), ([], []))
+        for entity_id in (a, b):
+            if entity_id not in ids:
+                ids.append(entity_id)
+        if reason not in reasons:
+            reasons.append(reason)
+    return list(grouped.values())
+
+
+def detect_name_variants(root: Path | None = None) -> list[NameVariantCluster]:
+    """Entities that are one person under different names, which
+    `detect_duplicate_entities` cannot see because their names do not
+    normalize to the same `match_key`. This is what finally *populates*
+    `aliases` from a book rather than from a hand-run merge: applying a
+    cluster goes through `merge_entities`, which already folds every
+    merged-away name into the kept entity's alias list.
+
+    Three rules, all scoped to one book and one entity type, and all
+    detection-only - nothing here writes. See each `_*_pairs` helper for the
+    measured precision that justifies its guards."""
+    root = root or library_root()
+    entities = load_entities(root)
+    by_id = {e["entity_id"]: e for e in entities["entities"]}
+
+    clusters: list[NameVariantCluster] = []
+    seen: set[frozenset[str]] = set()
+    for book_id, members in sorted(_entities_by_book(entities).items()):
+        pairs = (
+            _title_variant_pairs(members)
+            + _fuller_name_pairs(members)
+            + _stated_variant_pairs(book_id, members, root)
+        )
+        for entity_ids, reasons in _connected_clusters(pairs):
+            # A series entity belongs to several books and is examined once
+            # per book; the same cluster must only be offered once.
+            key = frozenset(entity_ids)
+            if key in seen:
+                continue
+            seen.add(key)
+            clusters.append(
+                NameVariantCluster(
+                    members=[
+                        NameVariant(
+                            entity_id=entity_id,
+                            canonical_name=by_id[entity_id]["canonical_name"],
+                            type=by_id[entity_id]["type"],
+                            book_ids=by_id[entity_id]["book_ids"],
+                            fact_count=_fact_count_for_entity(root, by_id[entity_id]),
+                        )
+                        for entity_id in entity_ids
+                    ],
+                    reasons=reasons,
+                    book_id=book_id,
+                )
+            )
+    return clusters
 
 
 @dataclass
@@ -488,6 +768,13 @@ class DoctorReport:
     # action than deleting an orphan. `bookrag doctor --split-cross-book`
     # applies it.
     cross_book_entities: list[CrossBookEntity] = field(default_factory=list)
+    # Entities that are one person under different names ("Baron Arald" and
+    # "Arald"), which duplicate_entity_groups cannot see because the names do
+    # not normalize to the same match_key. Applying one goes through
+    # merge_entities, which is what populates the otherwise-dead aliases
+    # field. Reported but never touched by --fix, same posture as the two
+    # above: `bookrag doctor --merge-name-variants` applies it.
+    name_variant_clusters: list[NameVariantCluster] = field(default_factory=list)
     fixed: bool = False
 
 
@@ -517,6 +804,7 @@ def run_doctor(root: Path | None = None, fix: bool = False) -> DoctorReport:
 
     duplicate_groups = _duplicate_clusters(entities, root)
     cross_book = detect_cross_book_entities(root)
+    name_variants = detect_name_variants(root)
 
     known_entity_ids = {e["entity_id"] for e in entities["entities"]}
     unnamed_fact_refs = sorted(
@@ -533,6 +821,7 @@ def run_doctor(root: Path | None = None, fix: bool = False) -> DoctorReport:
             duplicate_groups,
             unnamed_fact_refs,
             cross_book_entities=cross_book,
+            name_variant_clusters=name_variants,
             fixed=False,
         )
 
@@ -555,5 +844,6 @@ def run_doctor(root: Path | None = None, fix: bool = False) -> DoctorReport:
         duplicate_groups,
         unnamed_fact_refs,
         cross_book_entities=cross_book,
+        name_variant_clusters=name_variants,
         fixed=True,
     )

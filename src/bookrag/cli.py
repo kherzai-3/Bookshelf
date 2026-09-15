@@ -166,7 +166,15 @@ def main(argv: list[str] | None = None) -> int:
         "(not applied by --fix - rewrites fact records)",
     )
     doctor.add_argument(
-        "--yes", action="store_true", help="With --merge-duplicates, skip confirmation (keeps the most-facts entity)"
+        "--merge-name-variants",
+        action="store_true",
+        help="Interactively merge entities that are one person under different names, e.g. "
+        "'Baron Arald' and 'Arald' (not applied by --fix - see README)",
+    )
+    doctor.add_argument(
+        "--yes",
+        action="store_true",
+        help="With --merge-duplicates/--merge-name-variants, skip confirmation (keeps the most-facts entity)",
     )
 
     args = parser.parse_args(argv)
@@ -640,6 +648,7 @@ def _doctor(args: argparse.Namespace) -> int:
         and not report.duplicate_entity_groups
         and not report.unnamed_fact_refs
         and not report.cross_book_entities
+        and not report.name_variant_clusters
     )
     if nothing_found:
         print("Library is consistent - no issues found.")
@@ -688,13 +697,29 @@ def _doctor(args: argparse.Namespace) -> int:
         for group in report.duplicate_entity_groups:
             label = ", ".join(f"{e.canonical_name} ({e.type}, {e.fact_count} facts)" for e in group)
             print(f"  - {label}")
+    if report.name_variant_clusters:
+        n = len(report.name_variant_clusters)
+        print(f"{n} entit{'y' if n == 1 else 'ies'} that look like one name under several forms:")
+        for cluster in report.name_variant_clusters:
+            label = ", ".join(
+                f"{m.canonical_name} ({m.fact_count} facts)"
+                for m in sorted(cluster.members, key=lambda m: -m.fact_count)
+            )
+            print(f"  - {label}")
+            print(f"      {'; '.join(cluster.reasons)} (in {cluster.book_id})")
+        print(
+            "  Merging one records every other spelling as an alias, which is what makes\n"
+            "  a question about any of them find all of their facts. Run\n"
+            "  `bookrag doctor --merge-name-variants` to review them one at a time."
+        )
 
     if args.fix:
         print("Applied fixes: removed orphaned index entries, pruned stale book references, deleted fully orphaned entities.")
-    elif not args.merge_duplicates and not args.split_cross_book:
+    elif not args.merge_duplicates and not args.split_cross_book and not args.merge_name_variants:
         print(
             "Run `bookrag doctor --fix` to apply the safe cleanups above, "
-            "`bookrag doctor --merge-duplicates` to merge duplicate entity clusters, or "
+            "`bookrag doctor --merge-duplicates` to merge duplicate entity clusters, "
+            "`bookrag doctor --merge-name-variants` to merge one person's several names, or "
             "`bookrag doctor --split-cross-book` to split wrongly-shared identities."
         )
 
@@ -713,32 +738,53 @@ def _doctor(args: argparse.Namespace) -> int:
                 )
 
     if args.merge_duplicates:
-        for group in report.duplicate_entity_groups:
-            default_keep = max(group, key=lambda e: e.fact_count)
-            label = ", ".join(f"{e.canonical_name} ({e.type}, {e.fact_count} facts)" for e in group)
-            if not args.yes:
-                try:
-                    answer = (
-                        input(
-                            f"Merge [{label}] into '{default_keep.canonical_name}' "
-                            f"({default_keep.type}, {default_keep.fact_count} facts)? [y/N] "
-                        )
-                        .strip()
-                        .lower()
-                    )
-                except EOFError:
-                    print("Aborted (no confirmation available - pass --yes to merge non-interactively).")
-                    return 1
-                if answer != "y":
-                    print(f"Skipped: {label}")
-                    continue
-            result = merge_entities([e.entity_id for e in group], keep=default_keep.entity_id)
-            n = len(result.merged_entity_ids)
-            print(
-                f"Merged {n} entit{'y' if n == 1 else 'ies'} into '{default_keep.canonical_name}'"
-                f" ({result.facts_rewritten} fact(s) rewritten)"
-            )
+        aborted = _confirm_and_merge([(group, "") for group in report.duplicate_entity_groups], args.yes)
+        if aborted is not None:
+            return aborted
+
+    if args.merge_name_variants:
+        aborted = _confirm_and_merge(
+            [(cluster.members, f"  ({'; '.join(cluster.reasons)})") for cluster in report.name_variant_clusters],
+            args.yes,
+        )
+        if aborted is not None:
+            return aborted
     return 0
+
+
+def _confirm_and_merge(groups: list[tuple[list, str]], assume_yes: bool) -> int | None:
+    """The per-cluster decision shared by `--merge-duplicates` and
+    `--merge-name-variants`. Both end in the same question and the same
+    `merge_entities` call; only the evidence differs, which is what `why`
+    carries. Returns an exit code only when the run has to abort, so a caller
+    can tell "finished" from "gave up".
+
+    Both stay opt-in flags rather than part of `--fix` for the same reason:
+    merging picks a winner and permanently rewrites fact ownership, which is a
+    judgment call, not a cleanup."""
+    for members, why in groups:
+        default_keep = max(members, key=lambda e: e.fact_count)
+        label = ", ".join(f"{e.canonical_name} ({e.type}, {e.fact_count} facts)" for e in members)
+        if not assume_yes:
+            question = (
+                f"Merge [{label}] into '{default_keep.canonical_name}' "
+                f"({default_keep.type}, {default_keep.fact_count} facts)? [y/N] "
+            )
+            try:
+                answer = input(f"{why}\n{question}" if why else question).strip().lower()
+            except EOFError:
+                print("Aborted (no confirmation available - pass --yes to merge non-interactively).")
+                return 1
+            if answer != "y":
+                print(f"Skipped: {label}")
+                continue
+        result = merge_entities([e.entity_id for e in members], keep=default_keep.entity_id)
+        n = len(result.merged_entity_ids)
+        print(
+            f"Merged {n} entit{'y' if n == 1 else 'ies'} into '{default_keep.canonical_name}'"
+            f" ({result.facts_rewritten} fact(s) rewritten)"
+        )
+    return None
 
 
 def _print_section(header: str, lines: list[str]) -> None:

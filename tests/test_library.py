@@ -9,6 +9,7 @@ from bookrag.ingest.chapter import Chapter
 from bookrag.library import (
     detect_cross_book_entities,
     detect_duplicate_entities,
+    detect_name_variants,
     list_books,
     merge_entities,
     remove_book,
@@ -16,6 +17,7 @@ from bookrag.library import (
     show_book,
     split_cross_book_entity,
 )
+from bookrag.query import facts_as_of, select_relevant_facts
 from bookrag.storage import load_index, save_book
 from tests.helpers import NARRATIVE_PADDING
 
@@ -277,6 +279,266 @@ def test_detect_duplicate_entities_finds_a_real_shaped_cluster(tmp_path: Path) -
     assert cluster_ids == {"character-a", "setting-b", "theme-c"}
     fact_counts = {e.entity_id: e.fact_count for e in clusters[0]}
     assert fact_counts == {"character-a": 1, "setting-b": 2, "theme-c": 0}
+
+
+def _seed_named_entities(root: Path, book_id: str, named: list[tuple[str, str, str]]) -> None:
+    """(entity_id, canonical_name, type) -> a registry plus one fact each, so
+    every entity has a non-zero fact count and `merge_entities` has something
+    to rewrite."""
+    save_entities(
+        {
+            "entities": [
+                {"entity_id": eid, "canonical_name": name, "type": etype, "aliases": [], "book_ids": [book_id]}
+                for eid, name, etype in named
+            ]
+        },
+        root,
+    )
+    _write_facts(
+        root,
+        book_id,
+        [
+            {"entity_id": eid, "chapter_index": 0, "category": "description", "statement": f"about {name}"}
+            for eid, name, _ in named
+        ],
+    )
+
+
+def _variant_names(clusters) -> list[set[str]]:
+    return [{m.canonical_name for m in c.members} for c in clusters]
+
+
+def test_detect_name_variants_finds_a_title_in_front_of_a_name(tmp_path: Path) -> None:
+    """The highest-precision rule, and the one `detect_duplicate_entities`
+    structurally cannot reach: "Baron Arald" and "Arald" do not share a
+    match_key, so nothing before this saw them as one man. Real cluster from
+    the project's own library - 39 facts on one, 10 on the other."""
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Fantasy Book")
+    _seed_named_entities(
+        root,
+        book_id,
+        [("character-a", "Baron Arald", "character"), ("character-b", "Arald", "character")],
+    )
+
+    assert _variant_names(detect_name_variants(root=root)) == [{"Baron Arald", "Arald"}]
+
+
+def test_detect_name_variants_offers_three_forms_of_one_name_as_a_single_decision(tmp_path: Path) -> None:
+    """Real cluster: "Battlemaster David", "Sir David" and "David" are one
+    man. Without the union-find these arrive as three overlapping pairs, so
+    the user is asked the same question three times and the first answer
+    changes what the later two even mean."""
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Fantasy Book")
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("character-a", "Battlemaster David", "character"),
+            ("character-b", "Sir David", "character"),
+            ("character-c", "David", "character"),
+        ],
+    )
+
+    assert _variant_names(detect_name_variants(root=root)) == [{"Battlemaster David", "Sir David", "David"}]
+
+
+def test_detect_name_variants_keeps_two_people_who_merely_share_a_rank_apart(tmp_path: Path) -> None:
+    """A rank is not an identity. The real library holds King Duncan, King
+    Swyddned and King Herbert; a rule that compared whole names would fuse all
+    three, which is why the title rule compares what is left *after* the
+    title.
+
+    "Battlemaster" is the case that pins the bare-rank guard specifically. The
+    three kings are ambiguous - "King" sits inside two longer names - so the
+    ambiguity veto already rejects them and a test built only from kings
+    passes with the bare-rank guard deleted. "Battlemaster" sits inside
+    exactly one longer name, so only the guard stands between it and a merge
+    that would file a man's facts under his job title."""
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Fantasy Book")
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("character-a", "King Duncan", "character"),
+            ("character-b", "King Swyddned", "character"),
+            ("character-c", "King", "character"),
+            ("character-d", "Battlemaster David", "character"),
+            ("character-e", "Battlemaster", "character"),
+        ],
+    )
+
+    assert detect_name_variants(root=root) == []
+
+
+def test_detect_name_variants_finds_a_given_name_and_a_fuller_form(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Fantasy Book")
+    _seed_named_entities(
+        root,
+        book_id,
+        [("character-a", "Alyss Mainwaring", "character"), ("character-b", "Alyss", "character")],
+    )
+
+    assert _variant_names(detect_name_variants(root=root)) == [{"Alyss Mainwaring", "Alyss"}]
+
+
+def test_detect_name_variants_refuses_a_given_name_two_people_share(tmp_path: Path) -> None:
+    """Ambiguity is a veto, not a tie-break. Picking one of two Georges is the
+    invisible, hard-to-undo failure this whole feature exists to avoid, and
+    saying nothing costs only a retrieval near-miss."""
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Fantasy Book")
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("character-a", "George", "character"),
+            ("character-b", "George Carter", "character"),
+            ("character-c", "George Wheeler", "character"),
+        ],
+    )
+
+    assert detect_name_variants(root=root) == []
+
+
+def test_detect_name_variants_ignores_a_name_that_is_two_entities_joined(tmp_path: Path) -> None:
+    """Real case: "Tug and Blaze" is two horses the extractor filed as one
+    entity. Both halves are contained in it, so without the conjunction guard
+    each merges into the compound - and the compound is the wrong survivor."""
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Fantasy Book")
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("character-a", "Tug and Blaze", "character"),
+            ("character-b", "Tug", "character"),
+            ("character-c", "Blaze", "character"),
+        ],
+    )
+
+    assert detect_name_variants(root=root) == []
+
+
+def test_detect_name_variants_leaves_concepts_alone(tmp_path: Path) -> None:
+    """Why containment is character-only. In a book whose entire subject is
+    the difference between a finite game and an infinite one, "Finite Game"
+    contains "Game" and is emphatically not a longer name for it. Measured
+    across all types on the real library, containment proposed 44 pairs and
+    roughly 8 were right.
+
+    The *Temptation* pair is the one that pins the type restriction. The
+    three Games are ambiguous (two longer names contain "Game"), so the
+    ambiguity veto would reject them whatever their type - a test built only
+    from those would pass with the type restriction deleted, which is how this
+    test was originally written and what a sabotage run caught."""
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Philosophy Book")
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("concept-a", "Finite Game", "concept"),
+            ("concept-b", "Infinite Game", "concept"),
+            ("concept-c", "Game", "concept"),
+            ("concept-d", "Temptation Bundling", "concept"),
+            ("concept-e", "Temptation", "concept"),
+        ],
+    )
+
+    assert detect_name_variants(root=root) == []
+
+
+def _book_saying(tmp_path: Path, root: Path, title: str, text: str) -> str:
+    source = tmp_path / f"{title}.epub"
+    source.write_text("x", encoding="utf-8")
+    return save_book(source, [Chapter(0, "One", text)], title=title, root=root)
+
+
+def test_detect_name_variants_needs_the_book_to_state_a_prefix_link(tmp_path: Path) -> None:
+    """The reported case - a protagonist appearing as both Conn and Connwaer.
+    The prefix shape alone is worthless as evidence: measured on the real
+    library it proposed 6 such pairs and every one was wrong ("Machine"/
+    "Machinery", "King"/"Kingdom"). So the book has to say it."""
+    root = tmp_path / "library"
+    book_id = _book_saying(
+        tmp_path, root, "Thief Book", f"His name was Connwaer, but everyone called him Conn. {NARRATIVE_PADDING}"
+    )
+    _seed_named_entities(
+        root,
+        book_id,
+        [("character-a", "Connwaer", "character"), ("character-b", "Conn", "character")],
+    )
+
+    assert _variant_names(detect_name_variants(root=root)) == [{"Connwaer", "Conn"}]
+
+
+def test_detect_name_variants_stays_silent_when_the_book_never_links_the_names(tmp_path: Path) -> None:
+    """The same pair, in a book that never connects them - and the real
+    false positives this suppresses: a place and its people ("Skandia",
+    "Skandians") share a prefix and are two different things."""
+    root = tmp_path / "library"
+    book_id = _book_saying(
+        tmp_path, root, "Thief Book", f"Conn walked north. Connwaer was someone else entirely. {NARRATIVE_PADDING}"
+    )
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("character-a", "Connwaer", "character"),
+            ("character-b", "Conn", "character"),
+            ("setting-c", "Skandia", "setting"),
+            ("setting-d", "Skandians", "setting"),
+        ],
+    )
+
+    assert detect_name_variants(root=root) == []
+
+
+def test_merging_a_name_variant_makes_either_name_find_all_the_facts(tmp_path: Path) -> None:
+    """The point of the whole feature, end to end. Before: a question about
+    "Arald" retrieves only the facts filed under that exact spelling. After:
+    `merge_entities` records "Arald" as an alias of the surviving entity, and
+    `select_relevant_facts` - which has always searched aliases - finds both."""
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Fantasy Book")
+    _seed_named_entities(
+        root,
+        book_id,
+        [("character-a", "Baron Arald", "character"), ("character-b", "Arald", "character")],
+    )
+    facts = facts_as_of(book_id, 0, root=root)
+    assert len(select_relevant_facts("Tell me about Arald", facts, root=root)) == 1
+
+    (cluster,) = detect_name_variants(root=root)
+    keep = max(cluster.members, key=lambda m: m.fact_count)
+    merge_entities([m.entity_id for m in cluster.members], keep=keep.entity_id, root=root)
+
+    (survivor,) = load_entities(root)["entities"]
+    assert "Arald" in survivor["aliases"]
+    merged_facts = facts_as_of(book_id, 0, root=root)
+    assert len(select_relevant_facts("Tell me about Arald", merged_facts, root=root)) == 2
+    assert len(select_relevant_facts("Tell me about Baron Arald", merged_facts, root=root)) == 2
+
+
+def test_doctor_reports_name_variants_without_touching_them(tmp_path: Path) -> None:
+    """Same posture as duplicate clusters and cross-book splits: --fix never
+    merges, because merging picks a winner and rewrites fact ownership."""
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Fantasy Book")
+    _seed_named_entities(
+        root,
+        book_id,
+        [("character-a", "Baron Arald", "character"), ("character-b", "Arald", "character")],
+    )
+
+    report = run_doctor(root=root, fix=True)
+
+    assert _variant_names(report.name_variant_clusters) == [{"Baron Arald", "Arald"}]
+    assert len(load_entities(root)["entities"]) == 2
 
 
 def test_detect_duplicate_entities_no_false_positive_on_different_names(tmp_path: Path) -> None:

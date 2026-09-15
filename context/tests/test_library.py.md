@@ -1,7 +1,7 @@
 ---
 source: tests/test_library.py
-last_synced: 2026-09-13T16:40:00Z
-source_hash: f1b7cdfe4f262b2832f595f7a24cdfa43c9cecf3
+last_synced: 2026-09-15T14:49:45Z
+source_hash: adee9a2edcee6a24a6f13e7c5a1993308574dfcf
 ---
 
 ## Purpose
@@ -41,7 +41,35 @@ Also covers two areas added since:
   `test_split_preserves_every_fact` — the load-bearing one, since a split
   rewrites fact rows across multiple book directories and must not lose any.
 
+- **Name-variant detection** (`detect_name_variants`) — one person under
+  several names, the thing that finally populates `aliases` from a book.
+  Every case is taken from the real 493-entity library rather than invented:
+  `..._finds_a_title_in_front_of_a_name` (Baron Arald / Arald),
+  `..._offers_three_forms_of_one_name_as_a_single_decision` (Battlemaster
+  David / Sir David / David - the union-find, so the user is asked once, not
+  three overlapping times), `..._finds_a_given_name_and_a_fuller_form`.
+  The false-positive tests are the load-bearing half, one per guard:
+  `..._keeps_two_people_who_merely_share_a_rank_apart`,
+  `..._refuses_a_given_name_two_people_share`,
+  `..._ignores_a_name_that_is_two_entities_joined` (Tug and Blaze),
+  `..._leaves_concepts_alone` (Finite Game / Game),
+  `..._stays_silent_when_the_book_never_links_the_names`.
+  `..._needs_the_book_to_state_a_prefix_link` covers the reported
+  Conn/Connwaer case, and `test_merging_a_name_variant_makes_either_name_find_
+  all_the_facts` is the end-to-end payoff: detect, merge, then confirm
+  `select_relevant_facts` finds both entities' facts under either name.
+  `test_doctor_reports_name_variants_without_touching_them` pins that `--fix`
+  never merges.
+
 ## Key Decisions
+- **Two of the false-positive tests were originally vacuous, and a sabotage
+  run is what caught it.** The concepts test used only Finite/Infinite/Game
+  and the rank test used only three kings - both *ambiguous* shapes, so the
+  ambiguity veto rejected them and each test still passed with the guard it
+  claimed to cover deleted. They now each carry an unambiguous pair
+  (Temptation / Temptation Bundling; Battlemaster / Battlemaster David) where
+  only the named guard stands between the pair and a merge. All five guards
+  are sabotage-verified: removing any one fails exactly one test.
 - Book fixtures are built via the real `storage.save_book` (`_make_book`
   helper), not hand-written `metadata.json` - same posture as
   `test_extraction_pipeline.py`. `facts.jsonl`/`entities.json` content is

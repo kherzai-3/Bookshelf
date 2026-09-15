@@ -761,6 +761,114 @@ def test_doctor_merge_duplicates_without_yes_aborts_on_no_confirmation(
     assert {"character-a", "setting-b"} <= remaining_ids  # nothing merged
 
 
+def _seed_name_variant_cluster(library_root: Path, book_id: str) -> None:
+    """Real cluster from this project's own library: "Baron Arald" (39 facts)
+    and "Arald" (10) are one man, and their names do not share a match_key -
+    so the duplicate detector never saw them."""
+    entities = load_entities(library_root)
+    entities["entities"].extend(
+        [
+            {"entity_id": "character-arald-titled", "canonical_name": "Baron Arald", "type": "character", "aliases": [], "book_ids": [book_id]},
+            {"entity_id": "character-arald-bare", "canonical_name": "Arald", "type": "character", "aliases": [], "book_ids": [book_id]},
+        ]
+    )
+    save_entities(entities, library_root)
+    facts_path = library_root / book_id / "facts.jsonl"
+    with facts_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"entity_id": "character-arald-titled", "chapter_index": 0, "category": "description", "statement": "a"}) + "\n")
+        f.write(json.dumps({"entity_id": "character-arald-titled", "chapter_index": 0, "category": "status", "statement": "b"}) + "\n")
+        f.write(json.dumps({"entity_id": "character-arald-bare", "chapter_index": 0, "category": "description", "statement": "c"}) + "\n")
+
+
+def test_doctor_reports_a_name_variant_cluster_with_its_evidence(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The report has to say *why*, not just list the names. The user is being
+    asked to approve a permanent rewrite of fact ownership, and "these two
+    names differ only by a title" is the whole basis for saying yes."""
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    main(["extract", book_dir.name, "--provider", "fake"])
+    _seed_name_variant_cluster(_library_root, book_dir.name)
+    capsys.readouterr()
+
+    exit_code = main(["doctor"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "one name under several forms" in output
+    assert "Baron Arald" in output
+    assert "title or rank" in output
+    assert "--merge-name-variants" in output
+
+
+def test_doctor_merge_name_variants_with_yes_records_the_other_name_as_an_alias(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The user-visible payoff: after merging, the surviving entity carries
+    the other spelling as an alias, which is the field `select_relevant_facts`
+    has always searched and that nothing until now populated from a book."""
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    main(["extract", book_dir.name, "--provider", "fake"])
+    _seed_name_variant_cluster(_library_root, book_dir.name)
+    capsys.readouterr()
+
+    exit_code = main(["doctor", "--merge-name-variants", "--yes"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Merged" in output
+    by_id = {e["entity_id"]: e for e in load_entities(_library_root)["entities"]}
+    assert "character-arald-bare" not in by_id  # the 1-fact entity loses
+    assert by_id["character-arald-titled"]["aliases"] == ["Arald"]
+
+
+def test_doctor_merge_name_variants_declined_leaves_both_entities_alone(
+    tmp_path: Path, _library_root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    main(["extract", book_dir.name, "--provider", "fake"])
+    _seed_name_variant_cluster(_library_root, book_dir.name)
+    capsys.readouterr()
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+    exit_code = main(["doctor", "--merge-name-variants"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Skipped" in output
+    remaining = {e["entity_id"] for e in load_entities(_library_root)["entities"]}
+    assert {"character-arald-titled", "character-arald-bare"} <= remaining
+
+
+def test_doctor_fix_never_merges_a_name_variant(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Same posture as duplicate clusters and cross-book splits. `--fix` is
+    for cleanups of clearly-dead data; merging picks a winner and permanently
+    rewrites which entity owns a fact."""
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    main(["extract", book_dir.name, "--provider", "fake"])
+    _seed_name_variant_cluster(_library_root, book_dir.name)
+    capsys.readouterr()
+
+    main(["doctor", "--fix"])
+
+    remaining = {e["entity_id"] for e in load_entities(_library_root)["entities"]}
+    assert {"character-arald-titled", "character-arald-bare"} <= remaining
+
+
 def test_extract_refuses_a_model_mismatch_before_announcing_a_resume(
     tmp_path: Path, _library_root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
