@@ -9,6 +9,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/ingest/epub_loader.py](src/bookrag/ingest/epub_loader.py.md) — loads an `.epub` into per-chapter plain text, in reading order.
 - [src/bookrag/ingest/pdf_loader.py](src/bookrag/ingest/pdf_loader.py.md) — loads a `.pdf` into per-chapter plain text via its TOC/outline.
 - [src/bookrag/ingest/consolidate.py](src/bookrag/ingest/consolidate.py.md) — merges many small/incoherent chapter fragments into larger, coherent ones for extraction.
+- [src/bookrag/ingest/vocatives.py](src/bookrag/ingest/vocatives.py.md) — reads a first-person narrator's other names ("Conn"/"boy"/"lad") out of who addresses whom, at ingest, with no model.
 - [src/bookrag/storage.py](src/bookrag/storage.py.md) — persists a book (source + chapters + metadata incl. `content_type`) to `data/library/<book_id>/`; series-aware index + reading-order helper.
 - [src/bookrag/query.py](src/bookrag/query.py.md) — `facts_as_of`: the spoiler-safety filter primitive; `format_context` renders facts for a provider.
 - [src/bookrag/eval.py](src/bookrag/eval.py.md) — read-only provider comparison: side-by-side report + groundedness score.
@@ -44,6 +45,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [tests/test_extraction_pipeline.py](../tests/test_extraction_pipeline.py.md) — covers `extract_book`, including series entity-seeding.
 - [tests/test_query.py](../tests/test_query.py.md) — covers `facts_as_of`'s spoiler-safety guarantee across a series.
 - [tests/test_spoiler_safety.py](../tests/test_spoiler_safety.py.md) — the ship gate: end-to-end proof that a chapter-N render contains nothing from, and derives nothing from, past chapter N.
+- [tests/test_vocatives.py](../tests/test_vocatives.py.md) — covers narrator-alias detection: speaker split, per-chapter narration mode, quote styles, and the noise filters.
 - [tests/test_eval.py](../tests/test_eval.py.md) — covers `groundedness_score`, `run_eval`'s read-only guarantee, and `summarize`.
 - [tests/test_ingestion_report.py](../tests/test_ingestion_report.py.md) — covers `classify_ingestion`/`write_ingestion_report`.
 - [tests/test_parsing.py](../tests/test_parsing.py.md) — covers `providers.parsing.parse_facts`.

@@ -16,8 +16,10 @@ from bookrag.cli import (
     default_log_path,
     extract_start_notes,
     main,
+    narrator_alias_lines,
 )
 from bookrag.extract.resolve import load_entities, save_entities
+from bookrag.ingest.vocatives import NarratorAliases
 from bookrag.storage import load_chapters
 from tests.helpers import build_fragmented_epub, build_narrative_epub, build_sample_epub
 
@@ -759,6 +761,34 @@ def test_doctor_merge_duplicates_without_yes_aborts_on_no_confirmation(
     assert "Skipped" in output
     remaining_ids = {e["entity_id"] for e in load_entities(_library_root)["entities"]}
     assert {"character-a", "setting-b"} <= remaining_ids  # nothing merged
+
+
+def test_narrator_aliases_print_nothing_for_a_third_person_book() -> None:
+    """Most novels are third person, and this pass has nothing to say about
+    them. `_print_section` drops an empty section entirely, header included, so
+    the cost to those books is zero lines - which is what lets the section be
+    unconditional at the call site."""
+    assert narrator_alias_lines(NarratorAliases()) == []
+
+
+def test_narrator_aliases_show_their_counts_and_claim_nothing() -> None:
+    """The counts are the point: they are how a reader separates a real alias
+    from a stray match, and on a real book the gap is stark. The wording has to
+    stay at "candidates" - a three-party scene can put a bystander's title in
+    this list, and nothing here is applied to anything."""
+    found = NarratorAliases(
+        aliases=[("boy", 34), ("conn", 13), ("captain", 2)],
+        first_person_chapters=[0, 1, 2],
+        chapters_considered=4,
+    )
+
+    lines = narrator_alias_lines(found)
+
+    assert "boy (34x)" in lines[0]
+    assert "conn (13x)" in lines[0]
+    assert "3 of 4 chapters" in lines[1]
+    assert any("candidates only" in line for line in lines)
+    assert not any("merged" in line.lower() or "applied" in line.lower() for line in lines)
 
 
 def _seed_name_variant_cluster(library_root: Path, book_id: str) -> None:

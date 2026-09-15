@@ -16,6 +16,7 @@ from bookrag.extract.pipeline import extract_book, resume_blocker, resume_start_
 from bookrag.ingest import epub_loader, pdf_loader
 from bookrag.ingest.chapter import Chapter
 from bookrag.ingest.consolidate import consolidate_fragments, should_consolidate
+from bookrag.ingest.vocatives import NarratorAliases, detect_narrator_aliases
 from bookrag.library import (
     detect_duplicate_entities,
     list_books,
@@ -263,6 +264,7 @@ def _ingest(args: argparse.Namespace) -> int:
 
     _print_section("Parsing", parse_notes)
     _print_section("Sanity check", sanity_summary(chapters))
+    _print_section("Names for the narrator", narrator_alias_lines(detect_narrator_aliases(chapters)))
 
     report_path = write_ingestion_report(
         book_id, chapters, raw_chapter_count=raw_chapter_count if raw_chapter_count != len(chapters) else None
@@ -270,6 +272,29 @@ def _ingest(args: argparse.Namespace) -> int:
     _print_section("Files", [f"wrote {report_path}", *_incoming_cleanup_notes(args.path)])
     _print_section("Next steps", next_step_lines(book_id, len(chapters)))
     return 0
+
+
+def narrator_alias_lines(found: NarratorAliases) -> list[str]:
+    """What the book calls its narrator, reported at ingest.
+
+    Silent for a third-person book, which is most of them - an empty section
+    prints nothing at all (see `_print_section`), so this costs those books a
+    blank line and no attention. The counts are shown deliberately: they are
+    what a reader needs to tell a real alias from a stray match, and on a real
+    book the gap is stark (34 against 2). The wording says *candidates* and
+    names no consequence, because nothing is applied - `detect_narrator_aliases`
+    is a report, and a three-party scene can put a stranger's title in this
+    list."""
+    if not found.aliases:
+        return []
+    named = ", ".join(f"{name} ({count}x)" for name, count in found.aliases)
+    return [
+        f"other characters address the narrator as: {named}",
+        f"  read from dialogue in {len(found.first_person_chapters)} of "
+        f"{found.chapters_considered} chapters, which are written in the first person",
+        "  candidates only - nothing was changed. These are the names whose facts",
+        "  would otherwise be catalogued as separate people.",
+    ]
 
 
 def next_step_lines(book_id: str, chapter_count: int) -> list[str]:

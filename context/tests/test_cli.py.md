@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
-last_synced: 2026-09-15T14:49:45Z
-source_hash: e16b95a6018dd86598394cf067960789661f6a25
+last_synced: 2026-09-15T15:51:06Z
+source_hash: 7a450290540fa4d706d21a858d7860dc080adbd5
 ---
 
 ## Purpose
@@ -103,6 +103,15 @@ Also covers, added since the above:
   while its handle is still open - what a `tail -f` in another terminal does -
   and is the one test that would catch the log going silent for minutes at a
   time. Sabotage-verified by removing `_Tee`'s flush.
+
+- **Narrator-alias rendering** (`test_narrator_aliases_print_nothing_for_a_
+  third_person_book`, `..._show_their_counts_and_claim_nothing`) — the
+  detection itself is `test_vocatives.py`'s job; these pin the two properties
+  the *output* has to hold. The empty case matters because the section is
+  emitted unconditionally at the call site and most novels are third person.
+  The second asserts the counts survive into the text and that the wording
+  never claims anything was merged or applied — a bystander's title can land in
+  this list, so the copy is the only thing keeping it honest.
 
 ## Key Decisions
 - The `_library_root` autouse fixture points `BOOKRAG_LIBRARY_ROOT` at a

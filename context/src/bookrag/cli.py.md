@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-15T14:49:45Z
-source_hash: a7a979a549d73e4f5f8a0210150e34c8e07236fa
+last_synced: 2026-09-15T15:51:06Z
+source_hash: b057a9d59e92e61dacfa353a3b9b55f753d3568d
 ---
 
 ## Purpose
@@ -36,6 +36,15 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
 - `_print_section(header, lines) -> None` — a titled, indented block preceded
   by a blank line. Prints **nothing at all** for an empty `lines`, header
   included; see Key Decisions.
+- `narrator_alias_lines(found: NarratorAliases) -> list[str]` — renders
+  `ingest.vocatives.detect_narrator_aliases`'s result under ingest's "Names for
+  the narrator" section. Returns `[]` for a third-person book, which is most of
+  them, so `_print_section` drops the section entirely and the call site needs
+  no guard. Counts are shown deliberately: they are how a reader separates a
+  real alias from a stray match, and on a real book the gap is stark (34
+  against 2). The wording stays at *candidates* and names no consequence,
+  because nothing is applied and a three-party scene can put a bystander's
+  title in the list.
 - `next_step_lines(book_id, chapter_count) -> list[str]` — the post-ingest
   guidance (the `extract` command, the `--log`/follow recipe, that Ctrl+C is
   safe, the `--provider fake` path). Returns lines so `_print_section` owns
