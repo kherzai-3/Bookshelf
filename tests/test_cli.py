@@ -8,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from bookrag.cli import _print_progress, _Tee, _use_utf8_output, default_log_path, main
+from bookrag.cli import (
+    _print_progress,
+    _Tee,
+    _use_utf8_output,
+    default_log_path,
+    extract_start_notes,
+    main,
+)
 from bookrag.extract.resolve import load_entities, save_entities
 from bookrag.storage import load_chapters
 from tests.helpers import build_fragmented_epub, build_narrative_epub, build_sample_epub
@@ -328,6 +335,52 @@ def test_extract_prints_a_resuming_message_after_an_interruption(
     output = capsys.readouterr().out
     assert exit_code == 0
     assert f"Resuming '{book_dir.name}' from chapter 1" in output
+
+
+def test_extract_announces_the_run_before_the_first_chapter_completes(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A real user reported a fresh extract as a frozen run. It wasn't: nothing
+    was printed until chapter 1 finished, and on a cold start that is a model
+    load plus a full chapter of inference - one to five minutes of silence.
+
+    The banner has to come out *before* the first per-chapter progress line, so
+    assert on the ordering rather than merely on its presence."""
+    epub_path = tmp_path / "sample.epub"
+    build_sample_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    capsys.readouterr()  # discard the ingest output
+
+    exit_code = main(["extract", book_dir.name, "--provider", "fake"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    chapter_count = len(load_chapters(book_dir.name))
+    assert f"Extracting '{book_dir.name}' - {chapter_count} chapter(s)" in output
+    assert "Silence here is normal, not a hang." in output
+    assert output.index("Extracting") < output.index("chapter done")
+
+
+def test_extract_start_notes_name_the_model_and_omit_it_when_unknown() -> None:
+    """The provider identity is worth stating up front - it is the one thing a
+    resumed run can later refuse over - but `extraction_identity` returns None
+    for a provider that doesn't offer one, and "via None" would be worse than
+    saying nothing at all."""
+
+    class _Identified:
+        def extraction_identity(self):
+            return "ollama:qwen2.5:7b-instruct"
+
+    named = extract_start_notes("some-book", 75, 0, _Identified())
+    assert "via ollama:qwen2.5:7b-instruct" in named[0]
+
+    anonymous = extract_start_notes("some-book", 75, 0, object())
+    assert "via" not in anonymous[0]
+    assert "None" not in anonymous[0]
+
+    resumed = extract_start_notes("some-book", 75, 31, _Identified())
+    assert "44 remaining chapter(s)" in resumed[0]
 
 
 def test_eval_with_fake_provider(tmp_path: Path, _library_root: Path) -> None:
@@ -683,6 +736,10 @@ def test_extract_refuses_a_model_mismatch_before_announcing_a_resume(
     assert f"Resuming '{book_dir.name}'" not in out
     assert "ollama:qwen2.5:7b-instruct" in out and "ollama:llama3.2:3b" in out
     assert "--restart" in out
+    # The start-of-run banner must be held back by the same refusal, for the
+    # same reason as the "Resuming" line - a refused run never starts, so
+    # announcing what it is about to extract is exactly as wrong.
+    assert "Extracting" not in out
     assert _NeverCalledProvider.calls == 0
     # Progress left exactly as it was - a refusal must not be destructive.
     assert json.loads(progress_path.read_text(encoding="utf-8"))["provider"] == "ollama:qwen2.5:7b-instruct"

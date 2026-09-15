@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
-last_synced: 2026-09-13T18:15:00Z
-source_hash: f84d3bf8fbb71d913e33048de7baa00ca51959dc
+last_synced: 2026-09-15T13:19:07Z
+source_hash: e69944fe06b00ecb7470460148852f5db0259fbc
 ---
 
 ## Purpose
@@ -43,7 +43,18 @@ Also covers, added since the above:
 - **Model-mismatch refusal at the CLI boundary**
   (`test_extract_refuses_a_model_mismatch_before_announcing_a_resume`): the
   check must run *before* the "Resuming ..." line is printed, so the user is
-  never told a resume is happening that is then refused.
+  never told a resume is happening that is then refused. It now also asserts
+  `"Extracting" not in out` — the start-of-run banner has to be withheld by
+  the same refusal, for the same reason.
+- **The start-of-run banner**
+  (`test_extract_announces_the_run_before_the_first_chapter_completes`):
+  asserts on the *ordering* (`output.index("Extracting") <
+  output.index("chapter done")`), not merely that the banner appears — its
+  whole purpose is being emitted before the first chapter's silence, so a test
+  that only checked presence would pass even if it printed at the end.
+  `test_extract_start_notes_name_the_model_and_omit_it_when_unknown` covers
+  the identity clause directly: present for a provider that offers one, and
+  absent (never `"via None"`) for the many minimal test doubles that don't.
 - **The ETA denominator** (`test_progress_estimate_ignores_chapters_an_earlier_
   run_already_did`, `..._on_a_fresh_run_counts_every_completed_chapter`): a
   resumed run must divide elapsed time by chapters *this* run did, not by the

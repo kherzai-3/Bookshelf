@@ -25,7 +25,7 @@ from bookrag.library import (
     show_book,
     split_cross_book_entity,
 )
-from bookrag.providers.base import model_placement
+from bookrag.providers.base import extraction_identity, model_placement
 from bookrag.providers.registry import get_provider
 from bookrag.query import facts_as_of, format_context, select_relevant_facts
 from bookrag.storage import incoming_root, library_root, load_chapters, load_metadata, save_book
@@ -383,6 +383,11 @@ def _run_extract(args: argparse.Namespace) -> int:
             return 1
         if 0 < start_index < chapter_count:
             print(f"Resuming '{args.book_id}' from chapter {start_index}")
+        # After the refusal above, never before it - see resume_blocker's
+        # comment. Announcing a run that is about to be refused is exactly the
+        # confusion this is meant to remove.
+        for line in extract_start_notes(args.book_id, chapter_count, start_index, provider):
+            print(line, flush=True)
         result = extract_book(
             args.book_id,
             provider,
@@ -730,6 +735,39 @@ def sanity_summary(chapters: list[Chapter], edge_count: int = 3) -> list[str]:
     if len(chapters) > edge_count:
         lines.append("  last: " + " | ".join(label(c) for c in chapters[-edge_count:]))
     return lines
+
+
+def extract_start_notes(
+    book_id: str, chapter_count: int, start_index: int, provider: object
+) -> list[str]:
+    """What this run is about to do, said *before* the first chapter instead of
+    after it.
+
+    Until this existed a fresh `bookrag extract` printed nothing at all until
+    chapter 1 finished, and two slow things happen first, both silent: Ollama
+    loads several GB of weights on a cold start, then the chapter itself runs
+    (60s at best measured, minutes on CPU). The resulting one-to-five-minute
+    silence was reported by a real user as a frozen run, which is precisely
+    what it looks like from the outside.
+
+    Nothing about the run changed - only when it says so. Printed with
+    `flush=True` like the per-chapter progress, because a backgrounded run's
+    stdout is block-buffered and an unflushed banner would sit in the buffer
+    for minutes, reproducing the exact bug it exists to fix.
+    """
+    remaining = chapter_count - start_index
+    identity = extraction_identity(provider)
+    via = f" via {identity}" if identity else ""
+    if start_index > 0:
+        headline = f"Extracting {remaining} remaining chapter(s) of '{book_id}'{via}"
+    else:
+        headline = f"Extracting '{book_id}' - {chapter_count} chapter(s){via}"
+    return [
+        headline,
+        "  Expect several minutes before the first progress line: the model has to",
+        "  load before chapter 1 starts, and a chapter then takes minutes on CPU.",
+        "  Silence here is normal, not a hang.",
+    ]
 
 
 def _progress_and_placement(start_time: float, start_index: int, provider: object):

@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-13T19:30:00Z
-source_hash: 7ac49710c05a85099dd5a5d49e5fb33098e10ae4
+last_synced: 2026-09-15T13:19:07Z
+source_hash: 14fcf5b3caacf1e944d8b719fe9fa128888e61ef
 ---
 
 ## Purpose
@@ -33,6 +33,13 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   where the model is running (fully on GPU / partially / CPU-only), or `[]`
   when it can't be determined. Reported once per run by
   `_progress_and_placement`, after the first completed chapter.
+- `extract_start_notes(book_id, chapter_count, start_index, provider) ->
+  list[str]` — what the run is about to do, printed *before* the first chapter
+  rather than after it. Names the book, how many chapters this call will
+  process (the remaining count on a resumed run, not the book total), and the
+  provider identity when the provider offers one — `via None` would be worse
+  than saying nothing, so an unidentified provider simply omits the clause.
+  See Key Decisions for the user-reported bug this exists for.
 - `follow_commands(log_path) -> list[str]` — the shell command(s) for watching
   a log grow on this platform. Windows returns both `tail -f` (Git Bash, where
   this project is actually developed) and `Get-Content -Wait` (PowerShell);
@@ -108,6 +115,26 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   `library.merge_entities` for exactly what each flag changes.
 
 ## Key Decisions
+- **`extract` announces the run before starting it, not after the first
+  chapter.** A real user reported a fresh `bookrag extract` as a frozen run,
+  and from the outside it was indistinguishable from one: the only pre-loop
+  message was the "Resuming…" line, which a first run skips by definition, so
+  nothing at all printed until chapter 1 completed. Two slow things happen
+  first, both silent — Ollama loads several GB of weights on a cold start,
+  then the chapter itself runs (60s at best measured, minutes on CPU) — for a
+  combined one to five minutes of nothing. `extract_start_notes` prints what
+  the run is about to do plus an explicit "silence here is normal, not a
+  hang". The run itself is unchanged; only the timing of what it says.
+  - Printed with `flush=True`, matching the per-chapter progress line. A
+    backgrounded run's stdout is block-buffered, so an unflushed banner would
+    sit in the buffer for minutes and reproduce the exact bug it exists to
+    fix. (`--log`'s `_Tee` flushes on every write regardless; plain `>`
+    redirection does not.)
+  - Emitted **after** `resume_blocker`'s refusal, for the same reason the
+    "Resuming…" line is: a refused run never starts, so announcing what it is
+    about to extract is exactly as wrong. Pinned by
+    `test_extract_refuses_a_model_mismatch_before_announcing_a_resume`, which
+    now asserts the banner is withheld too.
 - **`ingest` ends by printing the next command** (`_print_next_steps`).
   Reported gap: nothing anywhere told a user that ingesting does not extract,
   what to run next, or that the next step takes hours. The guidance names the
