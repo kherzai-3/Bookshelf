@@ -508,7 +508,10 @@ def _chat(args: argparse.Namespace) -> int:
 def _list(args: argparse.Namespace) -> int:
     books = list_books()
     if not books:
-        print("No books in the library yet - use `bookrag ingest <path>` to add one.")
+        # The path is quoted in the hint because this line is read by someone
+        # with an empty library, i.e. the exact person about to type a book
+        # filename with an apostrophe in it for the first time.
+        print('No books in the library yet - use `bookrag ingest "<path>"` to add one.')
         return 0
 
     headers = ["book_id", "title", "author", "chapters", "type", "facts", "series"]

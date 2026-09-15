@@ -210,7 +210,7 @@ One book, start to finish. `bookrag ingest` prints the `book_id` it assigns
 `bookrag list`:
 
 ```bash
-bookrag ingest path/to/some-book.epub
+bookrag ingest "path/to/some-book.epub"   # quote it - see Ingesting a book
 # -> Ingested 'Some Book' as 'some-book' (12 chapters)
 #    ...then prints the exact extract command to run next, and how to watch it
 
@@ -233,24 +233,43 @@ the suggested staging spot, purely for your own clarity (it's not required by
 the tool, and nothing scans it automatically):
 
 ```bash
-mv ~/Downloads/some-book.epub data/incoming/
+mv ~/Downloads/"Some Book.epub" data/incoming/
 ```
 
+(the `~` stays *outside* the quotes - inside them it's a literal `~`, not your
+home directory)
+
 ```bash
-bookrag ingest data/incoming/some-book.epub
-bookrag ingest path/to/book.pdf --title "Custom Title" --author "Someone"
+bookrag ingest "data/incoming/Some Book.epub"
+bookrag ingest "path/to/book.pdf" --title "Custom Title" --author "Someone"
 
 # books in a series: chapters are always scoped per-book, so two books can
 # each have their own "chapter 2" without collision. --series-position is
 # required whenever --series is given.
-bookrag ingest book1.epub --series "The Saga" --series-position 1
-bookrag ingest book2.epub --series "The Saga" --series-position 2
+bookrag ingest "book1.epub" --series "The Saga" --series-position 1
+bookrag ingest "book2.epub" --series "The Saga" --series-position 2
 
 # self-help, philosophy, or other non-narrative books - selects a different
 # category/entity taxonomy for extraction (see below). Defaults to
 # "fiction" - not auto-detected, so this must be passed explicitly.
-bookrag ingest atomic-habits.epub --content-type nonfiction
+bookrag ingest "atomic-habits.epub" --content-type nonfiction
 ```
+
+**Quote the path.** Book filenames routinely contain spaces and apostrophes,
+and an unquoted apostrophe is the worse of the two: in PowerShell it opens a
+string literal that never closes, so the command is never run at all. You get
+a `>>` continuation prompt and something that looks exactly like a hung
+ingest - but nothing has started, which is why `ollama ps` shows nothing
+either. Ctrl+C, then re-run with double quotes:
+
+```bash
+bookrag ingest "data/incoming/Ranger's Apprentice.epub"
+```
+
+Dragging the file from Explorer (or Finder) into the terminal pastes the path
+already quoted, which is the easiest way to never think about this again. For
+reference, a real ingest takes about a second, even for a 70 MB file - if it
+is still going after ten, something other than parsing is wrong.
 
 **Fiction vs. nonfiction content:** `bookrag extract`'s category/entity
 taxonomy is fundamentally different depending on `--content-type`, because

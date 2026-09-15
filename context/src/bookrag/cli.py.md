@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-15T13:19:07Z
-source_hash: 14fcf5b3caacf1e944d8b719fe9fa128888e61ef
+last_synced: 2026-09-15T13:37:32Z
+source_hash: b8cfbc4fb0546fc7b55114e965ff4ca525c0a175
 ---
 
 ## Purpose
@@ -135,6 +135,16 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
     about to extract is exactly as wrong. Pinned by
     `test_extract_refuses_a_model_mismatch_before_announcing_a_resume`, which
     now asserts the banner is withheld too.
+- **Every path in a printed hint is quoted, deliberately.** `bookrag list`'s
+  empty-library hint says ``bookrag ingest "<path>"``, with the quotes. Book
+  filenames routinely contain apostrophes, and an unquoted apostrophe in
+  PowerShell opens a string literal that never closes - the command then never
+  runs at all, leaving a `>>` continuation prompt that is indistinguishable
+  from a hung ingest. A real user lost an afternoon to exactly this, and
+  `ollama ps` showing nothing was the confirming signal rather than a second
+  mystery. The hint is read by someone with an empty library, i.e. precisely
+  the person about to type their first book filename. Same change in
+  `install.py`'s post-install instructions and throughout `README.md`.
 - **`ingest` ends by printing the next command** (`_print_next_steps`).
   Reported gap: nothing anywhere told a user that ingesting does not extract,
   what to run next, or that the next step takes hours. The guidance names the

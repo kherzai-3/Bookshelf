@@ -595,7 +595,10 @@ def print_next_steps():
     print("\nActivate the environment:")
     print("  " + activate)
     print("\nThen try a book end to end (--provider fake needs no model):")
-    print("  bookrag ingest path/to/some-book.epub")
+    # Quoted deliberately: book filenames routinely contain apostrophes, and an
+    # unquoted one leaves PowerShell at a >> continuation prompt that looks
+    # exactly like a hang. This line is the first command a new user copies.
+    print('  bookrag ingest "path/to/some-book.epub"')
     print("  bookrag extract <book-id> --provider fake")
     print("  bookrag chat <book-id> --chapter 3 --question \"Who is who?\"")
     print("\nSee README.md for the full reference.")
