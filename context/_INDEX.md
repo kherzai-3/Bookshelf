@@ -43,6 +43,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [tests/test_fake_provider.py](../tests/test_fake_provider.py.md) — covers `FakeProvider`'s deterministic extraction.
 - [tests/test_extraction_pipeline.py](../tests/test_extraction_pipeline.py.md) — covers `extract_book`, including series entity-seeding.
 - [tests/test_query.py](../tests/test_query.py.md) — covers `facts_as_of`'s spoiler-safety guarantee across a series.
+- [tests/test_spoiler_safety.py](../tests/test_spoiler_safety.py.md) — the ship gate: end-to-end proof that a chapter-N render contains nothing from, and derives nothing from, past chapter N.
 - [tests/test_eval.py](../tests/test_eval.py.md) — covers `groundedness_score`, `run_eval`'s read-only guarantee, and `summarize`.
 - [tests/test_ingestion_report.py](../tests/test_ingestion_report.py.md) — covers `classify_ingestion`/`write_ingestion_report`.
 - [tests/test_parsing.py](../tests/test_parsing.py.md) — covers `providers.parsing.parse_facts`.

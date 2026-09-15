@@ -628,6 +628,33 @@ pytest tests/ -v
 (with the venv activated - see Setup - or `.venv\Scripts\python.exe -m pytest tests/ -v` /
 `.venv/bin/python -m pytest tests/ -v` if not)
 
+### The spoiler-safety gate
+
+`tests/test_spoiler_safety.py` is not an ordinary test module. Everything else
+here exists so that an answer about chapter N is safe for someone who has only
+read to chapter N, and these are the tests that say it actually is. They run
+the whole real path a `bookrag chat` turn runs, because a leak is far more
+often an interaction *between* the query steps than a bug inside one of them.
+
+Two of them carry the guarantee, and they fail for different reasons:
+
+- **The sentinel test** gives every chapter a token that appears nowhere else,
+  then checks every reading position against every retrieval path. When it
+  fails it tells you exactly which chapter escaped into which render.
+- **The truncated-library equivalence test** renders chapter N twice - once
+  from a library holding the whole book, once from a library that never held
+  anything past chapter N - and requires the two to be byte-identical. It has
+  no idea what a leak looks like, which is why it catches the kinds a sentinel
+  cannot: a count in a header, a relevance score computed over facts the reader
+  hasn't reached, an ordering that shifts once a later chapter exists.
+
+Both were sabotage-verified, and the second sabotage is the reason both exist:
+making the render leak a *number* derived from the whole book - copying no text
+at all - leaves the sentinel test passing and fails equivalence everywhere.
+
+**If you add a new way to render facts to a reader, extend these.** Equivalence
+only guards what it is pointed at.
+
 ## Known limitations
 
 - **Epub chapter detection** splits each spine document by heading
@@ -959,8 +986,12 @@ pytest tests/ -v
   Requested as a way to ask "who is in this book?" without naming anyone
   first. Today every fact hangs off one entity and there is no book-level
   layer at all (`metadata.json` holds only bibliographic fields). **This is
-  the most spoiler-dangerous idea on this list and must not be built before
-  the spoiler-safety tests below.** "Antagonist" and "main plotline" are
+  the most spoiler-dangerous idea on this list.** It was gated on the
+  spoiler-safety tests, which now exist (`tests/test_spoiler_safety.py`, see
+  "Running tests") - so the gate is open, but extending those tests to cover
+  whatever new render surface this adds is part of building it, not a
+  follow-up: equivalence only guards what it is pointed at.
+  "Antagonist" and "main plotline" are
   close to a definition of what spoils a book: a cast list rendered at
   chapter 3 that names the chapter-60 villain is a leak, and so is an
   antagonist field that is populated at all before the reader meets them.

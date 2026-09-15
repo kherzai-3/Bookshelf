@@ -5,7 +5,11 @@ source_hash: d42480d94e2cdf1e2970148e474534fe1e57fc42
 ---
 
 ## Purpose
-The load-bearing test for the project's core promise: `facts_as_of` never
+Unit coverage of the three query primitives in isolation. The end-to-end ship
+gate over all three composed together lives in `tests/test_spoiler_safety.py`;
+this module is where each function's own behaviour is pinned.
+
+The load-bearing part: `facts_as_of` never
 leaks a fact from beyond the given `(book_id, chapter_index)`. Covers a
 standalone book (chapter-by-chapter filtering), a series book querying an
 earlier chapter (all of an earlier series book counts as "in the past"),

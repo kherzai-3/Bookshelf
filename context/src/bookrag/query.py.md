@@ -60,7 +60,15 @@ plain-text context `cli.py`'s `chat` command hands to a provider's
 - Tested explicitly for the failure mode that matters most:
   `tests/test_query.py::test_facts_as_of_does_not_leak_a_later_book_in_the_series`
   and `..._never_returns_a_fact_past_the_given_chapter` - these are the
-  actual spoiler-safety guarantee, not incidental coverage.
+  actual spoiler-safety guarantee, not incidental coverage. **Those cover
+  `facts_as_of` in isolation; `tests/test_spoiler_safety.py` is the ship gate
+  over all three functions in this file composed together** (the order
+  `cli.py`'s chat loop calls them), because the dangerous leak is the one a
+  *later* step derives from what an earlier step correctly filtered out -
+  which is exactly why `_facts_matching_question_text` computes rarity over
+  the passed-in facts and never the whole book. Its truncated-library
+  equivalence test is what catches a derived-value leak of that shape; a
+  content-matching test cannot.
 - **`select_relevant_facts` is a cheap, dependency-free retrieval layer,
   not real semantic/embedding search** (see README's Future ideas for
   that, still not built). Matching: case-insensitive substring against an
