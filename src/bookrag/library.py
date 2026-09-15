@@ -322,12 +322,21 @@ def _title_variant_pairs(members: list[dict]) -> list[tuple[str, str, str]]:
     rule available and the only one that needs no guards beyond a non-empty
     remainder: it compares what is left *after* the title, so two people who
     merely share a rank ("King Duncan", "King Swyddned") never collide."""
-    by_stripped: dict[tuple[str, str], list[dict]] = {}
+    by_stripped: dict[str, list[dict]] = {}
     for entity in members:
+        # Characters only, for the same reason containment is. An honorific in
+        # front of a *person's* name leaves the person unchanged; in front of a
+        # concept it is part of the term. Found latent in the real library:
+        # "Master Player" in a book about finite and infinite games strips to
+        # "Player", and a master player is emphatically not a player. It has
+        # never fired only because no bare "Player" entity exists yet - a
+        # re-extraction could create one at any time.
+        if entity["type"] != "character":
+            continue
         stripped = _strip_titles(entity["canonical_name"])
         if len(stripped) < 3:
             continue
-        by_stripped.setdefault((entity["type"], match_key(stripped)), []).append(entity)
+        by_stripped.setdefault(match_key(stripped), []).append(entity)
 
     pairs = []
     for group in by_stripped.values():

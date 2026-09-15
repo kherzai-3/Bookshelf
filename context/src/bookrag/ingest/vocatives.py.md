@@ -107,5 +107,27 @@ the narrator" section.
   fragmentation never forms, rather than repairing it afterwards with
   `doctor --merge-name-variants`. That needs a confirmation surface first -
   this reports candidates and applies nothing.
+- **A generic epithet must not become a retrieval alias, and this is measured,
+  not feared.** `query.select_relevant_facts` matches a question against an
+  entity's aliases by case-insensitive *substring*, so an alias of "boy" makes
+  every question containing the word "boy" retrieve that character's entire
+  fact set. Simulated on the real library by giving Will the aliases
+  `["boy", "lad"]`:
+
+  | question | retrieved | verdict |
+  |---|---|---|
+  | "Who is the boy?" | 284 facts, Will | right, and the whole point |
+  | "What did Halt teach the boy?" | 445 facts, Halt + Will | right |
+  | "Describe the Skandian boy" | 294 facts, Skandians + **Will** | **wrong** |
+
+  The last row is the failure: "the Skandian boy" is a different boy, and the
+  epithet dragged in the protagonist. The same hazard is worse in the reported
+  book, where "boy" means the protagonist for four novels and a servant in the
+  fifth. So the two kinds of result this module finds are **not
+  interchangeable**: a name-like alias ("Conn", "Connwaer") is safe to merge
+  and to match on, while a generic epithet ("boy", "lad", "cousin") is good
+  evidence about who is being addressed and a bad retrieval key. Whatever
+  consumes this has to separate them - the obvious split is whether the
+  vocative is a proper noun, which is cheap and already implied by the data.
 - Third-person attribution is unsolved and deliberately out of scope. It needs
   an addressee, which is a different problem from finding a vocative.

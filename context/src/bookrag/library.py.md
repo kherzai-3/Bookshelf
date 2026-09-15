@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/library.py
-last_synced: 2026-09-15T14:49:45Z
-source_hash: 33bc218aa163f3e724e4941e1e932ef8d6151491
+last_synced: 2026-09-15T16:05:24Z
+source_hash: 961549edfd01d38596e241f212c5a0bdfd488a12
 ---
 
 ## Purpose
@@ -239,6 +239,15 @@ by reasoning about what ought to work** - the survey lives at
    "Arald". 10 candidates on real data, **10/10 correct**. Needs almost no
    guarding because it compares the remainder *after* stripping the title, so
    two people sharing a rank ("King Duncan", "King Swyddned") never collide.
+   **Characters only**, for the same reason containment is: an honorific in
+   front of a *person's* name leaves the person unchanged, but in front of a
+   concept it is part of the term. Found latent in the real library while
+   checking nonfiction safety - "Master Player" in *Finite and Infinite Games*
+   strips to "Player", and a master player is emphatically not a player. It had
+   never fired only because no bare "Player" entity exists yet; a re-extraction
+   could create one at any time. Restricting to characters costs nothing
+   measured: all 10 real hits were characters, and the real library still
+   yields the same 16 clusters after the restriction.
    `_TITLES` is a closed list plus `_MASTER_RANK`, a shape rule for the
    productive `-master` compound (Battlemaster, Craftmaster, Harbourmaster) so
    that part isn't overfitted to one book's vocabulary.
@@ -284,6 +293,24 @@ bug showing through.
 and cross-book splits: merging picks a winner and permanently rewrites fact
 ownership. `bookrag doctor --merge-name-variants` applies it, per cluster,
 with the reason shown before the question.
+
+**Retrieval effect, measured end to end** on a copy of the real library
+(before → after applying all 16 clusters), which is the only thing that makes
+this feature worth anything:
+
+| question | before | after |
+|---|---|---|
+| "Tell me about Arald" | 10 facts | **49 facts** |
+| "Tell me about David" | 1 fact | **11 facts** |
+| "Who is Baron Tyler?" | 6 facts, Tyler only | 6 facts, Tyler only |
+| "What is Baron Fergus like?" | 5 facts, Fergus only | 6 facts, Fergus only |
+
+The two control questions are the point: merging Arald does **not** drag the
+other barons in. Entity matching is per-entity and the merged aliases are full
+names, so "Baron Tyler" never matches Arald's record. (A separate entity
+literally named "The Baron" does match any question containing "baron" - that
+is `select_relevant_facts`'s substring tier being generous, and predates all
+of this.)
 
 **Open question deliberately left:** epithets ("the boy", "bird" for Conn)
 are out of reach of all three rules, since they share no string relationship

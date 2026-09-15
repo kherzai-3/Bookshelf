@@ -692,6 +692,30 @@ only guards what it is pointed at.
 
 ## Known limitations
 
+- **`bookrag remove` deletes your copy of the book, and doesn't say so.**
+  Open, and the most damaging item on this list. `ingest` effectively *moves*
+  a staged file: it copies into `data/library/<book_id>/source.epub` and then
+  deletes the original from `data/incoming/`. The library copy is therefore
+  the only copy. `remove` then deletes the whole directory, warning only that
+  "this deletes its chapters/facts permanently" — it never mentions the book
+  itself. So ingest-then-remove silently destroys the user's file, having
+  warned them about the wrong thing. Found the hard way during development,
+  on a book that had to be re-downloaded. Four options, not yet chosen:
+  1. **Warn accurately.** Name `source.epub` in `remove`'s prompt and say the
+     book file goes with it. Cheapest, changes no behaviour, and still loses
+     the file for anyone who types `--yes`.
+  2. **Restore on remove.** Move `source.*` back to `data/incoming/` instead of
+     deleting it. The book survives, the library ends up clean, and the file
+     lands where the user originally put it. Slightly surprising if they
+     expected `remove` to remove things.
+  3. **Copy at ingest, don't move.** Leave the staged file alone. Safest, but
+     it abandons a deliberate convenience (`data/incoming/` stops being a
+     staging area and becomes a pile), and duplicates every book on disk.
+  4. **`ingest --keep-source`.** Opt-in version of 3. No protection by default,
+     which is the case that actually bit.
+  2 or 1+2 look best; 2 alone means no prompt has to be read at the moment it
+  matters.
+
 - **Epub chapter detection** splits each spine document by heading
   (`h1`/`h2`/`h3`) when it has more than one, which fixes books that bundle
   many chapters per file (e.g. Project Gutenberg), but front/back matter

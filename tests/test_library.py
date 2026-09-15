@@ -446,6 +446,11 @@ def test_detect_name_variants_leaves_concepts_alone(tmp_path: Path) -> None:
             ("concept-c", "Game", "concept"),
             ("concept-d", "Temptation Bundling", "concept"),
             ("concept-e", "Temptation", "concept"),
+            # Found latent in the real library: an honorific in front of a
+            # person's name leaves the person alone, but in front of a concept
+            # it is part of the term. A master player is not a player.
+            ("concept-f", "Master Player", "concept"),
+            ("concept-g", "Player", "concept"),
         ],
     )
 
