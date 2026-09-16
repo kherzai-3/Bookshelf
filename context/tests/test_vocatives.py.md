@@ -1,7 +1,7 @@
 ---
 source: tests/test_vocatives.py
-last_synced: 2026-09-15T16:39:28Z
-source_hash: 560fac8fadbc7add05f4f2e6b68970ef783dea9b
+last_synced: 2026-09-16T19:53:59Z
+source_hash: 4b213453ef5a13cdda0cf780d9f3a86187f2dab4
 ---
 
 ## Purpose
@@ -55,3 +55,9 @@ Nine tests plus `_I_NARRATE` / `_HE_NARRATES` narration fixtures and the
   It is documented in the source and in the module's context doc but not
   pinned, because pinning it would assert the *wrong* answer as expected
   behaviour. It should become a test the moment the behaviour is fixed.
+
+## `_by_name` helper
+`detect_narrator_aliases` now returns `AliasCandidate` objects rather than
+`(name, count)` tuples, because auto-linking needs the surface form and the
+capitalisation count. `_by_name(found)` lowercases back to `{name: count}` for
+the tests that do not care; the ones that do assert on the dataclass directly.

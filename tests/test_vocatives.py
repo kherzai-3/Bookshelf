@@ -31,6 +31,14 @@ _HE_NARRATES = (
 )
 
 
+def _by_name(found) -> dict[str, int]:
+    """`{name: times addressed}`, lowercased. The detector now keeps the surface
+    form the book used (so a linked alias reads like the book rather than a
+    lowercased token), which these tests mostly don't care about - the ones that
+    do assert on `AliasCandidate` directly."""
+    return {c.name.lower(): c.times_addressed for c in found.aliases}
+
+
 def _chapter(index: int, narration: str, *dialogue: str) -> Chapter:
     return Chapter(index, f"Chapter {index}", narration + " " + " ".join(dialogue))
 
@@ -54,7 +62,7 @@ def test_what_other_characters_call_the_narrator_becomes_an_alias() -> None:
     found = detect_narrator_aliases(chapters)
 
     assert found.is_first_person
-    assert dict(found.aliases) == {"boy": 2, "conn": 2}
+    assert _by_name(found) == {"boy": 2, "conn": 2}
 
 
 def test_what_the_narrator_calls_other_people_is_not_an_alias() -> None:
@@ -65,7 +73,7 @@ def test_what_the_narrator_calls_other_people_is_not_an_alias() -> None:
 
     found = detect_narrator_aliases(chapters)
 
-    assert dict(found.aliases) == {"boy": 2}
+    assert _by_name(found) == {"boy": 2}
     assert dict((name, count) for name, count in found.addressed_by_narrator) == {"nevery": 3}
 
 
@@ -96,8 +104,8 @@ def test_a_third_person_chapter_inside_a_first_person_book_contributes_nothing()
     found = detect_narrator_aliases(chapters)
 
     assert found.first_person_chapters == [0]
-    assert dict(found.aliases) == {"boy": 2}
-    assert "servant" not in dict(found.aliases)
+    assert _by_name(found) == {"boy": 2}
+    assert "servant" not in _by_name(found)
 
 
 def test_curly_single_quotes_are_found_too() -> None:
@@ -113,7 +121,7 @@ def test_curly_single_quotes_are_found_too() -> None:
     found = detect_narrator_aliases(chapters)
 
     assert found.quote_style == "curly single"
-    assert dict(found.aliases) == {"boy": 3}
+    assert _by_name(found) == {"boy": 3}
 
 
 def test_a_name_the_narrator_uses_for_others_more_often_is_dropped() -> None:
@@ -142,7 +150,7 @@ def test_a_single_sighting_is_not_evidence() -> None:
 
     found = detect_narrator_aliases(chapters)
 
-    assert dict(found.aliases) == {"boy": 2}
+    assert _by_name(found) == {"boy": 2}
 
 
 def test_an_interjection_before_a_comma_is_not_a_name() -> None:
@@ -154,7 +162,7 @@ def test_an_interjection_before_a_comma_is_not_a_name() -> None:
         _chapter(1, _I_NARRATE, *([_said_by_another("Come along, boy.")] * 2)),
     ]
 
-    assert dict(detect_narrator_aliases(chapters).aliases) == {"boy": 2}
+    assert _by_name(detect_narrator_aliases(chapters)) == {"boy": 2}
 
 
 def test_a_candidate_who_also_speaks_is_another_character() -> None:
@@ -184,7 +192,7 @@ def test_a_candidate_who_also_speaks_is_another_character() -> None:
 
     found = detect_narrator_aliases(chapters)
 
-    assert dict(found.aliases) == {"boy": 2}
+    assert _by_name(found) == {"boy": 2}
     assert [name for name, _, _ in found.speakers] == ["trammel"]
 
 
@@ -197,4 +205,4 @@ def test_front_matter_is_not_judged_for_narration() -> None:
     found = detect_narrator_aliases(chapters)
 
     assert found.chapters_considered == 1
-    assert dict(found.aliases) == {"boy": 2}
+    assert _by_name(found) == {"boy": 2}

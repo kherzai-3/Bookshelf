@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/library.py
-last_synced: 2026-09-15T16:39:28Z
-source_hash: 05fd3fca4e10cb3193d196243a81282e79e53a43
+last_synced: 2026-09-16T19:53:59Z
+source_hash: 397b596680c3790a02edd5c42eea824427db2afd
 ---
 
 ## Purpose
@@ -355,3 +355,20 @@ name, which is O(text) rather than O(pairs²) and would catch epithets. It was
 dropped because "Will, known as the Ranger's apprentice" yields the pair
 (Will, Ranger) from a sentence that asserts nothing of the kind; the string
 relationship is what currently makes the text evidence trustworthy.
+
+## `link_names` / `unlink_names`
+- `link_names(book_id, names, root, epithets, reason) -> LinkResult` — declares
+  a name set to be one character. **Before extraction** it seeds, so the split
+  never forms; **after** it merges whatever entities already hold those names,
+  reusing `merge_entities`, because a real extraction costs hours and arriving
+  late must not mean starting over. Uses `resolve.seed_alias_group` for the
+  create-or-extend path so it and `extract_book` cannot disagree about what a
+  linked entity looks like. `names` and `epithets` stay separate all the way
+  down - see the two-list rule in `extract/resolve.py`'s context doc.
+- `unlink_names(book_id, root) -> list[str]` — the escape hatch that makes
+  automatic linking acceptable. A heuristic will sometimes be wrong, and
+  "wrong and permanent" is a different proposition from "wrong and one command
+  away". **Separates names, never facts**: already-written facts keep the
+  `entity_id` they were given, and only a re-extraction can re-decide that.
+  `entity_name` on new fact records (see `extract/pipeline.py`) is what would
+  make a real splitter possible; it is not built yet.

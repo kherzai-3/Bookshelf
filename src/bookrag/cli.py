@@ -16,7 +16,7 @@ from bookrag.extract.pipeline import extract_book, resume_blocker, resume_start_
 from bookrag.ingest import epub_loader, pdf_loader
 from bookrag.ingest.chapter import Chapter
 from bookrag.ingest.consolidate import consolidate_fragments, should_consolidate
-from bookrag.ingest.vocatives import NarratorAliases, detect_narrator_aliases
+from bookrag.ingest.vocatives import NarratorAliases, auto_link_plan, detect_narrator_aliases
 from bookrag.library import (
     detect_duplicate_entities,
     link_names,
@@ -26,11 +26,19 @@ from bookrag.library import (
     run_doctor,
     show_book,
     split_cross_book_entity,
+    unlink_names,
 )
 from bookrag.providers.base import extraction_identity, model_placement
 from bookrag.providers.registry import get_provider
 from bookrag.query import facts_as_of, format_context, select_relevant_facts
-from bookrag.storage import incoming_root, library_root, load_chapters, load_metadata, save_book
+from bookrag.storage import (
+    incoming_root,
+    library_root,
+    load_chapters,
+    load_declared_aliases,
+    load_metadata,
+    save_book,
+)
 from bookrag.titles import guess_title_author
 
 LOADERS = {
@@ -90,6 +98,11 @@ def main(argv: list[str] | None = None) -> int:
         choices=["fiction", "nonfiction"],
         default="fiction",
         help="Selects the extraction category/entity taxonomy used later by 'extract' - not auto-detected",
+    )
+    ingest.add_argument(
+        "--no-auto-link",
+        action="store_true",
+        help="Report the narrator's other names without linking them (produces the unlinked baseline)",
     )
 
     extract = subparsers.add_parser("extract", help="Extract character/setting/theme facts for a book")
@@ -163,6 +176,16 @@ def main(argv: list[str] | None = None) -> int:
         metavar="NAME,NAME,...",
         help="Declare these names to be one character. Run this BEFORE extract and the facts "
         "never fragment; run it after and any entities holding those names are merged.",
+    )
+    aliases.add_argument(
+        "--auto",
+        action="store_true",
+        help="Apply the same automatic linking ingest does, to a book already in the library",
+    )
+    aliases.add_argument(
+        "--unlink",
+        action="store_true",
+        help="Undo the declared links for this book (the entity keeps its facts; only the names are separated)",
     )
 
     doctor = subparsers.add_parser("doctor", help="Check the library for consistency issues (read-only by default)")
@@ -278,7 +301,9 @@ def _ingest(args: argparse.Namespace) -> int:
 
     _print_section("Parsing", parse_notes)
     _print_section("Sanity check", sanity_summary(chapters))
-    _print_section("Names for the narrator", narrator_alias_lines(detect_narrator_aliases(chapters)))
+    found = detect_narrator_aliases(chapters)
+    _print_section("Names for the narrator", narrator_alias_lines(found))
+    _print_section("Linked", auto_link_narrator(book_id, found, enabled=not args.no_auto_link))
 
     report_path = write_ingestion_report(
         book_id, chapters, raw_chapter_count=raw_chapter_count if raw_chapter_count != len(chapters) else None
@@ -286,6 +311,44 @@ def _ingest(args: argparse.Namespace) -> int:
     _print_section("Files", [f"wrote {report_path}", *_incoming_cleanup_notes(args.path)])
     _print_section("Next steps", next_step_lines(book_id, len(chapters)))
     return 0
+
+
+def auto_link_narrator(book_id: str, found: NarratorAliases, enabled: bool = True) -> list[str]:
+    """Link the narrator's names at the end of ingest, without asking.
+
+    **This is what makes the detection worth running at all.** A reader's flow
+    is download, drop in `data/incoming/`, ingest, extract - nothing in it goes
+    near a linking command, so a feature that waits to be invoked is invisible,
+    which is exactly the fault of `doctor --merge-name-variants`. An
+    interactive prompt was tried and is wrong for a different reason: it needs
+    a person present who can judge a book's cast, per book.
+
+    Says what it did and how to undo it, because this is an automatic mutation
+    driven by a heuristic. `auto_link_plan` is deliberately conservative and
+    returns nothing for most books.
+    """
+    if not enabled:
+        return ["skipped (--no-auto-link)"] if found.aliases else []
+    names, epithets = auto_link_plan(found)
+    if not names:
+        return []
+
+    result = link_names(
+        book_id,
+        names,
+        epithets=epithets,
+        reason="detected at ingest: addressed to a first-person narrator",
+    )
+    lines = [f"'{result.canonical_name}' also answers to {', '.join(result.aliases)}"]
+    if result.epithets:
+        lines.append(f"  and is referred to as {', '.join(result.epithets)}")
+    lines.extend(
+        [
+            "  Their facts will be catalogued as one character instead of several.",
+            f"  Wrong? `bookrag aliases {book_id} --unlink` undoes it, before or after extraction.",
+        ]
+    )
+    return lines
 
 
 def narrator_alias_lines(found: NarratorAliases) -> list[str]:
@@ -434,7 +497,10 @@ def _run_extract(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        chapter_count = len(load_chapters(args.book_id))
+        # Kept, not just counted: unlinked_narrator_warning needs the text to
+        # tell whether this book has a split character about to be baked in.
+        chapters = load_chapters(args.book_id)
+        chapter_count = len(chapters)
         start_index = resume_start_index(args.book_id, restart=args.restart, chapter_count=chapter_count)
         # Asked before the "Resuming..." line below, so a refusal never
         # follows an announcement that the run is under way.
@@ -448,6 +514,8 @@ def _run_extract(args: argparse.Namespace) -> int:
         # comment. Announcing a run that is about to be refused is exactly the
         # confusion this is meant to remove.
         for line in extract_start_notes(args.book_id, chapter_count, start_index, provider):
+            print(line, flush=True)
+        for line in unlinked_narrator_warning(args.book_id, chapters):
             print(line, flush=True)
         # Separates the banner from the progress lines that follow it at the
         # same indent, so the two don't read as one block.
@@ -684,9 +752,30 @@ def _aliases(args: argparse.Namespace) -> int:
         print(f"no such book in the library: {args.book_id!r}")
         return 1
 
-    if args.link:
+    if args.unlink:
+        removed = unlink_names(args.book_id)
+        if not removed:
+            print(f"'{args.book_id}' has no declared links to undo.")
+            return 0
+        print(f"Unlinked {', '.join(removed)}.")
+        print("  Already-extracted facts keep whichever entity owns them - the name alone")
+        print("  is separated. Re-run `bookrag extract --restart` for a clean re-extraction.")
+        return 0
+
+    if args.link or args.auto:
+        found = detect_narrator_aliases(chapters)
+        if args.auto:
+            lines = auto_link_narrator(args.book_id, found)
+            if not lines:
+                print(f"Nothing to link automatically for '{args.book_id}'.")
+                print("  Auto-linking needs two names that read as proper nouns AND look like")
+                print("  variants of each other. Run without --auto to see the candidates.")
+                return 0
+            for line in lines:
+                print(line)
+            return 0
         try:
-            result = link_names(args.book_id, args.link.split(","))
+            result = link_names(args.book_id, args.link.split(","), reason="named by hand")
         except ValueError as exc:
             print(f"{exc}")
             return 1
@@ -699,9 +788,20 @@ def _aliases(args: argparse.Namespace) -> int:
             print("  Extraction will now resolve every one of those names to this character.")
         return 0
 
+    declared = load_declared_aliases(args.book_id)
+    if declared:
+        print(f"Already linked for '{args.book_id}':")
+        for group in declared:
+            print(f"  names:    {', '.join(group['names'])}")
+            if group["epithets"]:
+                print(f"  also:     {', '.join(group['epithets'])}")
+            if group["reason"]:
+                print(f"  because:  {group['reason']}")
+        print(f"\n  Undo with: bookrag aliases {args.book_id} --unlink\n")
+
     found = detect_narrator_aliases(chapters)
     if not found.is_first_person:
-        print(f"'{args.book_id}' does not read as first-person narration - nothing to report.")
+        print(f"'{args.book_id}' does not read as first-person narration - nothing to detect.")
         print("  This pass only works where the text says who is speaking to whom. In third")
         print("  person a vocative is still findable, but nothing says who it was aimed at.")
         return 0
@@ -710,26 +810,30 @@ def _aliases(args: argparse.Namespace) -> int:
         return 0
 
     print(f"Names other characters use for the narrator of '{args.book_id}':")
-    for name, count in found.aliases:
-        print(f"  {name:16} {count}x")
+    for candidate in found.aliases:
+        kind = "name" if candidate.reads_as_a_name else "epithet"
+        print(f"  {candidate.name:16} {candidate.times_addressed:4}x   ({kind})")
     if found.speakers:
-        print("\nRejected - these speak as often as they are addressed, so they are other characters:")
+        print()
+        print("Rejected - these speak as often as they are addressed, so they are other characters:")
         for name, addressed, spoken in found.speakers:
             print(f"  {name:16} addressed {addressed}x, speaks {spoken}x")
+    print()
     print(
-        f"\nRead from {len(found.first_person_chapters)} of {found.chapters_considered} chapters"
+        f"Read from {len(found.first_person_chapters)} of {found.chapters_considered} chapters"
         f" ({found.quote_style} quotes)."
     )
-    print("These are candidates, not conclusions - pick the ones that really are one person.")
-    print("Prefer real names over generic terms of address ('boy', 'sir', 'dear'): an alias")
-    print("matches by substring, so 'boy' makes every question containing that word retrieve")
-    print("this character, including questions about some other boy.")
-    # No space after the comma: a book's cast routinely includes names a shell
-    # would split on, and this line is meant to be copied verbatim.
-    example = ",".join(name for name, _ in found.aliases[:2])
-    print(f"\n  bookrag aliases {args.book_id} --link {example}")
-    print("\nRun that BEFORE `bookrag extract` and the facts never fragment in the first")
-    print("place. Run it after and it merges whatever entities already hold those names.")
+
+    names, epithets = auto_link_plan(found)
+    if names and not declared:
+        also = f" (and {', '.join(epithets)})" if epithets else ""
+        print()
+        print(f"  bookrag aliases {args.book_id} --auto   would link {', '.join(names)}{also}")
+    elif not names:
+        print()
+        print("Nothing meets the bar for automatic linking - two names that read as proper")
+        print("nouns and look like variants of each other. Link by hand with --link if you")
+        print("know the book: names are matched against questions, so prefer real names.")
     return 0
 
 
@@ -929,6 +1033,31 @@ def sanity_summary(chapters: list[Chapter], edge_count: int = 3) -> list[str]:
     # Returns content, not formatting - indentation belongs to whoever renders
     # it (`_print_section` on the console, `write_ingestion_report` in the file).
     return lines
+
+
+def unlinked_narrator_warning(book_id: str, chapters: list[Chapter]) -> list[str]:
+    """The last chance to catch a split character before hours of work bake it in.
+
+    Ingest asks the question, but only on a terminal - a backgrounded or
+    scripted ingest skips it, and a user who pressed Enter can still change
+    their mind. This run is where it stops being cheap: the facts about to be
+    written are the ones that get filed under two people.
+
+    A warning, never a refusal. Declining to link is a legitimate answer, and
+    for most books (third person, nonfiction) there is nothing to say at all.
+    """
+    if load_declared_aliases(book_id):
+        return []
+    found = detect_narrator_aliases(chapters)
+    if not found.aliases:
+        return []
+    named = ", ".join(name for name, _ in found.aliases[:4])
+    return [
+        f"  Note: this book calls its narrator {named} and nothing links them yet,",
+        "  so their facts will be catalogued as separate people. Ctrl+C is safe -",
+        f"  `bookrag aliases {book_id}` shows the full list.",
+        "",
+    ]
 
 
 def extract_start_notes(

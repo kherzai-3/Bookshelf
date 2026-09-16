@@ -34,9 +34,10 @@ Approaches tried first and rejected, each on real data:
 from __future__ import annotations
 
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
+from bookrag.extract.resolve import looks_like_a_name_variant
 from bookrag.ingest.chapter import Chapter
 
 # Publishers differ, and a hardcoded pair fails *silently* - it returns zero
@@ -100,11 +101,49 @@ _NOT_A_VOCATIVE = frozenset(
 )
 
 
+# Terms of address that belong to whoever is being spoken to, and so say
+# nothing about who that is. Distinct from "boy"/"lad"/"thief", which describe
+# a particular person in context - these are pure politeness and attach to
+# anyone. Each one survives the speaker filters on real data by being addressed
+# to a third party while the narrator stands by.
+_ANYONES_TERM_OF_ADDRESS = frozenset(
+    "sir dear madam ma'am maam boss mate lord lady master mistress friend".split()
+)
+
+# Share of trailing-position sightings that must be capitalised before a
+# vocative reads as a *name* rather than an epithet. Trailing position only:
+# a leading vocative is sentence-initial and capitalised whatever it is.
+# Measured on a real book the split is near-total - Connwaer 24/24 and Conn
+# 22/22, against boy 1/106, lad 0/14, sir 0/12, thief 0/3 - so the exact
+# threshold barely matters; 0.8 leaves room for a stray sentence-initial catch.
+_NAME_CAPITALISATION_SHARE = 0.8
+
+
+@dataclass
+class AliasCandidate:
+    """One name the book uses for its narrator, with the evidence for it."""
+
+    name: str  # the most common surface form, e.g. "Connwaer" or "boy"
+    times_addressed: int
+    times_capitalised: int  # in trailing position, where capitalisation means something
+
+    @property
+    def reads_as_a_name(self) -> bool:
+        """A proper noun, so safe to expose to question matching; otherwise an
+        epithet, which is only safe at extraction time (see this module's
+        context doc for why the two are not interchangeable)."""
+        return self.times_capitalised >= self.times_addressed * _NAME_CAPITALISATION_SHARE
+
+    @property
+    def is_anyones_term_of_address(self) -> bool:
+        return self.name.lower() in _ANYONES_TERM_OF_ADDRESS
+
+
 @dataclass
 class NarratorAliases:
     """What the book calls its narrator, and enough context to judge it."""
 
-    aliases: list[tuple[str, int]] = field(default_factory=list)  # (name, times addressed)
+    aliases: list[AliasCandidate] = field(default_factory=list)
     # What the narrator calls *other* people. Not an alias list - kept because
     # it is the control that shows the split worked, and a reviewer comparing
     # the two columns can see at a glance whether attribution went wrong.
@@ -172,6 +211,20 @@ def _first_person_density(text: str) -> float:
     return len(re.findall(r"\b(?:I|me|my|mine|myself)\b", narration)) / len(words) * 100
 
 
+def _vocative_in_trailing_position(utterance: str) -> str | None:
+    """The vocative from the unambiguous position only, surface form intact.
+
+    Split out from `_vocative` because capitalisation is only evidence *here*.
+    A leading vocative sits at the start of a sentence and is capitalised
+    whether it is "Conn" or "Boy", so counting those would make every epithet
+    look like a name."""
+    trailing = re.search(r",\s*(?:my\s+|you\s+)?([A-Za-z][A-Za-z'-]{2,14})\s*[.?!,;]?$", utterance)
+    if not trailing:
+        return None
+    name = trailing.group(1)
+    return None if name.lower() in _NOT_A_VOCATIVE else name
+
+
 def _vocative(utterance: str) -> str | None:
     """The name an utterance addresses, if it plainly addresses one.
 
@@ -203,6 +256,58 @@ def _speaker(text: str, start: int, end: int) -> str | None:
         return after.group(1)
     before = re.search(_SPEAKER + r"\s+(?:\w+ly\s+)?" + _SPEECH_VERBS + r"\s*,?\s*$", text[max(0, start - 70) : start])
     return before.group(1) if before else None
+
+
+def auto_link_plan(found: NarratorAliases) -> tuple[list[str], list[str]]:
+    """`(names, epithets)` safe to link without asking anyone. Empty when the
+    evidence doesn't support a link, which is the common case.
+
+    This is what makes the whole pass worth running. A reader's flow is
+    download, ingest, extract - nothing in it goes near a linking command, so a
+    feature that waits to be invoked is invisible, which is exactly the fault
+    of `doctor --merge-name-variants`.
+
+    **Names need two independent signals, because either alone is wrong.**
+    Capitalisation says "proper noun", but `Magister` is capitalised 5/5 in the
+    reported book and is Keeston addressing *Nevery* while the narrator stands
+    by. A shared string relationship says "variant of the same name", but that
+    is only meaningful between two names. Requiring both leaves `Conn` and
+    `Connwaer` and rejects `Magister`, which relates to nothing.
+
+    **Epithets ride along on whatever the names produced, and are the larger
+    half of the win** - on one real book "boy" (495 references in the text),
+    "thief" (136) and "gutterboy" (100) outweigh "Conn" (344) and "Connwaer"
+    (162) combined. They are safe because `resolve_entity` matches an alias by
+    *exact* `match_key`, so an epithet of "boy" absorbs an entity named "boy"
+    and can never reach for "the Skandian boy". `query.select_relevant_facts`
+    is the one consumer that would substring-match them, and it deliberately
+    never reads this list.
+
+    Never links an epithet on its own. Without a name to attach it to there is
+    no evidence about *whose* epithet it is, and a lone "boy" would become a
+    character called boy."""
+    names = [
+        candidate
+        for candidate in found.aliases
+        if candidate.reads_as_a_name and not candidate.is_anyones_term_of_address
+    ]
+    linked: list[str] = []
+    for index, candidate in enumerate(names):
+        if any(
+            looks_like_a_name_variant(candidate.name, other.name)
+            for position, other in enumerate(names)
+            if position != index
+        ):
+            linked.append(candidate.name)
+    if len(linked) < 2:
+        return [], []
+
+    epithets = [
+        candidate.name
+        for candidate in found.aliases
+        if not candidate.reads_as_a_name and not candidate.is_anyones_term_of_address
+    ]
+    return linked, epithets
 
 
 def _times_speaking(text: str, name: str) -> int:
@@ -255,6 +360,7 @@ def detect_narrator_aliases(chapters: list[Chapter]) -> NarratorAliases:
     considered = 0
     to_narrator: Counter[str] = Counter()
     by_narrator: Counter[str] = Counter()
+    surface_forms: dict[str, Counter[str]] = defaultdict(Counter)
 
     for chapter in chapters:
         if len(chapter.text.split()) < _MIN_NARRATION_WORDS:
@@ -275,11 +381,17 @@ def detect_narrator_aliases(chapters: list[Chapter]) -> NarratorAliases:
             # The narrator speaking names somebody else; anyone else speaking,
             # in a scene the narrator is present for, names the narrator.
             (by_narrator if speaker == "I" else to_narrator)[name] += 1
+            if speaker != "I":
+                # Surface forms, from the one position where capitalisation is
+                # evidence. This is what later sorts a name from an epithet.
+                surface = _vocative_in_trailing_position(span.group(1))
+                if surface:
+                    surface_forms[name][surface] += 1
 
     first_person_text = "\n".join(
         chapter.text for chapter in chapters if chapter.index in set(first_person_chapters)
     )
-    kept: list[tuple[str, int]] = []
+    kept: list[AliasCandidate] = []
     ambiguous: list[tuple[str, int, int]] = []
     speakers: list[tuple[str, int, int]] = []
     for name, count in to_narrator.most_common():
@@ -292,7 +404,16 @@ def detect_narrator_aliases(chapters: list[Chapter]) -> NarratorAliases:
         if spoken and count / spoken <= _MIN_ADDRESSED_TO_SPOKEN:
             speakers.append((name, count, spoken))
             continue
-        kept.append((name, count))
+        forms = surface_forms[name]
+        kept.append(
+            AliasCandidate(
+                # The form the book actually uses, so a linked alias reads like
+                # the book rather than like a lowercased token.
+                name=max(forms, key=forms.get) if forms else name,
+                times_addressed=count,
+                times_capitalised=sum(n for form, n in forms.items() if form[:1].isupper()),
+            )
+        )
 
     return NarratorAliases(
         aliases=kept,

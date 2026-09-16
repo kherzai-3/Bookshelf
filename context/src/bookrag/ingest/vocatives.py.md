@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/vocatives.py
-last_synced: 2026-09-15T16:39:28Z
-source_hash: 4380f8d82402415cf17e05582dc56637dd6c1811
+last_synced: 2026-09-16T19:53:59Z
+source_hash: 6ab52b8eab9d18e52cd0f76c0a1de878c322d0ed
 ---
 
 ## Purpose
@@ -163,3 +163,34 @@ the narrator" section.
   vocative is a proper noun, which is cheap and already implied by the data.
 - Third-person attribution is unsolved and deliberately out of scope. It needs
   an addressee, which is a different problem from finding a vocative.
+
+## `AliasCandidate` and `auto_link_plan`
+- `AliasCandidate(name, times_addressed, times_capitalised)` with
+  `reads_as_a_name` (≥80% capitalised) and `is_anyones_term_of_address`.
+  `name` keeps the **surface form the book used**, so a linked alias reads like
+  the book rather than a lowercased token.
+- **Capitalisation is counted only in trailing vocative position**
+  (`_vocative_in_trailing_position`). A leading vocative is sentence-initial and
+  capitalised whether it is "Conn" or "Boy", so counting those would make every
+  epithet look like a name. Measured, the split is near-total: Connwaer 24/24
+  and Conn 22/22 against boy 1/106, lad 0/14, sir 0/12, thief 0/3.
+- `auto_link_plan(found) -> (names, epithets)` — what is safe to link with
+  nobody asked. **Names need two independent signals.** Capitalisation alone
+  admits `Magister` (5/5 capitalised), which is Keeston addressing *Nevery*
+  while the narrator stands by; a string relationship alone is the 0-for-6
+  prefix rule. Requiring both keeps Conn/Connwaer and rejects Magister.
+  Epithets ride along on whatever the names produced, minus
+  `_ANYONES_TERM_OF_ADDRESS` (`sir`, `dear`, ...). **Never links an epithet
+  alone** - without a name to attach it to there is no evidence whose epithet
+  it is, and a lone "boy" would become a character called boy.
+- Verified on all five real books: Magic Thief links Conn+Connwaer as names and
+  boy/lad/thief/cousin as epithets; the other four link nothing.
+
+## Correction: epithets were nearly discarded on fabricated evidence
+An earlier revision excluded epithets from linking, citing a query -
+"describe the Skandian boy" - that appears **zero times** in the book it was
+run against. It was invented. Epithets are not a side case: on the reported
+book they outweigh the names (boy 495 references, thief 136, gutterboy 100,
+against Conn 344 and Connwaer 162). The real constraint is *where* they are
+safe, not whether to keep them - see the two-list rule in
+`extract/resolve.py`'s context doc.

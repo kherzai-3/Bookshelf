@@ -110,6 +110,61 @@ def load_metadata(book_id: str, root: Path | None = None) -> dict:
     return json.loads((root / book_id / "metadata.json").read_text(encoding="utf-8"))
 
 
+def declared_aliases_path(book_id: str, root: Path | None = None) -> Path:
+    return (root or library_root()) / book_id / "declared_aliases.json"
+
+
+def load_declared_aliases(book_id: str, root: Path | None = None) -> list[dict]:
+    """Groups a reader (or the ingest-time detector) has declared to be one
+    character: `[{"names": ["Conn", "Connwaer"], "epithets": ["boy", "lad"],
+    "reason": "..."}]`.
+
+    Kept in the book's own directory rather than only in `entities.json`
+    because it is a statement about the *book*, not a byproduct of one
+    extraction run - and `extract_book --restart` deliberately prunes every
+    entity the discarded run created, which would otherwise take the
+    declaration with it and silently re-split the character. Confirmed: before
+    this existed, a restart turned a linked Conn/Connwaer back into two
+    entities with no aliases.
+
+    `reason` is recorded because these groups are now written automatically.
+    An automatic merge that nobody can explain afterwards is the bad version of
+    this feature; the evidence has to survive alongside the decision.
+
+    Tolerates the older bare-list shape (`[["Conn", "Connwaer"]]`) written
+    before epithets existed, and a malformed file reads as "nothing declared"
+    rather than raising - the same posture as `resume_start_index`."""
+    path = declared_aliases_path(book_id, root)
+    if not path.exists():
+        return []
+    try:
+        groups = json.loads(path.read_text(encoding="utf-8")).get("groups", [])
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    declared = []
+    for group in groups:
+        if isinstance(group, list):
+            group = {"names": group}
+        names = [str(name) for name in group.get("names", [])]
+        if len(names) < 2:
+            continue
+        declared.append(
+            {
+                "names": names,
+                "epithets": [str(word) for word in group.get("epithets", [])],
+                "reason": str(group.get("reason", "")),
+            }
+        )
+    return declared
+
+
+def save_declared_aliases(book_id: str, groups: list[dict], root: Path | None = None) -> None:
+    path = declared_aliases_path(book_id, root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"groups": groups}, indent=2), encoding="utf-8")
+
+
 def load_index(root: Path | None = None) -> dict:
     root = root or library_root()
     index_path = root / "index.json"

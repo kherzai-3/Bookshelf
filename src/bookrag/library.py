@@ -15,8 +15,23 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from bookrag.extract.resolve import load_entities, match_key, prune_book_from_entities, save_entities
-from bookrag.storage import library_root, load_chapters, load_index, load_metadata, remove_from_index
+from bookrag.extract.resolve import (
+    load_entities,
+    looks_like_a_name_variant,
+    match_key,
+    prune_book_from_entities,
+    save_entities,
+    seed_alias_group,
+)
+from bookrag.storage import (
+    library_root,
+    load_chapters,
+    load_declared_aliases,
+    load_index,
+    load_metadata,
+    remove_from_index,
+    save_declared_aliases,
+)
 
 
 @dataclass
@@ -529,12 +544,19 @@ class LinkResult:
     entity_id: str
     canonical_name: str
     aliases: list[str]
+    epithets: list[str]
     created: bool  # False means it folded into entities extraction had already made
     merged_entity_ids: list[str]
     facts_rewritten: int
 
 
-def link_names(book_id: str, names: list[str], root: Path | None = None) -> LinkResult:
+def link_names(
+    book_id: str,
+    names: list[str],
+    root: Path | None = None,
+    epithets: list[str] | None = None,
+    reason: str = "",
+) -> LinkResult:
     """Declare that several names are one character, before or after extraction.
 
     Before extraction this is the useful direction, and the reason this exists
@@ -549,11 +571,14 @@ def link_names(book_id: str, names: list[str], root: Path | None = None) -> Link
     and is reused rather than reimplemented. So a user who ingests, extracts,
     and only then works out who is who is not told to start over.
 
-    Deliberately takes explicit names rather than reading a detector's output.
-    `ingest.vocatives` reports *candidates*, and its own accuracy notes say a
-    generic term of address can land among them ("sir", "dear"); a name-like
-    alias is safe to merge while a generic epithet is a bad retrieval key (see
-    that module's context doc for the measurement). Choosing is a person's job.
+    `names` and `epithets` are kept apart all the way down, because they are
+    safe in different places: both reach `resolve_entity`, which matches
+    exactly, but only `names` reaches `query.select_relevant_facts`, which
+    substring-matches against a question. See `extract/resolve.py`.
+
+    `reason` is stored with the group. These are written automatically at
+    ingest now, and an automatic merge nobody can explain later is the bad
+    version of this feature.
     """
     root = root or library_root()
     cleaned = [name.strip() for name in names if name.strip()]
@@ -576,38 +601,92 @@ def link_names(book_id: str, names: list[str], root: Path | None = None) -> Link
     merged_ids: list[str] = []
     facts_rewritten = 0
     if len(owned) > 1:
+        # Already-extracted facts exist under several ids, so fold them first;
+        # seeding alone would leave the older ids owning real content.
         result = merge_entities([e["entity_id"] for e in owned], root=root)
         merged_ids, facts_rewritten = result.merged_entity_ids, result.facts_rewritten
         entities = load_entities(root)
-        kept = next(e for e in entities["entities"] if e["entity_id"] == result.kept_entity_id)
-    elif owned:
-        kept = next(e for e in entities["entities"] if e["entity_id"] == owned[0]["entity_id"])
-    else:
-        kept = {
-            "entity_id": f"character-{uuid.uuid4().hex[:8]}",
-            "canonical_name": cleaned[0],
-            "type": "character",
-            "aliases": [],
-            "book_ids": [book_id],
-        }
-        entities["entities"].append(kept)
 
-    created = not owned
-    for name in cleaned:
-        if match_key(name) == match_key(kept["canonical_name"]):
-            continue
-        if not any(match_key(alias) == match_key(name) for alias in kept["aliases"]):
-            kept["aliases"].append(name)
+    # One create-or-extend path, shared with extract_book's re-seeding, so the
+    # two cannot drift apart about what a linked entity looks like.
+    entity_id, created = seed_alias_group(entities, book_id, cleaned, "character", epithets)
     save_entities(entities, root)
+    kept = next(e for e in entities["entities"] if e["entity_id"] == entity_id)
+
+    # Record the decision against the *book*, not only in the registry. A
+    # `bookrag extract --restart` prunes every entity the discarded run
+    # created and cannot tell a seeded one apart, so without this the link
+    # silently disappears on a re-run - confirmed before it existed, where a
+    # restart turned a linked Conn/Connwaer back into two entities. extract_book
+    # re-applies the stored groups on every run.
+    groups = load_declared_aliases(book_id, root)
+    existing = next((g for g in groups if {match_key(n) for n in g["names"]} & keys), None)
+    if existing is None:
+        groups.append({"names": cleaned, "epithets": list(epithets or []), "reason": reason})
+    else:
+        for name in cleaned:
+            if not any(match_key(name) == match_key(seen) for seen in existing["names"]):
+                existing["names"].append(name)
+        for word in epithets or []:
+            if not any(match_key(word) == match_key(seen) for seen in existing["epithets"]):
+                existing["epithets"].append(word)
+        if reason:
+            existing["reason"] = reason
+    save_declared_aliases(book_id, groups, root)
 
     return LinkResult(
         entity_id=kept["entity_id"],
         canonical_name=kept["canonical_name"],
         aliases=list(kept["aliases"]),
+        epithets=list(kept.get("epithets", [])),
         created=created,
         merged_entity_ids=merged_ids,
         facts_rewritten=facts_rewritten,
     )
+
+
+def unlink_names(book_id: str, root: Path | None = None) -> list[str]:
+    """Undo this book's declared links. Returns the names that were separated.
+
+    The escape hatch that makes automatic linking at ingest acceptable: a
+    heuristic will sometimes be wrong, and "wrong and permanent" is a different
+    proposition from "wrong and one command away".
+
+    **Separates names, never facts.** Clearing the declaration stops future
+    extraction from folding those names together and stops the entity
+    answering to them, but facts already written keep whichever `entity_id`
+    they were given - a fact record says which entity owns it, and only a
+    re-extraction can re-decide that. `entity_name` is recorded on every new
+    fact precisely so that re-decision is possible at all (see
+    `extract/pipeline.py`); building the splitter on top of it is not done yet.
+    """
+    root = root or library_root()
+    groups = load_declared_aliases(book_id, root)
+    if not groups:
+        return []
+
+    declared: set[str] = set()
+    for group in groups:
+        declared.update(match_key(name) for name in group["names"])
+        declared.update(match_key(word) for word in group["epithets"])
+
+    entities = load_entities(root)
+    separated: list[str] = []
+    for entity in entities["entities"]:
+        if book_id not in entity["book_ids"]:
+            continue
+        for field_name in ("aliases", "epithets"):
+            kept = []
+            for name in entity.get(field_name, []):
+                if match_key(name) in declared:
+                    separated.append(name)
+                else:
+                    kept.append(name)
+            if field_name in entity or kept:
+                entity[field_name] = kept
+    save_entities(entities, root)
+    save_declared_aliases(book_id, [], root)
+    return separated
 
 
 @dataclass

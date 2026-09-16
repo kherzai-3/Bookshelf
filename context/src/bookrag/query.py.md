@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/query.py
-last_synced: 2026-09-09T00:00:00Z
-source_hash: 69a1bfe434965c20900f11cac1b2a2432065c243
+last_synced: 2026-09-16T19:53:59Z
+source_hash: 42dc8f8f91b5c5cec520330bca7c1ea78a0663a3
 ---
 
 ## Purpose
@@ -133,6 +133,34 @@ plain-text context `cli.py`'s `chat` command hands to a provider's
   prefer the later chapter's fact when two in the same category genuinely
   conflict - resolution happens at read/answer time, not by mutating the
   catalog.
+
+
+## The two-list rule (`aliases` vs `epithets`)
+
+An entity carries **two** name lists, and the split is a safety property, not
+tidiness. They exist because the two consumers match differently:
+
+| Consumer | Match | Reads |
+|---|---|---|
+| `extract.resolve.resolve_entity` | `name_key == match_key(x)`, **exact** | `aliases` **and** `epithets` |
+| `query._name_matches_question` | `name_lc in question_lc`, **substring** | `aliases` only |
+
+So an epithet of "boy" absorbs a fact the model filed under "boy" and can
+never reach for a different boy - but if it were substring-matched against a
+question, every question containing that word would retrieve this character.
+
+**This is the larger half of the win, not a side case.** On the real reported
+book the epithets outweigh the names: boy 495 references in the text, thief
+136, gutterboy 100, against Conn 344 and Connwaer 162. Measured end to end
+after auto-linking, `entity_name` on the fact records shows 28 facts arriving
+as "Boy" and 11 as "Thief" that would otherwise have fragmented.
+
+Verified both directions on a real library copy: "Tell me about Connwaer"
+retrieves the character (alias), "Who is the boy in the kitchen?" and
+"describe the thief" do **not** (epithets).
+
+**Adding `epithets` to `query.select_relevant_facts`'s candidate list is the
+one change that silently undoes all of this.**
 
 ## Dependencies
 - Internal: `bookrag.storage` (`library_root`, `series_reading_order`),

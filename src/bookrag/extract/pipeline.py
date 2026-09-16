@@ -14,9 +14,16 @@ from bookrag.extract.resolve import (
     prune_book_from_entities,
     resolve_entity,
     save_entities,
+    seed_alias_group,
 )
 from bookrag.providers.base import ExtractionParseError, Provider, extraction_identity
-from bookrag.storage import library_root, load_chapters, load_metadata, series_reading_order
+from bookrag.storage import (
+    library_root,
+    load_chapters,
+    load_declared_aliases,
+    load_metadata,
+    series_reading_order,
+)
 
 OnChapterDone = Callable[[int, int], None]
 
@@ -227,6 +234,21 @@ def extract_book(
         pruned, _ = prune_book_from_entities(entities, book_id)
         if pruned:
             save_entities(entities, root)
+
+    # Re-applied on every run, not just the first, and deliberately *after*
+    # the restart prune above. A declared alias set is a statement about the
+    # book, not a product of one extraction, and the prune cannot tell a
+    # seeded entity from one the discarded run created - so without this a
+    # `--restart` silently un-links the character. Confirmed before it
+    # existed: a linked Conn/Connwaer came back as two entities with no
+    # aliases. seed_alias_group is idempotent, so a normal resumed run
+    # re-applies the same groups and changes nothing.
+    declared = load_declared_aliases(book_id, root)
+    if declared:
+        for group in declared:
+            seed_alias_group(entities, book_id, group["names"], epithets=group["epithets"])
+        save_entities(entities, root)
+
     entities_before = len(entities["entities"])
     # .get(..., "fiction"): a book ingested before content_type existed has
     # no such key in its metadata.json - defaults to the taxonomy every book
@@ -317,6 +339,19 @@ def extract_book(
                         known_types[raw.entity_name] = raw.entity_type
                     record = {
                         "entity_id": entity_id,
+                        # The name the model actually returned, before
+                        # resolution. Without it a merge is permanent: the
+                        # record says which entity owns a fact and nothing
+                        # says which surface form it arrived as, so two
+                        # characters wrongly combined - by a bad alias link or
+                        # a bad doctor merge - cannot be told apart again, let
+                        # alone separated. With it, a wrong merge is a
+                        # reportable, undoable state rather than silent
+                        # corruption. Costs one short field per fact and no
+                        # model work, since resolution already had this in
+                        # hand. Absent on every record written before this
+                        # existed, so readers must treat it as optional.
+                        "entity_name": raw.entity_name,
                         "chapter_index": chapter.index,
                         "category": raw.category,
                         "statement": raw.statement,

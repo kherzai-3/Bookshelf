@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/pipeline.py
-last_synced: 2026-09-14T14:10:38Z
-source_hash: fd88d7b987103aa1a58c02cb638f23cca4e5f3c3
+last_synced: 2026-09-16T19:53:59Z
+source_hash: c28223f86548b351242b3b018b90cc28057b7ee3
 ---
 
 ## Purpose
@@ -395,3 +395,26 @@ silently un-establish a character book 1 introduced.
 
 Runs before `known_names`/`known_types` are built, so a restarted run is
 seeded from what actually survives rather than from the discarded run.
+
+## `entity_name` on every fact record
+The raw name the model returned, stored alongside `entity_id`.
+
+**This is what makes a merge reversible, and it is the real answer to "what if
+two characters get combined?"** A record used to say only which entity owns a
+fact; nothing said which surface form it arrived as, so two characters wrongly
+merged could not be told apart again, let alone separated. A wrong merge was
+permanent. It is now a reportable, undoable state. Costs one short field and no
+model work - resolution already had the value. **Absent from records written
+before this existed**, so readers must use `record.get("entity_name")`.
+
+Also evidence the alias machinery works: after auto-linking the real reported
+book, the raw names landing on one entity were Conn 67, Connwaer 55, Boy 28,
+Thief 11 - the last two being facts that would otherwise have fragmented.
+
+## Declared aliases are re-applied on every run
+`extract_book` re-seeds `storage.load_declared_aliases(book_id)` **after** the
+`--restart` prune, not before. The prune removes every entity the discarded run
+created and cannot distinguish a seeded one, so seeding earlier is undone -
+confirmed before this existed, where a restart turned a linked Conn/Connwaer
+back into two entities. `seed_alias_group` is idempotent, so a normal resumed
+run re-applies the same groups and changes nothing.

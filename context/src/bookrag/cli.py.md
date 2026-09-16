@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-15T16:39:28Z
-source_hash: f5293c00bab15e873ee7acde56821accd755a4ed
+last_synced: 2026-09-16T19:53:59Z
+source_hash: e82f76268c7c93baa8859dd8f6e374ce936a42a8
 ---
 
 ## Purpose
@@ -403,3 +403,22 @@ opt-in and never folded into `--fix`, because it rewrites fact records across
 book directories. Unlike `--merge-duplicates` it needs no confirmation
 prompt - there is no judgement call about which entity to keep, since the
 split is determined entirely by which book each fact already lives in.
+
+## Automatic narrator linking at ingest
+- `auto_link_narrator(book_id, found, enabled) -> list[str]` — called at the
+  end of `_ingest`, printed under a "Linked" section. **This is what makes the
+  detection worth running.** A reader's flow is download → `data/incoming/` →
+  ingest → extract, so a feature waiting to be invoked is invisible - exactly
+  the fault of `doctor --merge-name-variants`. An interactive prompt was built
+  first and removed: it needs a person present who can judge a book's cast, per
+  book, which neither scales nor works for a tester.
+- Says what it linked and how to undo it, because this is an automatic mutation
+  from a heuristic. `ingest --no-auto-link` produces the unlinked baseline.
+- `unlinked_narrator_warning(book_id, chapters)` — printed before a run when
+  candidates exist and nothing is linked. The last cheap moment before hours of
+  work bake a split character in. A warning, never a refusal. `_run_extract`
+  keeps the `chapters` list rather than only its length so this can read it.
+- `bookrag aliases <book> [--link A,B] [--auto] [--unlink]` — inspect, link by
+  hand, apply the same automatic rule to an already-ingested book, or undo. The
+  report marks each candidate `(name)` or `(epithet)`, which is the distinction
+  that decides where it may be used.

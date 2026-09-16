@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/storage.py
-last_synced: 2026-09-13T15:24:02Z
-source_hash: db78e26b452715b0cd531ade384d3f965cb26a93
+last_synced: 2026-09-16T19:53:59Z
+source_hash: 624a42ae3e448931816668114b4609a80b316ea5
 ---
 
 ## Purpose
@@ -107,3 +107,21 @@ listing/grouping books without ever merging their chapter numbering.
   context doc), so an accidental duplicate silently wasting a full run
   against the wrong copy is a real cost now, not a hypothetical one. Worth
   revisiting.
+
+## Declared aliases (`declared_aliases.json`)
+`declared_aliases_path` / `load_declared_aliases` / `save_declared_aliases`.
+Groups declared to be one character:
+`[{"names": [...], "epithets": [...], "reason": "..."}]`.
+
+**Kept in the book's own directory rather than only in `entities.json`**
+because it is a statement about the *book*, not a product of one extraction
+run. `extract --restart` prunes the entities a discarded run created and cannot
+tell a seeded one apart, so a registry-only link silently disappears on re-run.
+
+`reason` is recorded because these groups are now written **automatically** at
+ingest, and an automatic merge nobody can explain later is the bad version of
+this feature.
+
+Tolerates the older bare-list shape (`[["Conn", "Connwaer"]]`), and a malformed
+file reads as "nothing declared" rather than raising - the same tolerant
+posture as `resume_start_index`.

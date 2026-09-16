@@ -212,6 +212,14 @@ def select_relevant_facts(question: str, facts: list[Fact], root: Path | None = 
     matched_entity_ids: set[str] = set()
     for entity_id in {f.entity_id for f in facts}:
         entity = entities_by_id.get(entity_id)
+        # `canonical_name` and `aliases` only - **never** `epithets`. The two
+        # lists exist precisely because this comparison is a *substring* match
+        # (see _name_matches_question) while resolve_entity's is exact. An
+        # epithet of "boy" is correct and valuable there, absorbing a fact the
+        # model filed under "boy"; here it would make every question containing
+        # that word retrieve this character, including a question about some
+        # other boy. Adding `epithets` to this list is the one change that
+        # would silently undo the whole split.
         candidate_names = [entity["canonical_name"], *entity["aliases"]] if entity else [entity_id]
         if any(_name_matches_question(name, question_lc, question_words) for name in candidate_names):
             matched_entity_ids.add(entity_id)
