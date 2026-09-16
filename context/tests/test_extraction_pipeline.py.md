@@ -1,7 +1,7 @@
 ---
 source: tests/test_extraction_pipeline.py
-last_synced: 2026-09-14T14:10:38Z
-source_hash: 48a507d46083daa3d1f62811256c9b451cee4a7c
+last_synced: 2026-09-16T20:32:36Z
+source_hash: f8d1e36f7e30cf86d36d1aa1fd5e8325078f6064
 ---
 
 ## Purpose
@@ -88,6 +88,26 @@ must not reach past this book). `test_extract_persists_entities_after_every
 _chapter` pins the durability ordering: facts flush, then `save_entities`,
 then the progress write - so a crash can never leave progress claiming a
 chapter whose entities were never saved.
+
+Also covers **what makes an alias link survivable and reversible**:
+
+- `test_a_written_fact_records_the_name_the_model_used` — a fact record stores
+  `entity_id`, which says which entity owns it but not which name it *arrived*
+  as. Without the raw name a wrong merge is permanent and undiagnosable:
+  nothing separates the facts that came in as "boy" from those that came in as
+  "Conn". Recording `entity_name` is what makes an automatic merge undoable,
+  and automatic merging is only acceptable because it is undoable.
+
+- `test_a_declared_alias_group_survives_a_restart` — a confirmed regression,
+  not a hypothetical. `--restart` prunes every entity the discarded run
+  created, which is correct, but the alias link lived on one of those entities,
+  so the prune took the declaration with it and the character silently
+  re-split on the next run. That is the worst shape for the bug: the user
+  re-runs extraction *because* something looked wrong, and the re-run quietly
+  undoes the fix. Sabotage-verified by moving the `declared_aliases.json`
+  re-apply back above the prune (the pre-fix order): the first run still yields
+  one entity and the restart re-splits it into two, which is exactly the
+  reported symptom.
 
 Also covers `known_entity_types` threading
 (`test_extract_book_passes_known_entity_types_to_the_provider`): a

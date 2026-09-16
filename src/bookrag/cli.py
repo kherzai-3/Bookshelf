@@ -358,19 +358,26 @@ def narrator_alias_lines(found: NarratorAliases) -> list[str]:
     prints nothing at all (see `_print_section`), so this costs those books a
     blank line and no attention. The counts are shown deliberately: they are
     what a reader needs to tell a real alias from a stray match, and on a real
-    book the gap is stark (34 against 2). The wording says *candidates* and
-    names no consequence, because nothing is applied - `detect_narrator_aliases`
-    is a report, and a three-party scene can put a stranger's title in this
-    list."""
+    book the gap is stark (34 against 2). Each candidate is marked as a name or
+    an epithet, because that distinction decides what happens to it: only names
+    can be linked, and only names ever reach question matching.
+
+    This section reports; the "Linked" section immediately after it says what
+    was actually applied, and is the only authority on that. Keeping the claim
+    out of here matters - a three-party scene can put a stranger's title in
+    this list, so "detected" and "acted on" must not read as the same thing."""
     if not found.aliases:
         return []
-    named = ", ".join(f"{name} ({count}x)" for name, count in found.aliases)
+    named = ", ".join(
+        f"{c.name} ({c.times_addressed}x, {'name' if c.reads_as_a_name else 'epithet'})"
+        for c in found.aliases
+    )
     return [
         f"other characters address the narrator as: {named}",
         f"  read from dialogue in {len(found.first_person_chapters)} of "
         f"{found.chapters_considered} chapters, which are written in the first person",
-        "  candidates only - nothing was changed. These are the names whose facts",
-        "  would otherwise be catalogued as separate people.",
+        "  These are the names whose facts would otherwise be catalogued as",
+        "  separate people. See 'Linked' below for what was applied.",
     ]
 
 

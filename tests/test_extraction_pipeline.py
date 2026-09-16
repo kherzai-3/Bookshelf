@@ -14,7 +14,7 @@ from bookrag.extract.resolve import load_entities
 from bookrag.ingest.chapter import Chapter
 from bookrag.providers.base import ExtractedFact, ExtractionParseError
 from bookrag.providers.fake_provider import FakeProvider
-from bookrag.storage import save_book
+from bookrag.storage import save_book, save_declared_aliases
 from tests.helpers import NARRATIVE_PADDING
 
 
@@ -1019,3 +1019,62 @@ def test_restart_keeps_entities_an_earlier_series_book_still_owns(tmp_path: Path
     ishmael = [e for e in load_entities(root)["entities"] if e["canonical_name"] == "Ishmael"]
     assert len(ishmael) == 1
     assert book1 in ishmael[0]["book_ids"]
+
+
+def test_a_written_fact_records_the_name_the_model_used(tmp_path: Path) -> None:
+    """A fact stores `entity_id`, which says which entity *owns* it but not
+    which name it *arrived* as. Without the raw name, a wrong alias link is
+    permanent: nothing distinguishes the facts that came in as "boy" from the
+    ones that came in as "Conn", so there is no way to undo the merge or even
+    to report how much of the entity each name contributed. Recording it is
+    what makes an automatic merge reversible, and automatic merging is only
+    acceptable because it is reversible."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [Chapter(0, "One", f"Ishmael went to sea. {NARRATIVE_PADDING}")]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+
+    extract_book(book_id, FakeProvider(), root=root)
+
+    records = [
+        json.loads(line)
+        for line in (root / book_id / "facts.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [r["entity_name"] for r in records] == ["Ishmael"]
+
+
+def test_a_declared_alias_group_survives_a_restart(tmp_path: Path) -> None:
+    """A confirmed regression, not a hypothetical. `--restart` prunes every
+    entity the discarded run created - which is correct - but the alias link
+    lived only on one of those entities, so the prune took the declaration with
+    it and the character silently re-split on the very next run. That is the
+    worst shape for this bug: the user re-runs extraction *because* something
+    looked wrong, and the re-run quietly undoes the fix.
+
+    `declared_aliases.json` lives in the book's directory for this reason: it
+    is a statement about the book, not a byproduct of one extraction run, and
+    `extract_book` re-applies it after the prune."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [
+        Chapter(0, "One", f"Conn went to sea. {NARRATIVE_PADDING}"),
+        Chapter(1, "Two", f"Connwaer returned home. {NARRATIVE_PADDING}"),
+    ]
+    book_id = save_book(source, chapters, title="Test Novel", root=root)
+    save_declared_aliases(
+        book_id,
+        [{"names": ["Conn", "Connwaer"], "epithets": ["boy"], "reason": "test"}],
+        root=root,
+    )
+
+    extract_book(book_id, FakeProvider(), root=root)
+    assert len(load_entities(root)["entities"]) == 1
+
+    extract_book(book_id, FakeProvider(), root=root, restart=True)
+
+    (entity,) = load_entities(root)["entities"]
+    assert entity["canonical_name"] == "Conn"
+    assert entity["aliases"] == ["Connwaer"]
+    assert entity["epithets"] == ["boy"]

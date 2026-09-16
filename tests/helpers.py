@@ -95,6 +95,66 @@ def build_narrative_epub(path: Path) -> None:
     epub.write_epub(str(path), book)
 
 
+# Narration dense enough in first-person pronouns to clear vocatives.py's
+# threshold (4.0 per 100 words of narration; this runs ~16) and long enough to
+# clear its 50-word narration floor. Proper-noun-free, like NARRATIVE_PADDING,
+# so the only names in a first-person fixture are the ones its dialogue puts
+# there.
+_I_NARRATE = (
+    "I walked back through the market with my hands pushed into my pockets. "
+    "I had nothing left to trade and I knew it perfectly well. The stalls were "
+    "closing around me and I watched the lamps go out one by one while I waited "
+    "for my chance to slip away. I counted over what I still had, which was "
+    "nothing at all, and I went on anyway because I could not think what else "
+    "I might usefully do with my evening. "
+)
+
+
+def build_first_person_epub(path: Path) -> None:
+    """A first-person novel whose dialogue calls its narrator by two spellings
+    of one name and by an epithet - the shape `ingest.vocatives` looks for, and
+    the only fixture that exercises auto-linking at ingest end to end.
+
+    Every utterance is spoken by a *named* character (never "I"), because that
+    is the whole signal: in a first-person book an utterance from anyone but the
+    narrator is, in a two-hander, addressed to the narrator. The names sit in
+    trailing position with their capitalisation intact, since that is the one
+    position where a capital distinguishes a name from an epithet - so "Conn"
+    and "Connwaer" read as names and "boy" reads as an epithet, exactly as they
+    do in the real book this is shaped from."""
+    book = epub.EpubBook()
+    book.set_identifier("first-person-id")
+    book.set_title("First Person Book")
+    book.set_language("en")
+    book.add_author("First Person Author")
+
+    # Both name spellings and the epithet clear vocatives.py's floor of 2
+    # sightings in each chapter, so neither chapter carries the link alone.
+    dialogue = (
+        "“You are late, Conn,” Nevery said. "
+        "“I had expected you an hour ago, Connwaer,” Nevery said. "
+        "“Come along, boy,” Nevery said. "
+        "“Do not touch that, Conn,” Nevery said. "
+        "“Wipe your feet, Connwaer,” Nevery said. "
+        "“Sit down, boy,” Nevery said."
+    )
+    narration = _I_NARRATE * 9  # ~800 words, over the consolidation threshold
+
+    items = []
+    for number, title in enumerate(("Chapter One", "Chapter Two"), start=1):
+        chapter = epub.EpubHtml(title=title, file_name=f"chap{number}.xhtml")
+        chapter.content = f"<html><body><h1>{title}</h1><p>{narration}{dialogue}</p></body></html>"
+        book.add_item(chapter)
+        items.append(chapter)
+
+    book.toc = tuple(items)
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", *items]
+
+    epub.write_epub(str(path), book)
+
+
 def build_fragmented_epub(path: Path, fragment_count: int = 40, words_per_fragment: int = 100) -> None:
     """A page-scanned-style epub: many small, untitled spine documents with
     no heading markup at all - mirrors a real Internet-Archive-produced

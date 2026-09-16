@@ -46,6 +46,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [tests/test_query.py](../tests/test_query.py.md) — covers `facts_as_of`'s spoiler-safety guarantee across a series.
 - [tests/test_spoiler_safety.py](../tests/test_spoiler_safety.py.md) — the ship gate: end-to-end proof that a chapter-N render contains nothing from, and derives nothing from, past chapter N.
 - [tests/test_vocatives.py](../tests/test_vocatives.py.md) — covers narrator-alias detection: speaker split, per-chapter narration mode, quote styles, and the noise filters.
+- [tests/test_alias_linking.py](../tests/test_alias_linking.py.md) — pins the alias/epithet split: epithets reach `resolve_entity` and never `select_relevant_facts`, plus `auto_link_plan`'s rules.
 - [tests/test_eval.py](../tests/test_eval.py.md) — covers `groundedness_score`, `run_eval`'s read-only guarantee, and `summarize`.
 - [tests/test_ingestion_report.py](../tests/test_ingestion_report.py.md) — covers `classify_ingestion`/`write_ingestion_report`.
 - [tests/test_parsing.py](../tests/test_parsing.py.md) — covers `providers.parsing.parse_facts`.

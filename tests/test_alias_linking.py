@@ -1,0 +1,176 @@
+"""Covers linking a narrator's several names into one character automatically,
+across the three modules that have to agree for it to be safe:
+`ingest.vocatives` decides what to link, `extract.resolve` applies it, and
+`query` deliberately declines to.
+
+The first test in this file is the load-bearing one. Everything else here is
+support for it.
+"""
+
+from pathlib import Path
+
+import pytest
+
+from bookrag.extract.resolve import resolve_entity, save_entities, seed_alias_group
+from bookrag.ingest.vocatives import AliasCandidate, NarratorAliases, auto_link_plan
+from bookrag.query import Fact, select_relevant_facts
+
+
+def _candidate(name: str, times_addressed: int = 4, times_capitalised: int = 0) -> AliasCandidate:
+    return AliasCandidate(name, times_addressed, times_capitalised)
+
+
+def _a_name(name: str, times: int = 4) -> AliasCandidate:
+    """A vocative capitalised every time it was seen in trailing position."""
+    return _candidate(name, times, times)
+
+
+def _narrator(*aliases: AliasCandidate) -> NarratorAliases:
+    return NarratorAliases(aliases=list(aliases), first_person_chapters=[0], chapters_considered=1)
+
+
+def _library_with_a_linked_narrator(root: Path) -> tuple[str, str]:
+    """Conn, answering to "Connwaer" and referred to as "boy", plus a second
+    character who has nothing to do with him. Returns both entity ids.
+
+    The second character matters: `select_relevant_facts` falls back to
+    returning *every* fact when a question names no entity at all, so a test
+    asserting "this question did not retrieve Conn" needs the question to
+    retrieve somebody, or it passes for the wrong reason."""
+    entities: dict = {"entities": []}
+    conn_id, _ = seed_alias_group(entities, "book", ["Conn", "Connwaer"], epithets=["boy"])
+    benet_id = resolve_entity("Benet", "character", "book", entities)
+    save_entities(entities, root)
+    return conn_id, benet_id
+
+
+def _facts(*entity_ids: str) -> list[Fact]:
+    return [
+        Fact(book_id="book", entity_id=entity_id, chapter_index=0, category="development", statement=f"About {entity_id}.")
+        for entity_id in entity_ids
+    ]
+
+
+def test_an_epithet_resolves_an_extracted_fact_but_never_answers_a_question(tmp_path: Path) -> None:
+    """**The whole safety property of epithets, in one test.**
+
+    `aliases` and `epithets` exist as separate fields because the two consumers
+    of a name match differently. `resolve_entity` compares exact `match_key`s,
+    so an epithet of "boy" absorbs a fact the model filed under "boy" and can
+    never reach for a different boy - that is worth ~750 references on one real
+    book. `select_relevant_facts` substring-matches against a question, where
+    the same epithet would drag the narrator into every question containing the
+    word.
+
+    Adding `epithets` to `select_relevant_facts`'s candidate list is the single
+    change that silently undoes this, and it is a one-word edit that looks like
+    a bug fix. This test exists to fail when somebody makes it.
+    """
+    conn_id, benet_id = _library_with_a_linked_narrator(tmp_path)
+    entities = {
+        "entities": [
+            {
+                "entity_id": conn_id,
+                "canonical_name": "Conn",
+                "type": "character",
+                "aliases": ["Connwaer"],
+                "epithets": ["boy"],
+                "book_ids": ["book"],
+            }
+        ]
+    }
+
+    # Extraction: a fact the model filed under the epithet lands on Conn,
+    # instead of creating a second character called "boy".
+    assert resolve_entity("boy", "character", "book", entities) == conn_id
+    assert len(entities["entities"]) == 1
+
+    # Retrieval: a question about somebody else's boy does not.
+    retrieved = select_relevant_facts(
+        "Who is the boy that Benet trained?", _facts(conn_id, benet_id), root=tmp_path
+    )
+
+    assert [f.entity_id for f in retrieved] == [benet_id]
+
+
+def test_an_alias_answers_a_question_where_an_epithet_does_not(tmp_path: Path) -> None:
+    """The other half of the split: `aliases` reach both consumers, so asking
+    about the narrator under either spelling of his name still works. Without
+    this, the test above could be satisfied by dropping epithets entirely -
+    which is the design that was rejected."""
+    conn_id, benet_id = _library_with_a_linked_narrator(tmp_path)
+    facts = _facts(conn_id, benet_id)
+
+    assert [f.entity_id for f in select_relevant_facts("Tell me about Conn", facts, root=tmp_path)] == [conn_id]
+    assert [f.entity_id for f in select_relevant_facts("Tell me about Connwaer", facts, root=tmp_path)] == [conn_id]
+
+
+def test_a_capitalised_vocative_reads_as_a_name_and_a_lowercase_one_does_not() -> None:
+    """What sorts the two lists. Measured in trailing position only, where a
+    capital means something - real counts from the reported book were Connwaer
+    24/24 and Conn 22/22 against boy 1/106, lad 0/14, thief 0/3."""
+    assert _candidate("Connwaer", times_addressed=24, times_capitalised=24).reads_as_a_name
+    assert not _candidate("boy", times_addressed=106, times_capitalised=1).reads_as_a_name
+
+
+def test_auto_link_plan_links_two_spellings_of_a_name_and_their_epithets() -> None:
+    plan = _narrator(_a_name("Conn"), _a_name("Connwaer"), _candidate("boy"), _candidate("lad"))
+
+    assert auto_link_plan(plan) == (["Conn", "Connwaer"], ["boy", "lad"])
+
+
+def test_auto_link_plan_ignores_a_capitalised_name_that_relates_to_nothing() -> None:
+    """Capitalisation alone is not enough, and this is the real case that
+    proves it: "Magister" is capitalised 5/5 in the reported book and is
+    Keeston addressing *Nevery* while the narrator stands by. It relates to no
+    other name, so requiring a shared string relationship rejects it while
+    keeping Conn/Connwaer."""
+    plan = _narrator(_a_name("Conn"), _a_name("Connwaer"), _a_name("Magister"))
+
+    names, _ = auto_link_plan(plan)
+
+    assert names == ["Conn", "Connwaer"]
+
+
+def test_auto_link_plan_links_nothing_when_only_one_name_is_found() -> None:
+    """Two unrelated names are two characters, not one - so with nothing to
+    link, the epithets have no owner and must not be linked either. A lone
+    "boy" linked to nobody would become a character called boy."""
+    plan = _narrator(_a_name("Conn"), _a_name("Magister"), _candidate("boy"))
+
+    assert auto_link_plan(plan) == ([], [])
+
+
+def test_auto_link_plan_never_links_an_epithet_on_its_own() -> None:
+    plan = _narrator(_candidate("boy"), _candidate("lad"), _candidate("thief"))
+
+    assert auto_link_plan(plan) == ([], [])
+
+
+@pytest.mark.parametrize("term", ["sir", "Dear", "ma'am"])
+def test_a_term_of_address_is_never_linked(term: str) -> None:
+    """These attach to whoever is being spoken to, so they say nothing about
+    who that is. Each one survives the speaker filters on real data by being
+    addressed to a third party while the narrator stands by."""
+    plan = _narrator(_a_name("Conn"), _a_name("Connwaer"), _a_name(term), _candidate(term.lower()))
+
+    names, epithets = auto_link_plan(plan)
+
+    assert names == ["Conn", "Connwaer"]
+    assert epithets == []
+
+
+def test_seeding_keeps_epithets_out_of_the_alias_list() -> None:
+    """The split has to survive the write, not just the read - folding the two
+    lists together here would leak epithets into question matching by the back
+    door, with `select_relevant_facts` unchanged and its test still passing."""
+    entities: dict = {"entities": []}
+
+    entity_id, created = seed_alias_group(entities, "book", ["Conn", "Connwaer"], epithets=["boy", "lad"])
+
+    (entity,) = entities["entities"]
+    assert created
+    assert entity["entity_id"] == entity_id
+    assert entity["canonical_name"] == "Conn"
+    assert entity["aliases"] == ["Connwaer"]
+    assert entity["epithets"] == ["boy", "lad"]

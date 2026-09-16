@@ -19,9 +19,14 @@ from bookrag.cli import (
     narrator_alias_lines,
 )
 from bookrag.extract.resolve import load_entities, save_entities
-from bookrag.ingest.vocatives import NarratorAliases
+from bookrag.ingest.vocatives import AliasCandidate, NarratorAliases
 from bookrag.storage import load_chapters
-from tests.helpers import build_fragmented_epub, build_narrative_epub, build_sample_epub
+from tests.helpers import (
+    build_first_person_epub,
+    build_fragmented_epub,
+    build_narrative_epub,
+    build_sample_epub,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -817,24 +822,32 @@ def test_narrator_aliases_print_nothing_for_a_third_person_book() -> None:
     assert narrator_alias_lines(NarratorAliases()) == []
 
 
-def test_narrator_aliases_show_their_counts_and_claim_nothing() -> None:
-    """The counts are the point: they are how a reader separates a real alias
-    from a stray match, and on a real book the gap is stark. The wording has to
-    stay at "candidates" - a three-party scene can put a bystander's title in
-    this list, and nothing here is applied to anything."""
+def test_narrator_aliases_show_their_counts_and_whether_each_reads_as_a_name() -> None:
+    """The counts are how a reader separates a real alias from a stray match,
+    and on a real book the gap is stark. The name/epithet mark is the other
+    half: it decides what can happen to a candidate at all, since only a name
+    is ever linkable or reachable from a question.
+
+    This section still claims nothing about what was *done* - a three-party
+    scene can put a bystander's title in this list, so "detected" and "acted
+    on" have to stay visibly separate. The "Linked" section says what
+    happened."""
     found = NarratorAliases(
-        aliases=[("boy", 34), ("conn", 13), ("captain", 2)],
+        aliases=[
+            AliasCandidate("boy", times_addressed=34, times_capitalised=0),
+            AliasCandidate("Conn", times_addressed=13, times_capitalised=13),
+            AliasCandidate("Captain", times_addressed=2, times_capitalised=2),
+        ],
         first_person_chapters=[0, 1, 2],
         chapters_considered=4,
     )
 
     lines = narrator_alias_lines(found)
 
-    assert "boy (34x)" in lines[0]
-    assert "conn (13x)" in lines[0]
+    assert "boy (34x, epithet)" in lines[0]
+    assert "Conn (13x, name)" in lines[0]
     assert "3 of 4 chapters" in lines[1]
-    assert any("candidates only" in line for line in lines)
-    assert not any("merged" in line.lower() or "applied" in line.lower() for line in lines)
+    assert not any("merged" in line.lower() or "linked as" in line.lower() for line in lines)
 
 
 def _seed_name_variant_cluster(library_root: Path, book_id: str) -> None:
@@ -1133,3 +1146,86 @@ def test_tee_flushes_every_write_so_a_follower_sees_progress_live(tmp_path: Path
         assert log_path.read_text(encoding="utf-8") == "  [1/75] chapter done\n"
 
     assert sink.getvalue() == "  [1/75] chapter done\n"
+
+
+def _characters(library_root: Path) -> list[dict]:
+    return [e for e in load_entities(library_root)["entities"] if e["type"] == "character"]
+
+
+def test_ingest_links_a_first_person_narrators_names_without_being_asked(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """**The point of the whole feature.** A reader's flow is download, drop in
+    `data/incoming/`, ingest, extract - nothing in it goes near a linking
+    command. So a link that waits to be invoked is invisible, which is exactly
+    the fault of `doctor --merge-name-variants`, and a tester's re-ingest
+    reproduces the same fragmented library it was meant to fix.
+
+    Runs with no terminal attached (pytest captures stdout), because the
+    approach this replaced was an interactive prompt - it needed a person
+    present who could judge a book's cast, per book."""
+    epub_path = tmp_path / "first_person.epub"
+    build_first_person_epub(epub_path)
+
+    exit_code = main(["ingest", str(epub_path)])
+
+    assert exit_code == 0
+    (entity,) = _characters(_library_root)
+    assert entity["canonical_name"] == "Conn"
+    assert entity["aliases"] == ["Connwaer"]
+    assert entity["epithets"] == ["boy"]
+
+    output = capsys.readouterr().out
+    assert "'Conn' also answers to Connwaer" in output
+    # An automatic, heuristic-driven merge has to say how to undo itself.
+    assert "--unlink" in output
+
+
+def test_ingest_no_auto_link_leaves_the_names_separate(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The baseline escape hatch: still detects and reports, links nothing."""
+    epub_path = tmp_path / "first_person.epub"
+    build_first_person_epub(epub_path)
+
+    exit_code = main(["ingest", str(epub_path), "--no-auto-link"])
+
+    assert exit_code == 0
+    assert _characters(_library_root) == []
+    output = capsys.readouterr().out
+    assert "skipped (--no-auto-link)" in output
+    assert "Connwaer" in output  # detection still ran and still reported
+
+
+def test_aliases_unlink_separates_the_names_again(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """What makes automatic linking acceptable at all. A heuristic will
+    sometimes be wrong, and "wrong and permanent" is a different proposition
+    from "wrong and one command away"."""
+    epub_path = tmp_path / "first_person.epub"
+    build_first_person_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    capsys.readouterr()
+
+    exit_code = main(["aliases", book_dir.name, "--unlink"])
+
+    assert exit_code == 0
+    (entity,) = _characters(_library_root)
+    assert entity["aliases"] == []
+    assert entity["epithets"] == []
+    assert json.loads((book_dir / "declared_aliases.json").read_text(encoding="utf-8"))["groups"] == []
+    assert "Unlinked" in capsys.readouterr().out
+
+
+def test_a_third_person_book_is_left_alone(tmp_path: Path, _library_root: Path) -> None:
+    """Most books are third person, and there is no attribution signal there -
+    a vocative is findable but nothing says who it was aimed at. Ingest must be
+    silent rather than guess, or auto-linking becomes a liability on the
+    common case rather than a win on the rare one."""
+    epub_path = tmp_path / "narrative.epub"
+    build_narrative_epub(epub_path)
+
+    assert main(["ingest", str(epub_path)]) == 0
+    assert _characters(_library_root) == []

@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
-last_synced: 2026-09-15T16:39:28Z
-source_hash: 94e2008ebfa41e3d4823ce2a50d5637640d01671
+last_synced: 2026-09-16T20:32:36Z
+source_hash: 372b5b0fc7397c578fe1a4db3620975824d329d1
 ---
 
 ## Purpose
@@ -105,13 +105,36 @@ Also covers, added since the above:
   time. Sabotage-verified by removing `_Tee`'s flush.
 
 - **Narrator-alias rendering** (`test_narrator_aliases_print_nothing_for_a_
-  third_person_book`, `..._show_their_counts_and_claim_nothing`) — the
-  detection itself is `test_vocatives.py`'s job; these pin the two properties
-  the *output* has to hold. The empty case matters because the section is
-  emitted unconditionally at the call site and most novels are third person.
-  The second asserts the counts survive into the text and that the wording
-  never claims anything was merged or applied — a bystander's title can land in
-  this list, so the copy is the only thing keeping it honest.
+  third_person_book`, `..._show_their_counts_and_whether_each_reads_as_a_name`)
+  — the detection itself is `test_vocatives.py`'s job; these pin the two
+  properties the *output* has to hold. The empty case matters because the
+  section is emitted unconditionally at the call site and most novels are third
+  person. The second asserts the counts survive into the text, that each
+  candidate is marked name-or-epithet (the distinction that decides what can
+  happen to it), and that this section still claims nothing about what was
+  *applied* — a bystander's title can land in this list, so "detected" and
+  "acted on" have to stay visibly separate. The "Linked" section below it is
+  the only authority on what happened.
+
+  This test was stale and silently vacuous before the tests below existed: it
+  built `NarratorAliases` from `(name, count)` tuples, which matched a
+  `narrator_alias_lines` that also still unpacked tuples, while the real
+  `found.aliases` had become a list of `AliasCandidate`. Both halves agreed
+  with each other and neither agreed with production, so the suite was green
+  while **every first-person book crashed at ingest with a `TypeError`**. The
+  ingest tests below are what surfaced it.
+
+- **Auto-linking at ingest** (`test_ingest_links_a_first_person_narrators_
+  names_without_being_asked`, `..._no_auto_link_leaves_the_names_separate`,
+  `test_aliases_unlink_separates_the_names_again`,
+  `test_a_third_person_book_is_left_alone`) — the point of the whole feature.
+  A reader's flow is download, ingest, extract; nothing in it goes near a
+  linking command, so a link that waits to be invoked is invisible and a
+  tester's re-ingest reproduces the same fragmented library it was meant to
+  fix. These run with no terminal attached, which is the property that rules
+  out the interactive prompt this replaced. The third-person test is the
+  restraint half: most books are third person, there is no attribution signal
+  there, and ingest has to stay silent rather than guess.
 
 - **The `aliases` command** (`test_aliases_command_says_so_plainly_for_a_third_
   person_book`, `..._link_creates_an_entity_extraction_will_resolve_into`,

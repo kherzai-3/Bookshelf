@@ -1,7 +1,7 @@
 ---
 source: tests/helpers.py
-last_synced: 2026-09-13T16:40:00Z
-source_hash: b9c411a0d4a202e24c4ccb934ee8d2167d768bd5
+last_synced: 2026-09-16T20:32:36Z
+source_hash: 0ad0d203eb45ad47b5a683d420755e2cf93c08c9
 ---
 
 ## Purpose
@@ -29,6 +29,16 @@ have something real to assert against.
   for a new entity: every sentence starts with one of `FakeProvider`'s own
   pronoun stopwords (It/He/She/They/We), and no other word in it is
   capitalized.
+- `build_first_person_epub(path)` — a first-person novel whose dialogue calls
+  its narrator "Conn", "Connwaer" and "boy". The only fixture that exercises
+  auto-linking at ingest end to end, and the shape `ingest.vocatives` looks
+  for: two chapters, each with ~770 words of first-person narration and six
+  utterances spoken by a *named* character. Detection on it yields Conn 4/4
+  capitalised, Connwaer 4/4, boy 0/4 — so `auto_link_plan` returns
+  `(["Conn", "Connwaer"], ["boy"])`.
+- `_I_NARRATE: str` — private; the first-person counterpart to
+  `NARRATIVE_PADDING`, proper-noun-free but dense in `I`/`my`/`me` (~16 per 100
+  words against `vocatives._FIRST_PERSON_PER_100_WORDS`'s floor of 4.0).
 - `build_fragmented_epub(path, fragment_count=40, words_per_fragment=100)` —
   many small, untitled, unheaded spine documents (no `h1`-`h3` markup at
   all), mirroring a real page-scanned Internet-Archive epub (Atomic
@@ -45,3 +55,14 @@ have something real to assert against.
   `build_sample_epub` itself, since the latter is shared by tests
   (`test_epub_loader.py` etc.) that assert its exact short content -
   lengthening it in place would have risked breaking those.
+- `build_first_person_epub`'s dialogue puts every name in *trailing* vocative
+  position ("You are late, Conn,"), because that is the one position where
+  capitalisation is evidence - a leading vocative is sentence-initial and
+  capitalised whether it is a name or an epithet. A fixture using leading
+  position would make "boy" read as a name and the epithet half of the feature
+  would silently not be under test.
+- Every utterance in it is attributed to a named speaker rather than "I". That
+  is the entire detection signal: in a first-person book an utterance from
+  anyone but the narrator is, in a two-hander, addressed *to* the narrator.
+- The speaker ("Nevery") is never itself addressed, so it never lands in the
+  ambiguous column and never competes with the real aliases.

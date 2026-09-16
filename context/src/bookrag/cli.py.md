@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-16T19:53:59Z
-source_hash: e82f76268c7c93baa8859dd8f6e374ce936a42a8
+last_synced: 2026-09-16T20:32:36Z
+source_hash: 7bb640d52efbcdff204ef63cc5395330f55e4bd8
 ---
 
 ## Purpose
@@ -42,9 +42,20 @@ actual logic (see that file's context doc for the real behavior).
   them, so `_print_section` drops the section entirely and the call site needs
   no guard. Counts are shown deliberately: they are how a reader separates a
   real alias from a stray match, and on a real book the gap is stark (34
-  against 2). The wording stays at *candidates* and names no consequence,
-  because nothing is applied and a three-party scene can put a bystander's
-  title in the list.
+  against 2). Each candidate is marked `name` or `epithet`, since that decides
+  what can happen to it — only a name is linkable, and only a name ever reaches
+  question matching. The section reports and claims nothing about what was
+  *applied*; the "Linked" section immediately after is the sole authority on
+  that, because a three-party scene can put a bystander's title in this list
+  and "detected" must not read as "acted on".
+
+  **It read `found.aliases` as `(name, count)` tuples long after they became
+  `AliasCandidate` objects**, so every first-person book crashed here at ingest
+  with a `TypeError`. The suite stayed green because the only test covering it
+  built its fixture from tuples too — both halves agreed with each other and
+  neither with production. Found by `test_cli.py`'s first real ingest of a
+  first-person epub; the lesson is that a hand-built fixture for a dataclass
+  that recently changed shape is worth nothing.
 - `next_step_lines(book_id, chapter_count) -> list[str]` — the post-ingest
   guidance (the `extract` command, the `--log`/follow recipe, that Ctrl+C is
   safe, the `--provider fake` path). Returns lines so `_print_section` owns
