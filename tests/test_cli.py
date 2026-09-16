@@ -1229,3 +1229,62 @@ def test_a_third_person_book_is_left_alone(tmp_path: Path, _library_root: Path) 
 
     assert main(["ingest", str(epub_path)]) == 0
     assert _characters(_library_root) == []
+
+
+def test_extract_after_unlinking_warns_instead_of_crashing(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The recovery path, which shipped broken. `--unlink` tells the user to
+    re-run `bookrag extract --restart`, and that command died with a
+    `TypeError` - so the one instruction printed to somebody undoing a wrong
+    link was the one instruction that did not work.
+
+    Ingest-only tests cannot reach this: nothing is declared *yet* at ingest
+    time either way, so the warning is silent there. It needs an extract that
+    runs *after* the link was removed."""
+    epub_path = tmp_path / "first_person.epub"
+    build_first_person_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    main(["aliases", book_dir.name, "--unlink"])
+    capsys.readouterr()
+
+    exit_code = main(["extract", book_dir.name, "--provider", "fake", "--restart"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "nothing links them yet" in output
+    assert "Conn" in output
+
+
+def test_extract_after_no_auto_link_warns_instead_of_crashing(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other way to reach the same line: opting out at ingest rather than
+    undoing afterwards. Same crash, same silence from ingest-only tests."""
+    epub_path = tmp_path / "first_person.epub"
+    build_first_person_epub(epub_path)
+    main(["ingest", str(epub_path), "--no-auto-link"])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    capsys.readouterr()
+
+    exit_code = main(["extract", book_dir.name, "--provider", "fake"])
+
+    assert exit_code == 0
+    assert "nothing links them yet" in capsys.readouterr().out
+
+
+def test_extract_says_nothing_about_aliases_when_the_link_is_in_place(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The normal path stays quiet. Auto-linking already handled it at ingest,
+    and repeating the warning here would train the reader to ignore it."""
+    epub_path = tmp_path / "first_person.epub"
+    build_first_person_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    capsys.readouterr()
+
+    main(["extract", book_dir.name, "--provider", "fake"])
+
+    assert "nothing links them yet" not in capsys.readouterr().out

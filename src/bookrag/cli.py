@@ -1045,20 +1045,29 @@ def sanity_summary(chapters: list[Chapter], edge_count: int = 3) -> list[str]:
 def unlinked_narrator_warning(book_id: str, chapters: list[Chapter]) -> list[str]:
     """The last chance to catch a split character before hours of work bake it in.
 
-    Ingest asks the question, but only on a terminal - a backgrounded or
-    scripted ingest skips it, and a user who pressed Enter can still change
-    their mind. This run is where it stops being cheap: the facts about to be
-    written are the ones that get filed under two people.
+    Ingest links automatically, so this is silent on the normal path - it only
+    speaks when a book *has* candidates and nothing is declared, which means
+    the user deliberately opted out (`ingest --no-auto-link`) or undid a link
+    (`aliases --unlink`). This run is where that choice stops being cheap: the
+    facts about to be written are the ones that get filed under two people.
 
     A warning, never a refusal. Declining to link is a legitimate answer, and
     for most books (third person, nonfiction) there is nothing to say at all.
+
+    **Both paths that reach this line are reversibility paths**, which is how
+    it shipped crashing: it unpacked `found.aliases` as `(name, count)` tuples
+    long after they became `AliasCandidate` objects, so `extract` died with a
+    `TypeError` for exactly the user who had just opted out or unlinked - and
+    `--unlink` tells them to re-run `extract --restart`. Ingest-only tests
+    never reach here, because nothing is declared *yet* at ingest time either
+    way; it needs an extract *after* an unlink or a `--no-auto-link`.
     """
     if load_declared_aliases(book_id):
         return []
     found = detect_narrator_aliases(chapters)
     if not found.aliases:
         return []
-    named = ", ".join(name for name, _ in found.aliases[:4])
+    named = ", ".join(candidate.name for candidate in found.aliases[:4])
     return [
         f"  Note: this book calls its narrator {named} and nothing links them yet,",
         "  so their facts will be catalogued as separate people. Ctrl+C is safe -",

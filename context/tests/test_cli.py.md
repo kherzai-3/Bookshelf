@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
-last_synced: 2026-09-16T20:32:36Z
-source_hash: 372b5b0fc7397c578fe1a4db3620975824d329d1
+last_synced: 2026-09-16T21:10:59Z
+source_hash: ec878fe28145e98a97b166c68ee5e24bd5a5c66d
 ---
 
 ## Purpose
@@ -123,6 +123,20 @@ Also covers, added since the above:
   with each other and neither agreed with production, so the suite was green
   while **every first-person book crashed at ingest with a `TypeError`**. The
   ingest tests below are what surfaced it.
+
+- **The reversibility paths** (`test_extract_after_unlinking_warns_instead_of_
+  crashing`, `..._after_no_auto_link_...`, `test_extract_says_nothing_about_
+  aliases_when_the_link_is_in_place`) — `unlinked_narrator_warning` is silent
+  on the normal path, so the only two ways to reach it are the two ways to opt
+  out of auto-linking. It shipped crashing on both, which meant `extract
+  --restart` — the single instruction `--unlink` prints — died with a
+  `TypeError` for exactly the user undoing a wrong link. **Ingest-only tests
+  structurally cannot catch this**: nothing is declared yet at ingest time
+  whether or not you opted out, so the warning stays quiet there; it needs an
+  extract that runs *after* the opt-out. Found by walking the real user flow
+  rather than by reasoning about it. The third test pins the other half — the
+  normal path stays quiet, since repeating the warning when the link is already
+  in place trains the reader to ignore it.
 
 - **Auto-linking at ingest** (`test_ingest_links_a_first_person_narrators_
   names_without_being_asked`, `..._no_auto_link_leaves_the_names_separate`,

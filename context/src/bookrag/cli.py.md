@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-16T20:32:36Z
-source_hash: 7bb640d52efbcdff204ef63cc5395330f55e4bd8
+last_synced: 2026-09-16T21:10:59Z
+source_hash: 8bad70ea3c830226c243a4d890a798449c4a0e5d
 ---
 
 ## Purpose
@@ -429,6 +429,17 @@ split is determined entirely by which book each fact already lives in.
   candidates exist and nothing is linked. The last cheap moment before hours of
   work bake a split character in. A warning, never a refusal. `_run_extract`
   keeps the `chapters` list rather than only its length so this can read it.
+
+  Silent on the normal path now that ingest auto-links, so **the only two ways
+  to reach it are reversibility paths**: `ingest --no-auto-link`, or
+  `aliases --unlink`. That is how it shipped crashing — it unpacked
+  `found.aliases` as `(name, count)` tuples after they became
+  `AliasCandidate` objects, so `extract` died with a `TypeError` for exactly
+  the user who had just undone a link, and `--unlink`'s own message tells them
+  to re-run `extract --restart`. The single documented recovery instruction was
+  the one that did not work. Ingest-only tests cannot catch it: nothing is
+  declared *yet* at ingest time either way, so it takes an extract that runs
+  *after* the opt-out.
 - `bookrag aliases <book> [--link A,B] [--auto] [--unlink]` — inspect, link by
   hand, apply the same automatic rule to an already-ingested book, or undo. The
   report marks each candidate `(name)` or `(epithet)`, which is the distinction
