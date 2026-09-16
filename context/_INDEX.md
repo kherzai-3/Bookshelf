@@ -13,8 +13,8 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/storage.py](src/bookrag/storage.py.md) — persists a book (source + chapters + metadata incl. `content_type`) to `data/library/<book_id>/`; series-aware index + reading-order helper.
 - [src/bookrag/query.py](src/bookrag/query.py.md) — `facts_as_of`: the spoiler-safety filter primitive; `format_context` renders facts for a provider.
 - [src/bookrag/eval.py](src/bookrag/eval.py.md) — read-only provider comparison: side-by-side report + groundedness score.
-- [src/bookrag/cli.py](src/bookrag/cli.py.md) — `bookrag ingest|extract|eval|chat|list|show|remove|doctor` CLI entry point.
-- [src/bookrag/library.py](src/bookrag/library.py.md) — library-wide list/show/remove/doctor: extraction-status summaries, index/entities.json consistency cleanup, and the duplicate/cross-book/name-variant entity detectors.
+- [src/bookrag/cli.py](src/bookrag/cli.py.md) — `bookrag ingest|extract|eval|chat|list|show|remove|aliases|doctor` CLI entry point.
+- [src/bookrag/library.py](src/bookrag/library.py.md) — library-wide list/show/remove/aliases/doctor: extraction-status summaries, index/entities.json cleanup, the duplicate/cross-book/name-variant detectors, and `link_names` (declare several names one character, before or after extraction).
 - [src/bookrag/titles.py](src/bookrag/titles.py.md) — last-resort title/author guess from a filename.
 - [src/bookrag/env.py](src/bookrag/env.py.md) — reads settings from the environment/`.env`; a blank value counts as unset, not as an empty-string override.
 - [src/bookrag/providers/__init__.py](src/bookrag/providers/__init__.py.md) — `providers` subpackage marker.
@@ -34,8 +34,8 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [tests/test_pdf_loader.py](../tests/test_pdf_loader.py.md) — covers `pdf_loader` (chapters + metadata), TOC and no-TOC fallback paths.
 - [tests/test_storage.py](../tests/test_storage.py.md) — covers `storage.py`, including the series/chapter-2-collision guarantee.
 - [tests/test_storage_series_reading_order.py](../tests/test_storage_series_reading_order.py.md) — covers `series_reading_order`.
-- [tests/test_cli.py](../tests/test_cli.py.md) — end-to-end `bookrag ingest|extract|eval` coverage, plus CLI-plumbing coverage of `list|show|remove|doctor`.
-- [tests/test_library.py](../tests/test_library.py.md) — covers `library.py`'s list/show/remove/doctor logic in depth.
+- [tests/test_cli.py](../tests/test_cli.py.md) — end-to-end `bookrag ingest|extract|eval` coverage, plus CLI-plumbing coverage of `list|show|remove|aliases|doctor`.
+- [tests/test_library.py](../tests/test_library.py.md) — covers `library.py`'s list/show/remove/doctor logic in depth, plus name-variant detection and `link_names`.
 - [tests/test_env.py](../tests/test_env.py.md) — covers `env.py`'s blank-means-unset rule, and that copying `.env.example` to `.env` leaves every default intact.
 - [tests/test_hooks.py](../tests/test_hooks.py.md) — covers the context-doc enforcement hooks: which paths block a turn, which must not, and that the block decision stays valid JSON.
 - [tests/test_placement.py](../tests/test_placement.py.md) — covers GPU/CPU placement reporting: ModelPlacement, the /api/ps read, and the warning a user sees.

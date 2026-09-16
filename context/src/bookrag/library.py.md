@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/library.py
-last_synced: 2026-09-15T16:05:24Z
-source_hash: 961549edfd01d38596e241f212c5a0bdfd488a12
+last_synced: 2026-09-15T16:39:28Z
+source_hash: 05fd3fca4e10cb3193d196243a81282e79e53a43
 ---
 
 ## Purpose
@@ -51,6 +51,10 @@ module's functions.
   list[str], book_id: str`.
 - `detect_name_variants(root=None) -> list[NameVariantCluster]` — one person
   under several names (see "Name-variant detection" below).
+- `LinkResult` (dataclass) — `entity_id, canonical_name, aliases: list[str],
+  created: bool, merged_entity_ids: list[str], facts_rewritten: int`.
+- `link_names(book_id, names: list[str], root=None) -> LinkResult` — declares
+  several names to be one character. See "Linking names" below.
 - `DoctorReport` (dataclass) — `orphaned_index_entries: list[str],
   stale_entity_book_refs: list[tuple[entity_id, book_id]],
   orphaned_entities: list[str], duplicate_entity_groups:
@@ -215,6 +219,36 @@ they merged precisely because they spell alike.
 exact copy of the four-book library, then the copy re-checked - 2,035 facts
 before and after, zero dangling references, zero cross-book entities
 remaining. Applied to the real library with the same result.
+
+## Linking names (`link_names`)
+
+The answer to "would a re-extraction fix a fragmented character?" - **no, and
+that was tested rather than argued.** The same three-chapter book extracts as
+two entities unseeded (`Conn` in chapters 0 and 2, `Connwaer` in chapter 1) and
+one seeded. A fresh ingest plus re-extraction reproduces the split exactly;
+what decides it is whether `entities.json` already knows the alias when
+extraction starts.
+
+Nothing new was needed to make that work: `extract.resolve.resolve_entity` has
+always matched an incoming entity name against a known entity's `aliases`
+(scoped by `book_ids`), so writing the alias set *first* makes every later
+mention resolve to one entity and the fragmentation never forms. Confirmed on
+the real 84-chapter Magic Thief omnibus - after linking `Conn,Connwaer`, a full
+extraction leaves **no separate "Connwaer" entity at all**.
+
+**Works in both directions, on purpose.** Run after extraction it merges
+whatever entities already hold those names, reusing `merge_entities` rather
+than reimplementing it. A real extraction costs hours, so a user who only
+works out who is who *afterwards* must not be told to start over.
+
+**Takes explicit names, never a detector's output.** `ingest.vocatives` reports
+candidates, and its own accuracy notes record that a generic term of address
+(`sir`, `dear`) can survive its filters. A name-like alias is safe to link; a
+generic epithet is a bad retrieval key, because `query.select_relevant_facts`
+matches aliases by substring and an alias of "boy" makes every question
+containing that word retrieve this character (measured - see
+`context/src/bookrag/ingest/vocatives.py.md`). Choosing is a person's job, and
+`cli.py`'s `aliases` command says so in its output.
 
 ## Name-variant detection (`detect_name_variants`)
 

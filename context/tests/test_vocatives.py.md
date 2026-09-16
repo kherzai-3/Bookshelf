@@ -1,7 +1,7 @@
 ---
 source: tests/test_vocatives.py
-last_synced: 2026-09-15T15:51:06Z
-source_hash: 0b5291c1161b089acfdfe4dcbb5ec95e11c8c629
+last_synced: 2026-09-15T16:39:28Z
+source_hash: 560fac8fadbc7add05f4f2e6b68970ef783dea9b
 ---
 
 ## Purpose
@@ -37,6 +37,13 @@ Nine tests plus `_I_NARRATE` / `_HE_NARRATES` narration fixtures and the
   detector that had stopped working.
 - Tests assert on `dict(found.aliases)` rather than the ordered list wherever
   order is not the subject, so adding a name does not break an unrelated test.
+
+- **`test_a_candidate_who_also_speaks_is_another_character`** pins the fix for
+  the precision failure that the first measurement missed entirely: in a
+  first-person novel the narrator overhears conversations he is not part of, so
+  "spoken by someone other than the narrator" does not mean "addressed to the
+  narrator". The fixture gives Trammel both an addressed line and two speaking
+  lines, which is the real shape (`"Well, Trammel?" Brumbee asked`).
 
 ## Dependencies
 - Internal: `bookrag.ingest.vocatives`, `bookrag.ingest.chapter.Chapter`

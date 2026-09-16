@@ -4,12 +4,14 @@ from pathlib import Path
 
 import pytest
 
+from bookrag.extract.pipeline import extract_book
 from bookrag.extract.resolve import load_entities, save_entities
 from bookrag.ingest.chapter import Chapter
 from bookrag.library import (
     detect_cross_book_entities,
     detect_duplicate_entities,
     detect_name_variants,
+    link_names,
     list_books,
     merge_entities,
     remove_book,
@@ -17,6 +19,7 @@ from bookrag.library import (
     show_book,
     split_cross_book_entity,
 )
+from bookrag.providers.fake_provider import FakeProvider
 from bookrag.query import facts_as_of, select_relevant_facts
 from bookrag.storage import load_index, save_book
 from tests.helpers import NARRATIVE_PADDING
@@ -544,6 +547,67 @@ def test_doctor_reports_name_variants_without_touching_them(tmp_path: Path) -> N
 
     assert _variant_names(report.name_variant_clusters) == [{"Baron Arald", "Arald"}]
     assert len(load_entities(root)["entities"]) == 2
+
+
+def test_link_names_before_extraction_stops_the_split_forming(tmp_path: Path) -> None:
+    """The whole point of linking *before* extraction, proved end to end
+    against the real pipeline rather than argued. `resolve_entity` already
+    matches an incoming name against a known entity's aliases, so a seeded
+    alias set absorbs every later mention and the fragmentation never forms.
+    The unseeded half of this test is the bug it prevents."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [
+        Chapter(0, "One", f"Conn climbed the wall. {NARRATIVE_PADDING}"),
+        Chapter(1, "Two", f"Connwaer stole the stone. {NARRATIVE_PADDING}"),
+    ]
+
+    unseeded = save_book(source, chapters, title="Thief Unseeded", root=root)
+    extract_book(unseeded, FakeProvider(), root=root)
+    names = {e["entity_id"]: e["canonical_name"] for e in load_entities(root)["entities"]}
+    split = {names[f.entity_id] for f in facts_as_of(unseeded, 1, root=root)}
+    assert {"Conn", "Connwaer"} <= split  # the bug: two people
+
+    seeded = save_book(source, chapters, title="Thief Seeded", root=root)
+    link_names(seeded, ["Conn", "Connwaer"], root=root)
+    extract_book(seeded, FakeProvider(), root=root)
+    names = {e["entity_id"]: e["canonical_name"] for e in load_entities(root)["entities"]}
+    unified = {names[f.entity_id] for f in facts_as_of(seeded, 1, root=root)}
+    assert "Conn" in unified
+    assert "Connwaer" not in unified  # absorbed; no second entity was ever made
+
+
+def test_link_names_after_extraction_merges_what_is_already_there(tmp_path: Path) -> None:
+    """A user who ingests, extracts, and only then works out who is who must
+    not be told to start over - a real extraction costs hours."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    book_id = save_book(
+        source,
+        [
+            Chapter(0, "One", f"Conn climbed the wall. {NARRATIVE_PADDING}"),
+            Chapter(1, "Two", f"Connwaer stole the stone. {NARRATIVE_PADDING}"),
+        ],
+        title="Thief",
+        root=root,
+    )
+    extract_book(book_id, FakeProvider(), root=root)
+
+    result = link_names(book_id, ["Conn", "Connwaer"], root=root)
+
+    assert result.created is False
+    assert result.merged_entity_ids and result.facts_rewritten >= 1
+    names = {e["entity_id"]: e["canonical_name"] for e in load_entities(root)["entities"]}
+    assert {names[f.entity_id] for f in facts_as_of(book_id, 1, root=root)} == {"Conn"}
+
+
+def test_link_names_refuses_a_single_name(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    book_id = _make_book(tmp_path, root, "Thief")
+    with pytest.raises(ValueError):
+        link_names(book_id, ["Conn"], root=root)
 
 
 def test_detect_duplicate_entities_no_false_positive_on_different_names(tmp_path: Path) -> None:

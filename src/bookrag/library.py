@@ -525,6 +525,92 @@ def detect_name_variants(root: Path | None = None) -> list[NameVariantCluster]:
 
 
 @dataclass
+class LinkResult:
+    entity_id: str
+    canonical_name: str
+    aliases: list[str]
+    created: bool  # False means it folded into entities extraction had already made
+    merged_entity_ids: list[str]
+    facts_rewritten: int
+
+
+def link_names(book_id: str, names: list[str], root: Path | None = None) -> LinkResult:
+    """Declare that several names are one character, before or after extraction.
+
+    Before extraction this is the useful direction, and the reason this exists
+    at all: `resolve_entity` already matches an incoming entity name against a
+    known entity's `aliases`, so writing the alias set *first* makes every
+    chapter's mention resolve to one entity and the fragmentation never forms.
+    Verified end to end - the same three-chapter book extracts as two entities
+    unseeded and one seeded.
+
+    After extraction it still does the right thing: any entities those names
+    already own are merged into the largest, which is `merge_entities`'s job
+    and is reused rather than reimplemented. So a user who ingests, extracts,
+    and only then works out who is who is not told to start over.
+
+    Deliberately takes explicit names rather than reading a detector's output.
+    `ingest.vocatives` reports *candidates*, and its own accuracy notes say a
+    generic term of address can land among them ("sir", "dear"); a name-like
+    alias is safe to merge while a generic epithet is a bad retrieval key (see
+    that module's context doc for the measurement). Choosing is a person's job.
+    """
+    root = root or library_root()
+    cleaned = [name.strip() for name in names if name.strip()]
+    if len(cleaned) < 2:
+        raise ValueError("link_names needs at least two names")
+
+    entities = load_entities(root)
+    keys = {match_key(name) for name in cleaned}
+    owned = [
+        entity
+        for entity in entities["entities"]
+        if entity["type"] == "character"
+        and book_id in entity["book_ids"]
+        and (
+            match_key(entity["canonical_name"]) in keys
+            or any(match_key(alias) in keys for alias in entity["aliases"])
+        )
+    ]
+
+    merged_ids: list[str] = []
+    facts_rewritten = 0
+    if len(owned) > 1:
+        result = merge_entities([e["entity_id"] for e in owned], root=root)
+        merged_ids, facts_rewritten = result.merged_entity_ids, result.facts_rewritten
+        entities = load_entities(root)
+        kept = next(e for e in entities["entities"] if e["entity_id"] == result.kept_entity_id)
+    elif owned:
+        kept = next(e for e in entities["entities"] if e["entity_id"] == owned[0]["entity_id"])
+    else:
+        kept = {
+            "entity_id": f"character-{uuid.uuid4().hex[:8]}",
+            "canonical_name": cleaned[0],
+            "type": "character",
+            "aliases": [],
+            "book_ids": [book_id],
+        }
+        entities["entities"].append(kept)
+
+    created = not owned
+    for name in cleaned:
+        if match_key(name) == match_key(kept["canonical_name"]):
+            continue
+        if not any(match_key(alias) == match_key(name) for alias in kept["aliases"]):
+            kept["aliases"].append(name)
+    save_entities(entities, root)
+
+    return LinkResult(
+        entity_id=kept["entity_id"],
+        canonical_name=kept["canonical_name"],
+        aliases=list(kept["aliases"]),
+        created=created,
+        merged_entity_ids=merged_ids,
+        facts_rewritten=facts_rewritten,
+    )
+
+
+@dataclass
 class MergeResult:
     kept_entity_id: str
     merged_entity_ids: list[str]

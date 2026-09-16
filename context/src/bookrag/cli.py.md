@@ -1,17 +1,17 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-15T15:51:06Z
-source_hash: b057a9d59e92e61dacfa353a3b9b55f753d3568d
+last_synced: 2026-09-15T16:39:28Z
+source_hash: f5293c00bab15e873ee7acde56821accd755a4ed
 ---
 
 ## Purpose
 The `bookrag` command-line entry point (registered via `[project.scripts]` in
-`pyproject.toml`). Eight subcommands: `ingest` (file → library),
+`pyproject.toml`). Nine subcommands: `ingest` (file → library),
 `extract` (library book → chapter-scoped facts), `eval` (compare providers,
 read-only), `chat` (spoiler-safe Q&A against a book, up to a given chapter),
-and four library-management commands - `list`, `show`, `remove`, `doctor` -
-that are thin argparse/print wrappers around `bookrag.library`'s actual logic
-(see that file's context doc for the real behavior).
+and five library-management commands - `list`, `show`, `remove`, `aliases`,
+`doctor` - that are thin argparse/print wrappers around `bookrag.library`'s
+actual logic (see that file's context doc for the real behavior).
 
 ## Public Interface
 - `main(argv: list[str] | None = None) -> int` — argparse-based entry point;
@@ -119,6 +119,18 @@ that are thin argparse/print wrappers around `bookrag.library`'s actual logic
   `--yes` is given; an unconfirmable prompt (EOF, e.g. non-interactive
   stdin) aborts rather than silently proceeding. Works even on a
   directory-only-orphaned or index-only-orphaned book.
+- CLI: `bookrag aliases <book-id> [--link NAME,NAME,...]` — without `--link`,
+  reports what `ingest.vocatives` found (the same detection ingest prints,
+  re-run from stored chapters, so no new storage format was needed), plus the
+  candidates it *rejected* as other characters and why. With `--link`, calls
+  `library.link_names`. **The point of the command is the ordering it teaches:**
+  linking before `extract` stops the split forming, linking after merges what
+  already exists. Says plainly that a third-person book has nothing to report,
+  rather than printing an empty list that reads like a failure. The example
+  command it prints joins names with a bare comma and no space - a cast
+  routinely includes names a shell would split on, and that line is meant to be
+  copied verbatim. It also warns, above the example, to prefer real names over
+  generic terms of address, because aliases match by substring.
 - CLI: `bookrag doctor [--fix] [--merge-duplicates] [--merge-name-variants]
   [--split-cross-book] [--yes]` — reports (or, with `--fix`, also repairs)
   three kinds of library drift: orphaned `index.json` entries, stale

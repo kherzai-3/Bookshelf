@@ -78,6 +78,16 @@ _SPEECH_VERBS = (
 
 _SPEAKER = r"(I|[Hh]e|[Ss]he|[A-Z][a-z]+)"
 
+# A candidate must be addressed *more* often than it is caught speaking.
+# The narrator of a first-person book is never a speech-tag subject - they are
+# "I" - so a name that speaks is somebody else's. Measured on the reported
+# book this separates cleanly: every confirmed error sits at or below 1.0
+# (trammel 0.12, argent 0.16, you 0.29, captain 0.75) and every confirmed
+# alias above it (connwaer 24.0, boy 5.6, conn 4.3), with one correct name
+# lost at the boundary (gutterboy, exactly 1.0). Losing a real epithet costs
+# a retrieval near-miss; keeping a real character costs a merged identity.
+_MIN_ADDRESSED_TO_SPOKEN = 1.0
+
 # Words that open an utterance followed by a comma and are not names.
 # Only needed for the leading vocative position; the trailing one ("..., boy.")
 # is unambiguous.
@@ -104,6 +114,10 @@ class NarratorAliases:
     # than absolute: a name the narrator uses for other people more often than
     # other people use it for the narrator is somebody else's name.
     ambiguous: list[tuple[str, int, int]] = field(default_factory=list)  # (name, to, by)
+    # Candidates rejected because they are themselves speakers - other
+    # characters the narrator merely overheard being addressed.
+    # (name, times addressed, times speaking)
+    speakers: list[tuple[str, int, int]] = field(default_factory=list)
     first_person_chapters: list[int] = field(default_factory=list)
     chapters_considered: int = 0
     quote_style: str | None = None  # a human-readable name, for diagnosing a silent zero
@@ -191,6 +205,25 @@ def _speaker(text: str, start: int, end: int) -> str | None:
     return before.group(1) if before else None
 
 
+def _times_speaking(text: str, name: str) -> int:
+    """How often a name is the subject of a speech tag.
+
+    The narrator of a first-person book is never one - they are "I" - so a
+    candidate that speaks belongs to somebody else. This is what separates a
+    real epithet from another character the narrator merely *overheard* being
+    addressed, which the speaker split alone cannot do: `"Well, Trammel?"
+    Brumbee asked` is correctly attributed to Brumbee, who is correctly not the
+    narrator, and is still not addressing the narrator.
+
+    Counted over first-person chapters only. A third-person section names its
+    characters in speech tags, so including one would credit the narrator's own
+    name to somebody else - measured on the reported book, whose later
+    third-person sections made "conn" and "connwaer" look like speakers."""
+    return len(re.findall(r"\b" + re.escape(name) + r"\b\s+(?:\w+ly\s+)?" + _SPEECH_VERBS + r"\b", text, re.I)) + len(
+        re.findall(_SPEECH_VERBS + r"\s+(?:the\s+)?" + re.escape(name) + r"\b", text, re.I)
+    )
+
+
 def detect_narrator_aliases(chapters: list[Chapter]) -> NarratorAliases:
     """Every name the other characters use for a first-person narrator.
 
@@ -243,19 +276,29 @@ def detect_narrator_aliases(chapters: list[Chapter]) -> NarratorAliases:
             # in a scene the narrator is present for, names the narrator.
             (by_narrator if speaker == "I" else to_narrator)[name] += 1
 
-    kept = [
-        (name, count)
-        for name, count in to_narrator.most_common()
-        if count >= _MIN_TIMES_ADDRESSED and count > by_narrator[name]
-    ]
-    ambiguous = [
-        (name, count, by_narrator[name]) for name, count in to_narrator.most_common() if count <= by_narrator[name]
-    ]
+    first_person_text = "\n".join(
+        chapter.text for chapter in chapters if chapter.index in set(first_person_chapters)
+    )
+    kept: list[tuple[str, int]] = []
+    ambiguous: list[tuple[str, int, int]] = []
+    speakers: list[tuple[str, int, int]] = []
+    for name, count in to_narrator.most_common():
+        if count < _MIN_TIMES_ADDRESSED:
+            continue
+        if count <= by_narrator[name]:
+            ambiguous.append((name, count, by_narrator[name]))
+            continue
+        spoken = _times_speaking(first_person_text, name)
+        if spoken and count / spoken <= _MIN_ADDRESSED_TO_SPOKEN:
+            speakers.append((name, count, spoken))
+            continue
+        kept.append((name, count))
 
     return NarratorAliases(
         aliases=kept,
         addressed_by_narrator=by_narrator.most_common(),
         ambiguous=ambiguous,
+        speakers=speakers,
         first_person_chapters=first_person_chapters,
         chapters_considered=considered,
         quote_style=_quote_style_name(pair),

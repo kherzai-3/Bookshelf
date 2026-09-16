@@ -157,6 +157,37 @@ def test_an_interjection_before_a_comma_is_not_a_name() -> None:
     assert dict(detect_narrator_aliases(chapters).aliases) == {"boy": 2}
 
 
+def test_a_candidate_who_also_speaks_is_another_character() -> None:
+    """The failure the speaker split alone cannot see, and the one that made
+    the first measurement look better than it was. In a first-person novel the
+    narrator constantly *overhears* other people talking to each other, so
+    "spoken by someone other than the narrator" does not mean "addressed to the
+    narrator". Real case: `"Well, Trammel?" Brumbee asked` is correctly
+    attributed to Brumbee, who is correctly not the narrator, and is still
+    addressing Trammel.
+
+    The narrator is never a speech-tag subject - they are "I" - so a name
+    caught speaking belongs to somebody else. On the reported book this removed
+    every confirmed error (trammel 0.12, argent 0.16, you 0.29, captain 0.75)
+    and kept every confirmed alias (connwaer 24.0, boy 5.6, conn 4.3)."""
+    chapters = [
+        _chapter(
+            i,
+            _I_NARRATE,
+            _said_by_another("What do you think, Trammel?"),
+            "“I think not,” Trammel said. “Nor does anyone else.”",
+            "“It is late,” Trammel said. “We should go.”",
+            _said_by_another("Come along, boy."),
+        )
+        for i in range(2)
+    ]
+
+    found = detect_narrator_aliases(chapters)
+
+    assert dict(found.aliases) == {"boy": 2}
+    assert [name for name, _, _ in found.speakers] == ["trammel"]
+
+
 def test_front_matter_is_not_judged_for_narration() -> None:
     chapters = [
         Chapter(0, "Copyright", "All rights reserved."),

@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
-last_synced: 2026-09-15T15:51:06Z
-source_hash: 7a450290540fa4d706d21a858d7860dc080adbd5
+last_synced: 2026-09-15T16:39:28Z
+source_hash: 94e2008ebfa41e3d4823ce2a50d5637640d01671
 ---
 
 ## Purpose
@@ -112,6 +112,13 @@ Also covers, added since the above:
   The second asserts the counts survive into the text and that the wording
   never claims anything was merged or applied — a bystander's title can land in
   this list, so the copy is the only thing keeping it honest.
+
+- **The `aliases` command** (`test_aliases_command_says_so_plainly_for_a_third_
+  person_book`, `..._link_creates_an_entity_extraction_will_resolve_into`,
+  `test_aliases_rejects_an_unknown_book`) — CLI plumbing only; `test_library.py`
+  owns the proof that extraction honours a link. The third-person test pins that
+  the command explains itself rather than printing an empty list, which reads
+  like a failure on the majority of novels.
 
 ## Key Decisions
 - The `_library_root` autouse fixture points `BOOKRAG_LIBRARY_ROOT` at a

@@ -1,7 +1,7 @@
 ---
 source: tests/test_library.py
-last_synced: 2026-09-15T16:05:24Z
-source_hash: ab19455473a403340bd814f77a184ab330c88588
+last_synced: 2026-09-15T16:39:28Z
+source_hash: 3b775a7b9a6a52a9051667267aa1a1c92083b83d
 ---
 
 ## Purpose
@@ -60,6 +60,15 @@ Also covers two areas added since:
   `select_relevant_facts` finds both entities' facts under either name.
   `test_doctor_reports_name_variants_without_touching_them` pins that `--fix`
   never merges.
+
+- **Linking names** (`link_names`) —
+  `test_link_names_before_extraction_stops_the_split_forming` is the important
+  one and deliberately runs the *real* pipeline twice in one test: unseeded
+  first, asserting the split actually forms, then seeded, asserting it does
+  not. Asserting only the seeded half would pass against a detector that had
+  quietly stopped working. `..._after_extraction_merges_what_is_already_there`
+  covers the other direction (a real extraction costs hours, so arriving late
+  must not mean starting over), and `..._refuses_a_single_name` the guard.
 
 ## Key Decisions
 - **Two of the false-positive tests were originally vacuous, and a sabotage

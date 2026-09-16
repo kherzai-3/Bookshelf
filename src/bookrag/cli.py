@@ -19,6 +19,7 @@ from bookrag.ingest.consolidate import consolidate_fragments, should_consolidate
 from bookrag.ingest.vocatives import NarratorAliases, detect_narrator_aliases
 from bookrag.library import (
     detect_duplicate_entities,
+    link_names,
     list_books,
     merge_entities,
     remove_book,
@@ -153,6 +154,17 @@ def main(argv: list[str] | None = None) -> int:
     remove.add_argument("book_id")
     remove.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
 
+    aliases = subparsers.add_parser(
+        "aliases", help="Show the names a book uses for its narrator, and link them into one character"
+    )
+    aliases.add_argument("book_id")
+    aliases.add_argument(
+        "--link",
+        metavar="NAME,NAME,...",
+        help="Declare these names to be one character. Run this BEFORE extract and the facts "
+        "never fragment; run it after and any entities holding those names are merged.",
+    )
+
     doctor = subparsers.add_parser("doctor", help="Check the library for consistency issues (read-only by default)")
     doctor.add_argument("--fix", action="store_true", help="Apply the safe, obvious cleanups instead of just reporting")
     doctor.add_argument(
@@ -194,6 +206,8 @@ def main(argv: list[str] | None = None) -> int:
         return _show(args)
     if args.command == "remove":
         return _remove(args)
+    if args.command == "aliases":
+        return _aliases(args)
     if args.command == "doctor":
         return _doctor(args)
     return 1
@@ -660,6 +674,62 @@ def _remove(args: argparse.Namespace) -> int:
         if result.entities_deleted:
             note += f", deleted {result.entities_deleted} that became fully orphaned"
         print(note)
+    return 0
+
+
+def _aliases(args: argparse.Namespace) -> int:
+    try:
+        chapters = load_chapters(args.book_id)
+    except (FileNotFoundError, NotADirectoryError):
+        print(f"no such book in the library: {args.book_id!r}")
+        return 1
+
+    if args.link:
+        try:
+            result = link_names(args.book_id, args.link.split(","))
+        except ValueError as exc:
+            print(f"{exc}")
+            return 1
+        verb = "Created" if result.created else "Updated"
+        print(f"{verb} '{result.canonical_name}' with aliases: {', '.join(result.aliases) or '(none)'}")
+        if result.merged_entity_ids:
+            n = len(result.merged_entity_ids)
+            print(f"  merged {n} existing entit{'y' if n == 1 else 'ies'} into it ({result.facts_rewritten} fact(s) rewritten)")
+        if result.created:
+            print("  Extraction will now resolve every one of those names to this character.")
+        return 0
+
+    found = detect_narrator_aliases(chapters)
+    if not found.is_first_person:
+        print(f"'{args.book_id}' does not read as first-person narration - nothing to report.")
+        print("  This pass only works where the text says who is speaking to whom. In third")
+        print("  person a vocative is still findable, but nothing says who it was aimed at.")
+        return 0
+    if not found.aliases:
+        print(f"'{args.book_id}' reads as first-person, but no name is used for the narrator often enough to report.")
+        return 0
+
+    print(f"Names other characters use for the narrator of '{args.book_id}':")
+    for name, count in found.aliases:
+        print(f"  {name:16} {count}x")
+    if found.speakers:
+        print("\nRejected - these speak as often as they are addressed, so they are other characters:")
+        for name, addressed, spoken in found.speakers:
+            print(f"  {name:16} addressed {addressed}x, speaks {spoken}x")
+    print(
+        f"\nRead from {len(found.first_person_chapters)} of {found.chapters_considered} chapters"
+        f" ({found.quote_style} quotes)."
+    )
+    print("These are candidates, not conclusions - pick the ones that really are one person.")
+    print("Prefer real names over generic terms of address ('boy', 'sir', 'dear'): an alias")
+    print("matches by substring, so 'boy' makes every question containing that word retrieve")
+    print("this character, including questions about some other boy.")
+    # No space after the comma: a book's cast routinely includes names a shell
+    # would split on, and this line is meant to be copied verbatim.
+    example = ",".join(name for name, _ in found.aliases[:2])
+    print(f"\n  bookrag aliases {args.book_id} --link {example}")
+    print("\nRun that BEFORE `bookrag extract` and the facts never fragment in the first")
+    print("place. Run it after and it merges whatever entities already hold those names.")
     return 0
 
 

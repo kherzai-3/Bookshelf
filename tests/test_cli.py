@@ -763,6 +763,52 @@ def test_doctor_merge_duplicates_without_yes_aborts_on_no_confirmation(
     assert {"character-a", "setting-b"} <= remaining_ids  # nothing merged
 
 
+def test_aliases_command_says_so_plainly_for_a_third_person_book(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Most novels are third person. Saying "nothing to report" and why beats
+    an empty list, which reads like a failure."""
+    epub_path = tmp_path / "sample.epub"
+    build_narrative_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    capsys.readouterr()
+
+    exit_code = main(["aliases", book_dir.name])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "does not read as first-person" in output
+
+
+def test_aliases_link_creates_an_entity_extraction_will_resolve_into(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The handoff that makes the whole pass worth running: linking before
+    extraction is what stops the split forming. `test_library.py` owns the
+    proof that extraction honours it; this pins the CLI plumbing and that the
+    user is told what just happened."""
+    epub_path = tmp_path / "sample.epub"
+    build_narrative_epub(epub_path)
+    main(["ingest", str(epub_path)])
+    (book_dir,) = [p for p in _library_root.iterdir() if p.is_dir()]
+    capsys.readouterr()
+
+    exit_code = main(["aliases", book_dir.name, "--link", "Conn,Connwaer"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Created 'Conn'" in output and "Connwaer" in output
+    (entity,) = [e for e in load_entities(_library_root)["entities"] if e["canonical_name"] == "Conn"]
+    assert entity["aliases"] == ["Connwaer"]
+    assert entity["book_ids"] == [book_dir.name]
+
+
+def test_aliases_rejects_an_unknown_book(capsys: pytest.CaptureFixture[str], _library_root: Path) -> None:
+    assert main(["aliases", "no-such-book"]) == 1
+    assert "no such book" in capsys.readouterr().out
+
+
 def test_narrator_aliases_print_nothing_for_a_third_person_book() -> None:
     """Most novels are third person, and this pass has nothing to say about
     them. `_print_section` drops an empty section entirely, header included, so

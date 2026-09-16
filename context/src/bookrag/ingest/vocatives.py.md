@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/vocatives.py
-last_synced: 2026-09-15T15:51:06Z
-source_hash: 6cb49f90c81d189ac46d18c83c9583d3f5a1d730
+last_synced: 2026-09-15T16:39:28Z
+source_hash: 4380f8d82402415cf17e05582dc56637dd6c1811
 ---
 
 ## Purpose
@@ -21,10 +21,45 @@ it rather than having its output patched afterwards.
 ## Public Interface
 - `NarratorAliases` (dataclass) — `aliases: list[tuple[str, int]]`,
   `addressed_by_narrator: list[tuple[str, int]]`,
-  `ambiguous: list[tuple[str, int, int]]`, `first_person_chapters: list[int]`,
+  `ambiguous: list[tuple[str, int, int]]`,
+  `speakers: list[tuple[str, int, int]]`, `first_person_chapters: list[int]`,
   `chapters_considered: int`, `quote_style: str | None`, plus an
   `is_first_person` property.
 - `detect_narrator_aliases(chapters: list[Chapter]) -> NarratorAliases`
+- Consumed by `cli.narrator_alias_lines` (the ingest section) and
+  `bookrag aliases <book_id>`. **Nothing here is ever applied** - linking is
+  `library.link_names`, driven by a person choosing from this list.
+
+## The precision correction (read this before trusting any number)
+An earlier revision of this doc reported **6 of 7 correct**. That was
+small-sample luck and is now known to be wrong. Re-ingesting the reported book
+after a trailing-comma fix roughly **tripled recall** (connwaer 3→24, boy
+34→106), the candidate list went from 7 to 16, and three real characters
+appeared in it: `argent`, `trammel`, `captain`.
+
+The cause is structural, not a tuning problem. In a first-person novel the
+narrator constantly **overhears** conversations he is not part of, so "spoken
+by someone other than the narrator" does not mean "addressed to the narrator".
+`"Well, Trammel?" Brumbee asked` is attributed correctly to Brumbee, who
+correctly is not the narrator, and is still addressing Trammel.
+
+The fix is `_times_speaking` plus `_MIN_ADDRESSED_TO_SPOKEN`: the narrator of a
+first-person book is never a speech-tag subject, so a candidate caught speaking
+belongs to somebody else. Measured on the reported book it separates cleanly -
+every confirmed error at or below a 1.0 ratio (trammel 0.12, argent 0.16, you
+0.29, captain 0.75), every confirmed alias above it (connwaer 24.0, boy 5.6,
+conn 4.3). One correct name is lost at the boundary (gutterboy, exactly 1.0),
+and that trade is deliberate: a missed epithet costs a retrieval near-miss, a
+kept character costs a merged identity.
+
+Counted over **first-person chapters only**. A third-person section names its
+characters in speech tags, and including the reported book's later
+third-person sections made "conn" and "connwaer" themselves look like speakers.
+
+Surviving list on that book: `boy, conn, connwaer, lad, sir, dear, magister,
+thief, shadow, blackbird, cousin`. Six are confirmed correct; `sir`/`dear` are
+generic terms of address and would be poor links. **Still a candidate list, not
+an answer.**
 
 ## Key Decisions
 - **The signal is who is speaking, not what is said.** A vocative sits in
@@ -92,21 +127,18 @@ is a report. `cli.narrator_alias_lines` renders it under ingest's "Names for
 the narrator" section.
 
 ## Open Questions / TODOs
-- **Measured accuracy is 6 of 7 on one book, and needs re-verification across
-  more.** The one wrong result is instructive: the two-hander assumption breaks
-  in a three-party scene, where a guard faces the narrator and says "I suppose
-  she will have to see him, Captain" - speaking *about* the narrator *to* a
-  third person - and "captain" is harvested. `cousin` and `thief` looked wrong
-  and turned out genuine on inspection.
-- **The Magic Thief counts above predate the trailing-comma fix** and will be
-  higher once re-measured; the book was deleted from this machine before the
-  fix landed (`bookrag remove` destroys `source.epub`, which `ingest` had
-  already moved out of `data/incoming/` - see that separate hazard).
-- **Nothing consumes the result yet.** The intended next step is seeding
-  `extract.resolve` with a confirmed alias set before extraction, so the
-  fragmentation never forms, rather than repairing it afterwards with
-  `doctor --merge-name-variants`. That needs a confirmation surface first -
-  this reports candidates and applies nothing.
+- **Accuracy is established on exactly one book.** See "The precision
+  correction" above for why the first estimate was wrong; the same thing could
+  happen again on a book with a different dialogue style. Every number here is
+  n=1 until a reader runs it on something nobody here has seen.
+- **`sir`, `dear`, `magister`, `shadow`, `blackbird` are unresolved** on the
+  reported book - generic terms of address, or possibly real epithets. They
+  survive the filters and a person has to judge them.
+- **Consumed by `library.link_names` only when a person chooses.** Linking
+  before extraction is what stops the split forming, and is now proved end to
+  end; see that function and `test_link_names_before_extraction_stops_the_split_
+  forming`. Nothing links automatically, and it should stay that way while the
+  candidate list still contains `sir`.
 - **A generic epithet must not become a retrieval alias, and this is measured,
   not feared.** `query.select_relevant_facts` matches a question against an
   entity's aliases by case-insensitive *substring*, so an alias of "boy" makes
