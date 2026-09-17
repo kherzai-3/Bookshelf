@@ -145,19 +145,48 @@ class AliasCandidate:
     """One name the book uses for its narrator, with the evidence for it."""
 
     name: str  # the most common surface form, e.g. "Connwaer" or "boy"
-    times_addressed: int
-    times_capitalised: int  # in trailing position, where capitalisation means something
+    times_addressed: int  # in any position - the evidence a reader is shown
+    times_capitalised: int  # of the trailing sightings below, never of all of them
+    times_in_trailing_position: int  # the only sightings capitalisation can be read from
     # Which chapters this candidate was addressed in. Defaulted because every
-    # consumer outside this module reads only the three fields above, and
-    # because a caller that builds a candidate by hand has no chapters to give.
+    # consumer outside this module reads only the fields above, and because a
+    # caller that builds a candidate by hand has no chapters to give.
     chapters: set[int] = field(default_factory=set)
 
     @property
     def reads_as_a_name(self) -> bool:
         """A proper noun, so safe to expose to question matching; otherwise an
         epithet, which is only safe at extraction time (see this module's
-        context doc for why the two are not interchangeable)."""
-        return self.times_capitalised >= self.times_addressed * _NAME_CAPITALISATION_SHARE
+        context doc for why the two are not interchangeable).
+
+        **Both sides of this ratio have to count the same sightings, which is
+        the entire reason the third field exists.** `times_capitalised` can only
+        ever be counted in trailing position - a leading vocative is
+        sentence-initial and capitalised whether it is "Conn" or "Boy" - so
+        measuring it against `times_addressed`, which counts every position,
+        divides one set by a strictly larger one. The effect is not uniform
+        noise either: it penalises a name exactly in proportion to how often the
+        book addresses it *first* in an utterance, which is a property of the
+        prose and nothing to do with whether the word is a proper noun.
+
+        Measured on the reported book, `Conn` is addressed 26 times, 22 of them
+        trailing and all 22 capitalised. The old ratio read 0.85 against a
+        threshold of 0.8 - correct, but by 0.05, and four more leading sightings
+        would have demoted the narrator's own name to an epithet and made the
+        flagship Conn/Connwaer link impossible. Note that
+        `_NAME_CAPITALISATION_SHARE` already documented itself as a share of
+        *trailing* sightings, and already quoted Conn as 22/22; the constant
+        described this rule before the code implemented it.
+
+        A candidate never seen in trailing position carries no capitalisation
+        evidence either way and is not a name. That is stated rather than left
+        to arithmetic because `0 >= 0` is true: the old denominator made this
+        case fail closed by accident, since every candidate has already cleared
+        `_MIN_TIMES_ADDRESSED`, and this one would otherwise promote a candidate
+        with no evidence at all."""
+        if not self.times_in_trailing_position:
+            return False
+        return self.times_capitalised >= self.times_in_trailing_position * _NAME_CAPITALISATION_SHARE
 
     @property
     def is_anyones_term_of_address(self) -> bool:
@@ -292,7 +321,27 @@ def _vocative(utterance: str) -> str | None:
     Trailing position ("Come along, boy.") is taken as-is - a comma before the
     final word of an utterance is a vocative and very little else. Leading
     position ("Conn, come here") has to be filtered, because it is also where
-    every interjection in English lives ("Well, ...", "Righty-o, ...")."""
+    every interjection in English lives ("Well, ...", "Righty-o, ...").
+
+    **An utterance yields at most one vocative, and a trailing match wins. That
+    reads as an oversight - the early return discards any leading match in the
+    same utterance - and it is load-bearing.** Measured across all eight books
+    in the corpus, exactly 19 utterances match in both positions, and in every
+    single one the trailing match is the real vocative while the leading match
+    is a false positive:
+
+        "Breakfast, Nevery,"             "Tea, boy,"
+        "Where, boy?"                    "Quick, lad,"
+        "Mmm, I expect you would, Conn." "cue, routine, reward"
+
+    Counting both would file `Breakfast`, `Where`, `Mmm`, `Tea`, `Quick` and
+    `cue` as names the narrator answers to. They cannot be filtered by
+    extending `_NOT_A_VOCATIVE`: they are ordinary nouns and adverbs, and the
+    stoplist would have to become a dictionary. The two patterns are genuinely
+    asymmetric - a trailing vocative needs a comma *and* the end of the
+    utterance, a leading one needs only a word and a comma, so it fires on
+    every list, interjection and fronted adverbial in the book. Pinned by
+    `test_a_leading_false_positive_never_outranks_the_real_trailing_vocative`."""
     trailing = _vocative_in_trailing_position(utterance)
     if trailing:
         return trailing.lower()
@@ -528,6 +577,11 @@ def detect_narrator_aliases(chapters: list[Chapter]) -> NarratorAliases:
                 name=max(forms, key=forms.get) if forms else name,
                 times_addressed=count,
                 times_capitalised=sum(n for form, n in forms.items() if form[:1].isupper()),
+                # `surface_forms` is only ever written from
+                # `_vocative_in_trailing_position`, so its total *is* the
+                # trailing-sighting count - the denominator the capitalised
+                # count above is the numerator of. See `reads_as_a_name`.
+                times_in_trailing_position=sum(forms.values()),
                 chapters=chapters_of[name],
             )
         )

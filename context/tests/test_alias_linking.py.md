@@ -1,7 +1,7 @@
 ---
 source: tests/test_alias_linking.py
-last_synced: 2026-09-17T14:59:27Z
-source_hash: 0ba29b0b0bd488c2e61571a3435c2164fe95a288
+last_synced: 2026-09-17T18:23:32Z
+source_hash: 036685ea944c25f241d267fb887176e9b6714de5
 ---
 
 ## Purpose
@@ -62,6 +62,17 @@ tests pin `_epithets_for`:
 `_candidate`/`_a_name` take an optional `chapters` set; tests not about chapter
 evidence leave it empty, which reads as "no rival competes" and leaves their
 behaviour unchanged.
+
+`_candidate` also defaults `times_in_trailing_position` to `times_addressed`,
+i.e. a candidate seen only in trailing position — which is what the corpus
+overwhelmingly contains (every real candidate across all eight books except
+`Conn` has the two counts equal). **A derived default in a hand-built fixture is
+exactly the shape that once let this suite agree with itself and not with
+production**, so the gap between the two counts is covered end to end, against
+the real detector, in `test_vocatives.py`; this file only exercises the ratio.
+`test_a_capitalised_vocative_reads_as_a_name_and_a_lowercase_one_does_not`
+carries the one explicit case (Conn, 22 of 26) so the distinction is visible
+here too.
 
 **The two-narrator case is the one that bites hardest.**
 `test_auto_link_plan_refuses_a_book_with_two_narrators` pins that two name

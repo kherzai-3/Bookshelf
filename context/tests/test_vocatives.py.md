@@ -1,7 +1,7 @@
 ---
 source: tests/test_vocatives.py
-last_synced: 2026-09-17T14:59:27Z
-source_hash: f954932ca93374d0dc789f149e1405efd22f1370
+last_synced: 2026-09-17T18:23:32Z
+source_hash: fc5143eb1f64eaaf8c4bb820bc24811a6f9ecc0d
 ---
 
 ## Purpose
@@ -12,7 +12,7 @@ the numbers each encodes live in
 `context/src/bookrag/ingest/vocatives.py.md`.
 
 ## Public Interface
-Fifteen tests plus `_I_NARRATE` / `_HE_NARRATES` narration fixtures and the
+Eighteen tests plus `_I_NARRATE` / `_HE_NARRATES` narration fixtures and the
 `_chapter` / `_said_by_another` / `_said_by_narrator` builders.
 
 ## Key Decisions
@@ -81,6 +81,27 @@ Fifteen tests plus `_I_NARRATE` / `_HE_NARRATES` narration fixtures and the
     only the first narrator's epithet survives the plan. This file is the only
     home for it: `test_alias_linking.py`'s version builds `AliasCandidate`s by
     hand and so cannot catch the detector failing to record chapters at all.
+
+- **Three tests cover the capitalisation denominator and the one-vocative rule**
+  (added 2026-09-17, see the module's context doc for the corpus measurements).
+  All three assert against real detector output, which matters because the
+  property they pin lives in a dataclass that `test_alias_linking.py` builds by
+  hand — the exact shape that once let a fixture and production disagree.
+  - `..._a_leading_sighting_does_not_dilute_the_capitalisation_ratio` is the
+    bug. The fixture gives one trailing sighting and two leading ones, so the
+    old denominator reads 2/6 and calls the narrator's own name an epithet
+    while the new one reads 2/2. It asserts the old ratio explicitly
+    (`times_capitalised < times_addressed * 0.8`) rather than only the verdict,
+    so it still describes what was wrong if the threshold ever moves.
+  - `..._a_vocative_never_seen_in_trailing_position_is_not_a_name` pins the
+    fail-closed case the new denominator opens: `0 >= 0 * 0.8` is true, so a
+    candidate with no capitalisation evidence would otherwise be promoted.
+  - `..._a_leading_false_positive_never_outranks_the_real_trailing_vocative`
+    pins behaviour that **looks like a bug and is not** — `_vocative` returns on
+    a trailing match and never examines the leading one. Its fixtures
+    ("Tea, boy," and "Where, boy?") are verbatim from the corpus, where all 19
+    both-position utterances have a false-positive leading match. The test
+    exists to stop the next reader "fixing" it.
 
 ## Dependencies
 - Internal: `bookrag.ingest.vocatives`, `bookrag.ingest.chapter.Chapter`

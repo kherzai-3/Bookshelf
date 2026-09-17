@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/vocatives.py
-last_synced: 2026-09-17T14:59:27Z
-source_hash: 63250fb91356bcf77395328b3523a65a18c539d7
+last_synced: 2026-09-17T18:23:32Z
+source_hash: e6d8382f20398cbe2cdcb2eae72d2ed1f56a1b97
 ---
 
 ## Purpose
@@ -198,8 +198,10 @@ the narrator" section.
   an addressee, which is a different problem from finding a vocative.
 
 ## `AliasCandidate` and `auto_link_plan`
-- `AliasCandidate(name, times_addressed, times_capitalised, chapters)` with
-  `reads_as_a_name` (≥80% capitalised) and `is_anyones_term_of_address`.
+- `AliasCandidate(name, times_addressed, times_capitalised,
+  times_in_trailing_position, chapters)` with `reads_as_a_name` (≥80% of the
+  *trailing* sightings capitalised — see the denominator section below) and
+  `is_anyones_term_of_address`.
   `name` keeps the **surface form the book used**, so a linked alias reads like
   the book rather than a lowercased token. `chapters` is the set of chapter
   indices the candidate was addressed in — recorded for the *to-narrator*
@@ -290,6 +292,84 @@ of their scenes are not separable this way, and neither is a second narrator the
 book only ever calls by an epithet. Both need a real multi-narrator book to
 calibrate against, and the corpus has none — all eight books have at most one
 first-person narrator.
+
+## The capitalisation denominator (fixed 2026-09-17)
+
+`reads_as_a_name` divided `times_capitalised` by `times_addressed`, and those
+two count **different sets of sightings**. Capitalisation is only ever counted
+in trailing position (`_vocative_in_trailing_position`), because a leading
+vocative is sentence-initial and capitalised whether it is "Conn" or "Boy".
+`times_addressed` counts both positions. So the ratio divided one set by a
+strictly larger one, and the shortfall tracked how often the book happens to
+address a name *first* in an utterance — a property of the prose with no
+bearing on whether the word is a proper noun.
+
+`AliasCandidate` gained `times_in_trailing_position` and the property now
+divides by it. **`_NAME_CAPITALISATION_SHARE`'s own comment already described
+this rule** ("Share of trailing-position sightings…") and already quoted Conn
+as 22/22; the constant documented the intended behaviour before the code
+implemented it, which is why the bug survived review.
+
+**Measured, and the honest summary is that it changes nothing visible today.**
+Across all eight books, `auto_link_plan`'s output is byte-identical before and
+after — because every real candidate except one has `trailing == addressed`:
+
+| candidate | addressed | trailing | capitalised | old ratio | new ratio |
+|---|---|---|---|---|---|
+| Conn | 26 | 22 | 22 | **0.85** | **1.00** |
+| Connwaer | 24 | 24 | 24 | 1.00 | 1.00 |
+| boy | 106 | 106 | 1 | 0.01 | 0.01 |
+| blackbird / cousin | 2 | 2 | 1 | 0.50 | 0.50 |
+
+So the fix buys margin on the flagship case, not a new result: `Conn` cleared a
+0.8 threshold by 0.05, and four more leading sightings would have demoted the
+narrator's own name to an epithet and made the Conn/Connwaer link impossible.
+`blackbird`/`cousin` were the feared fragility — a lone capitalised sighting
+becoming 1/1 — and they are not, because their single capital is one of *two*
+trailing sightings.
+
+**A minimum-trailing-sightings guard was measured and deliberately not added.**
+Thresholds of 2 and 3 were run over the whole corpus and changed no verdict and
+no link, so the constant would have been unmeasured speculation. What *is*
+needed is the zero case: `0 >= 0 * 0.8` is **true**, so the new denominator
+would promote a candidate never seen in trailing position — one with no
+capitalisation evidence at all — to a name. The old denominator got that right
+by accident (every candidate has already cleared `_MIN_TIMES_ADDRESSED`), so
+the guard is written out explicitly.
+
+Sabotage-verified: restoring the old denominator fails exactly
+`test_a_leading_sighting_does_not_dilute_the_capitalisation_ratio`; removing
+the zero guard fails exactly
+`test_a_vocative_never_seen_in_trailing_position_is_not_a_name`.
+
+## One vocative per utterance is correct, and was nearly "fixed"
+
+`_vocative` matches trailing position first and **returns early**, discarding
+any leading vocative in the same utterance. That reads as an oversight, and was
+queued as a bug to fix. Measured across all eight books before writing
+anything, it is the opposite: exactly **19 utterances in the entire corpus**
+match in both positions, and in every one the trailing match is the real
+vocative while the leading match is a false positive.
+
+```
+"Breakfast, Nevery,"              "Tea, boy,"
+"Where, boy?"                     "Quick, lad,"
+"Mmm, I expect you would, Conn."  "cue, routine, reward"
+```
+
+Counting both would file `Breakfast`, `Where`, `Mmm`, `Tea`, `Quick` and `cue`
+as names the narrator answers to. Extending `_NOT_A_VOCATIVE` cannot rescue it
+— these are ordinary nouns and adverbs, and the stoplist would have to become a
+dictionary. The asymmetry is structural: a trailing vocative needs a comma
+*and* the end of the utterance, while a leading one needs only a word and a
+comma, so it fires on every list, interjection and fronted adverbial in the
+book. (Both Atomic Habits hits are list items — "cue, routine, reward" — in a
+book with no narrator at all.)
+
+Now pinned by
+`test_a_leading_false_positive_never_outranks_the_real_trailing_vocative`, so
+the next reader who spots the early return finds a test explaining it rather
+than repeating the investigation.
 
 ## Correction: epithets were nearly discarded on fabricated evidence
 An earlier revision excluded epithets from linking, citing a query -

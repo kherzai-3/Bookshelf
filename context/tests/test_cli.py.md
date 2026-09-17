@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
-last_synced: 2026-09-17T14:21:10Z
-source_hash: 9795512fc6945a678273a106c4e47205a565b3f7
+last_synced: 2026-09-17T18:23:32Z
+source_hash: a10ccc47a54f893805f5b14d409aaf918424aa1f
 ---
 
 ## Purpose
@@ -123,6 +123,13 @@ Also covers, added since the above:
   with each other and neither agreed with production, so the suite was green
   while **every first-person book crashed at ingest with a `TypeError`**. The
   ingest tests below are what surfaced it.
+
+  That hazard recurred on 2026-09-17, and the shape of the fix is the lesson:
+  `AliasCandidate` gained a `times_in_trailing_position` field (see
+  `context/src/bookrag/ingest/vocatives.py.md`), and it was added **without a
+  default** precisely so a stale hand-built fixture fails loudly at construction
+  instead of silently computing a name/epithet verdict from a field that was
+  never supplied. This fixture supplies it for all three candidates.
 
 - **The reversibility paths** (`test_extract_after_unlinking_warns_instead_of_
   crashing`, `..._after_no_auto_link_...`, `test_extract_says_nothing_about_

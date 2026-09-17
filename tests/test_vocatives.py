@@ -221,9 +221,102 @@ def test_capitalisation_sorts_a_name_from_an_epithet_in_trailing_position() -> N
     by_name = {c.name: c for c in found.aliases}
 
     assert by_name["Conn"].times_capitalised == by_name["Conn"].times_addressed == 2
+    assert by_name["Conn"].times_in_trailing_position == 2
     assert by_name["Conn"].reads_as_a_name
     assert by_name["boy"].times_capitalised == 0
     assert not by_name["boy"].reads_as_a_name
+
+
+def test_a_leading_sighting_does_not_dilute_the_capitalisation_ratio() -> None:
+    """**The two sides of the ratio have to count the same sightings.**
+
+    `times_capitalised` can only be counted in trailing position, because a
+    leading vocative is sentence-initial and capitalised whatever it is. It was
+    measured against `times_addressed`, which counts both positions - so every
+    time the book opened an utterance with the narrator's name, the narrator's
+    own ratio fell, and a real name drifted toward the epithet verdict for a
+    reason that has nothing to do with whether it is a proper noun.
+
+    Not hypothetical on the reported book: `Conn` is addressed 26 times, 22 of
+    them trailing and all 22 capitalised. That read 0.85 against a threshold of
+    0.8 - right, but by 0.05, and four more leading sightings would have demoted
+    the narrator's own name and made the flagship Conn/Connwaer link impossible.
+    This fixture is that shape with the margin taken out.
+
+    The two utterances that end in something other than the name are leading
+    sightings: a trailing vocative needs a comma *and* the end of the utterance.
+    """
+    chapters = [
+        _chapter(
+            i,
+            _I_NARRATE,
+            _said_by_another("You are late, Conn."),
+            _said_by_another("Conn, we must go now."),
+            _said_by_another("Conn, there is no time at all."),
+        )
+        for i in range(2)
+    ]
+
+    found = detect_narrator_aliases(chapters)
+    conn = {c.name: c for c in found.aliases}["Conn"]
+
+    assert (conn.times_addressed, conn.times_in_trailing_position, conn.times_capitalised) == (6, 2, 2)
+    # What the old denominator computed, kept explicit: the same evidence, read
+    # against every sighting rather than the ones it was gathered from, calls
+    # the narrator's own name an epithet.
+    assert conn.times_capitalised < conn.times_addressed * 0.8
+    assert conn.reads_as_a_name
+
+
+def test_a_vocative_never_seen_in_trailing_position_is_not_a_name() -> None:
+    """Fail closed, and say so out loud rather than leaving it to arithmetic.
+
+    Capitalisation is only evidence in trailing position, so a candidate with no
+    trailing sighting has no evidence either way. The old denominator got this
+    right by accident - every candidate has already cleared
+    `_MIN_TIMES_ADDRESSED`, so `0 >= 2 * 0.8` is false. Dividing by the trailing
+    count instead makes the same expression `0 >= 0 * 0.8`, which is **true**,
+    and would promote a candidate with no capitalisation evidence at all.
+    """
+    chapters = [
+        _chapter(
+            i,
+            _I_NARRATE,
+            _said_by_another("Benet, we must go now."),
+            _said_by_another("Benet, there is no time at all."),
+        )
+        for i in range(2)
+    ]
+
+    found = detect_narrator_aliases(chapters)
+    benet = {c.name: c for c in found.aliases}["benet"]
+
+    assert (benet.times_addressed, benet.times_in_trailing_position, benet.times_capitalised) == (4, 0, 0)
+    assert not benet.reads_as_a_name
+
+
+def test_a_leading_false_positive_never_outranks_the_real_trailing_vocative() -> None:
+    """**An utterance yields one vocative, and the trailing one wins.**
+
+    `_vocative` returns on a trailing match and never examines the leading one,
+    which reads as an oversight and is load-bearing. Measured across all eight
+    books in the corpus, exactly 19 utterances match in both positions, and in
+    every one the leading match is a false positive: "Tea, boy," ·
+    "Where, boy?" · "Quick, lad," · "Breakfast, Nevery," ·
+    "Mmm, I expect you would, Conn." · "cue, routine, reward".
+
+    Counting both would file `Tea`, `Where`, `Quick`, `Breakfast`, `Mmm` and
+    `cue` as names the narrator answers to. They cannot be filtered by extending
+    `_NOT_A_VOCATIVE` - they are ordinary nouns and adverbs, and the stoplist
+    would have to become a dictionary. Both fixtures below are verbatim from the
+    corpus, and both would clear `_MIN_TIMES_ADDRESSED` if they were counted.
+    """
+    chapters = [
+        _chapter(i, _I_NARRATE, _said_by_another("Tea, boy,"), _said_by_another("Where, boy?"))
+        for i in range(2)
+    ]
+
+    assert _by_name(detect_narrator_aliases(chapters)) == {"boy": 4}
 
 
 def test_a_vocative_introduced_by_you_or_my_is_still_the_same_sighting() -> None:

@@ -21,8 +21,23 @@ def _candidate(
     times_addressed: int = 4,
     times_capitalised: int = 0,
     chapters: set[int] | None = None,
+    times_in_trailing_position: int | None = None,
 ) -> AliasCandidate:
-    return AliasCandidate(name, times_addressed, times_capitalised, chapters or set())
+    """`times_in_trailing_position` defaults to `times_addressed`, i.e. a
+    candidate seen only in trailing position - which is what the corpus
+    overwhelmingly contains (every real candidate on all eight books except
+    `Conn` has the two counts equal). Pass it explicitly to describe a candidate
+    the book also addresses at the start of an utterance; that gap is what
+    `reads_as_a_name` measures and is covered end to end, against the real
+    detector rather than a hand-built candidate, by
+    `test_vocatives.py::test_a_leading_sighting_does_not_dilute_the_capitalisation_ratio`."""
+    return AliasCandidate(
+        name,
+        times_addressed,
+        times_capitalised,
+        times_addressed if times_in_trailing_position is None else times_in_trailing_position,
+        chapters or set(),
+    )
 
 
 def _a_name(name: str, times: int = 4, chapters: set[int] | None = None) -> AliasCandidate:
@@ -116,6 +131,14 @@ def test_a_capitalised_vocative_reads_as_a_name_and_a_lowercase_one_does_not() -
     24/24 and Conn 22/22 against boy 1/106, lad 0/14, thief 0/3."""
     assert _candidate("Connwaer", times_addressed=24, times_capitalised=24).reads_as_a_name
     assert not _candidate("boy", times_addressed=106, times_capitalised=1).reads_as_a_name
+
+    # Conn is the case the denominator distinction exists for: 26 sightings, 22
+    # of them trailing and all 22 capitalised. Against every sighting that is
+    # 0.85 - still a name, but by 0.05; against the sightings capitalisation was
+    # actually counted in, it is 1.00.
+    conn = _candidate("Conn", times_addressed=26, times_capitalised=22, times_in_trailing_position=22)
+    assert conn.reads_as_a_name
+    assert conn.times_capitalised / conn.times_addressed < 1.0
 
 
 def test_auto_link_plan_links_two_spellings_of_a_name_and_their_epithets() -> None:

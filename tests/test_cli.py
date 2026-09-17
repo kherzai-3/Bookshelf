@@ -882,9 +882,9 @@ def test_narrator_aliases_show_their_counts_and_whether_each_reads_as_a_name() -
     happened."""
     found = NarratorAliases(
         aliases=[
-            AliasCandidate("boy", times_addressed=34, times_capitalised=0),
-            AliasCandidate("Conn", times_addressed=13, times_capitalised=13),
-            AliasCandidate("Captain", times_addressed=2, times_capitalised=2),
+            AliasCandidate("boy", times_addressed=34, times_capitalised=0, times_in_trailing_position=34),
+            AliasCandidate("Conn", times_addressed=13, times_capitalised=13, times_in_trailing_position=13),
+            AliasCandidate("Captain", times_addressed=2, times_capitalised=2, times_in_trailing_position=2),
         ],
         first_person_chapters=[0, 1, 2],
         chapters_considered=4,
