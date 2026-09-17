@@ -138,13 +138,26 @@ passes. Don't commit mid-implementation, and don't wait to batch up multiple
 unrelated changes into one commit either — one commit per completed change,
 with a message that explains why, not just what.
 
-**Never merge `development` into `master`, and never push to any remote,
-without the user explicitly instructing it in that specific instance.** A
-past approval of one merge/push does not carry forward to the next one — this
-matches the project's general "confirm before hard-to-reverse or shared-state
-actions" policy, applied specifically to this repo's branch model. `master`
-is the user's checkpoint of record; only they decide when `development`'s
-state is ready to become it.
+**The two remote branches are governed differently. Don't collapse them.**
+
+- **`origin development` — standing authorization, granted 2026-09-17.** Once
+  a commit lands on local `development`, push it: `git push origin development`.
+  No need to ask, and no need to wait for a batch. The user's words: "I want
+  you to work on `origin development` from now on." The remote branch is the
+  working branch of record, so leaving it behind local is now the deviation,
+  not the safe default. This is a fast-forward-only privilege — if that push
+  is ever *refused*, the standing authorization does not cover whatever would
+  fix it, so stop and ask.
+- **`origin master` — still explicit, per instance, every time.** A past
+  approval never carries forward. `master` is the user's checkpoint of record;
+  only they decide when `development`'s state becomes it. This matches the
+  project's general "confirm before hard-to-reverse or shared-state actions"
+  policy. Note the vocabulary: **when the user says "push to master" they mean
+  `origin master`**, not the local branch — the local one is a follow-up step,
+  not the thing being asked for.
+
+Merging `development` into `master` follows the `origin master` rule, not the
+`development` one: never without an explicit instruction in that instance.
 
 **Keep the history linear. Never create a merge commit.** When the user does
 approve a release, fast-forward:
@@ -158,15 +171,38 @@ git checkout master && git merge --ff-only development && git checkout developme
 `master` and `development` pointing at *different commits with byte-identical
 trees*, permanently, and adds one such commit per release — needless divergent
 state whose only payoff is a summary message that belongs in the individual
-commits anyway. If a fast-forward is ever refused, that means `master` has
-genuinely moved and the right response is to ask the user, not to reach for
-`--no-ff` or `--force`.
+commits anyway.
+
+**That commit is gone as of 2026-09-17, and removing it cost a force-push.**
+It blocked the very next release: `git push origin development:master` was
+refused as non-fast-forward, because `febb954` sat on `master` and was not an
+ancestor of `development`. The user approved
+`git push --force-with-lease=master:<old-sha> origin development:master`,
+then `git branch -f master development` locally — note that the `merge
+--ff-only` line above *also* refuses in this state, for the same reason the
+push does. `master` now has zero merge commits, so the fast-forward path
+above should simply work from here.
+
+**A refused fast-forward does not automatically mean `master` genuinely
+moved** — the earlier version of this file said it did, and that was wrong.
+Check first whether the blocking commit's tree is already reachable from
+`development` (`git rev-parse <blocker>^{tree}` against its parents'). If it
+is, the refusal is leftover `--no-ff` residue holding no content
+`development` lacks, and the honest choice to put to the user is
+force-with-lease vs. stop. If it is *not*, `master` really has moved and
+something unexplained is going on. Either way the response is to ask, never
+to reach for `--no-ff` or a bare `--force`; what changes is which options you
+present.
 
 **Run the test suite once, before the release, on `development`.** Re-running
 it after a fast-forward tests byte-identical content and proves nothing — the
 trees are the same by definition. The only case that warrants a second run is
 a merge that was *not* a fast-forward, which under the rule above should not
 happen without asking first.
+
+The standing `origin development` push does **not** add a test run of its own.
+The commit gate above already requires a passing suite, and pushing a commit
+that already passed re-tests nothing. Push straight after the commit.
 
 **Partially hook-enforced, the same way the context-doc convention is:**
 - A `Stop` hook (`.claude/hooks/check_pending_commit.sh`) notices when
