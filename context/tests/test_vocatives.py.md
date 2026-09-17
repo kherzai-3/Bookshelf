@@ -1,7 +1,7 @@
 ---
 source: tests/test_vocatives.py
-last_synced: 2026-09-17T18:23:32Z
-source_hash: fc5143eb1f64eaaf8c4bb820bc24811a6f9ecc0d
+last_synced: 2026-09-17T18:30:20Z
+source_hash: 09f97387a86c6264f5f0a418e9333982e5b231f3
 ---
 
 ## Purpose

@@ -300,16 +300,19 @@ def test_a_leading_false_positive_never_outranks_the_real_trailing_vocative() ->
 
     `_vocative` returns on a trailing match and never examines the leading one,
     which reads as an oversight and is load-bearing. Measured across all eight
-    books in the corpus, exactly 19 utterances match in both positions, and in
-    every one the leading match is a false positive: "Tea, boy," ·
-    "Where, boy?" · "Quick, lad," · "Breakfast, Nevery," ·
-    "Mmm, I expect you would, Conn." · "cue, routine, reward".
+    books, exactly 19 utterances match in both positions, and in **none** of
+    them is the leading match the correct vocative: 14 have a right trailing
+    match and a false-positive leading one ("Tea, boy," · "Write, Connwaer," ·
+    "Louder, boy!"), 5 have no vocative in either position
+    ("Stoichiometry, hmmm," · "Drats, drats, drats!"), and 0 favour the leading
+    match. So counting it never rescues a real vocative - it is redundant where
+    trailing is right and adds a second false positive where trailing is wrong.
 
-    Counting both would file `Tea`, `Where`, `Quick`, `Breakfast`, `Mmm` and
-    `cue` as names the narrator answers to. They cannot be filtered by extending
-    `_NOT_A_VOCATIVE` - they are ordinary nouns and adverbs, and the stoplist
-    would have to become a dictionary. Both fixtures below are verbatim from the
-    corpus, and both would clear `_MIN_TIMES_ADDRESSED` if they were counted.
+    Counting both would file `Tea`, `Write` and `Louder` as names the narrator
+    answers to. They cannot be filtered by extending `_NOT_A_VOCATIVE` - they
+    are ordinary nouns and imperatives, and the stoplist would have to become a
+    dictionary. Both fixtures below are verbatim from the corpus, and both would
+    clear `_MIN_TIMES_ADDRESSED` if the leading match were counted.
     """
     chapters = [
         _chapter(i, _I_NARRATE, _said_by_another("Tea, boy,"), _said_by_another("Where, boy?"))

@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/vocatives.py
-last_synced: 2026-09-17T18:23:32Z
-source_hash: e6d8382f20398cbe2cdcb2eae72d2ed1f56a1b97
+last_synced: 2026-09-17T18:30:20Z
+source_hash: b9b1a5d8dd3f7db4c79cf137d6a196261b95dd49
 ---
 
 ## Purpose
@@ -345,31 +345,48 @@ the zero guard fails exactly
 ## One vocative per utterance is correct, and was nearly "fixed"
 
 `_vocative` matches trailing position first and **returns early**, discarding
-any leading vocative in the same utterance. That reads as an oversight, and was
+any leading vocative in the same utterance. That reads as an oversight and was
 queued as a bug to fix. Measured across all eight books before writing
-anything, it is the opposite: exactly **19 utterances in the entire corpus**
-match in both positions, and in every one the trailing match is the real
-vocative while the leading match is a false positive.
+anything, it is not one.
 
-```
-"Breakfast, Nevery,"              "Tea, boy,"
-"Where, boy?"                     "Quick, lad,"
-"Mmm, I expect you would, Conn."  "cue, routine, reward"
-```
+Exactly **19 utterances in the entire corpus** match in both positions, and in
+**none** of them is the leading match the correct vocative:
 
-Counting both would file `Breakfast`, `Where`, `Mmm`, `Tea`, `Quick` and `cue`
-as names the narrator answers to. Extending `_NOT_A_VOCATIVE` cannot rescue it
-— these are ordinary nouns and adverbs, and the stoplist would have to become a
+| | count | examples |
+|---|---|---|
+| trailing right, leading a false positive | **14** | `"Tea, boy,"` · `"Write, Connwaer,"` · `"Louder, boy!"` · `"Sit, Connwaer,"` · `"Nothing, Nevery!"` |
+| neither position holds a vocative | **5** | `"Stoichiometry, hmmm,"` · `"Drats, drats, drats!"` · `"Crowe, you mean?"` · two Atomic Habits list items |
+| leading right, trailing wrong | **0** | — |
+
+So the leading match never rescues anything. Where trailing is right it is
+redundant; where trailing is wrong it adds a *second* false positive rather
+than correcting the first. **The shape that would justify counting it —
+`"Conn, hurry."`, the name leading and a stray word trailing, which is how this
+item was originally described — does not occur anywhere in the corpus.** The
+five trailing false positives are all one-offs, which is exactly what
+`_MIN_TIMES_ADDRESSED = 2` discards; that constant's own comment already names
+`stoichiometry` as one it caught.
+
+Extending `_NOT_A_VOCATIVE` cannot rescue the leading side either — the
+false positives are ordinary nouns and imperatives (`Tea`, `Write`, `Louder`,
+`Sit`, `Breakfast`, `Quick`), so the stoplist would have to become a
 dictionary. The asymmetry is structural: a trailing vocative needs a comma
 *and* the end of the utterance, while a leading one needs only a word and a
-comma, so it fires on every list, interjection and fronted adverbial in the
-book. (Both Atomic Habits hits are list items — "cue, routine, reward" — in a
-book with no narrator at all.)
+comma, so it fires on every list, interjection and fronted imperative in the
+book.
 
 Now pinned by
 `test_a_leading_false_positive_never_outranks_the_real_trailing_vocative`, so
 the next reader who spots the early return finds a test explaining it rather
 than repeating the investigation.
+
+**Correction, same day.** The first version of this section (and commit
+`3da039a`'s message) claimed the trailing match is the real vocative in *every*
+one of the 19. That was written from the 6 examples `r23_measure.py` prints per
+book, not from all 19, and it is wrong for the five where neither position is a
+vocative. The conclusion is unchanged — 0 of 19 favour the leading match — but
+the overstated version would have been read as "trailing is always right",
+which it is not.
 
 ## Correction: epithets were nearly discarded on fabricated evidence
 An earlier revision excluded epithets from linking, citing a query -

@@ -325,22 +325,31 @@ def _vocative(utterance: str) -> str | None:
 
     **An utterance yields at most one vocative, and a trailing match wins. That
     reads as an oversight - the early return discards any leading match in the
-    same utterance - and it is load-bearing.** Measured across all eight books
-    in the corpus, exactly 19 utterances match in both positions, and in every
-    single one the trailing match is the real vocative while the leading match
-    is a false positive:
+    same utterance - and it is load-bearing.** Measured across all eight books,
+    exactly 19 utterances match in both positions, and in **none** of them is
+    the leading match the correct vocative:
 
-        "Breakfast, Nevery,"             "Tea, boy,"
-        "Where, boy?"                    "Quick, lad,"
-        "Mmm, I expect you would, Conn." "cue, routine, reward"
+        14  trailing right, leading a false positive
+            "Tea, boy,"  "Write, Connwaer,"  "Louder, boy!"  "Nothing, Nevery!"
+         5  neither position holds a vocative at all
+            "Stoichiometry, hmmm,"  "Drats, drats, drats!"  "Crowe, you mean?"
+         0  leading right, trailing wrong
 
-    Counting both would file `Breakfast`, `Where`, `Mmm`, `Tea`, `Quick` and
-    `cue` as names the narrator answers to. They cannot be filtered by
-    extending `_NOT_A_VOCATIVE`: they are ordinary nouns and adverbs, and the
-    stoplist would have to become a dictionary. The two patterns are genuinely
-    asymmetric - a trailing vocative needs a comma *and* the end of the
-    utterance, a leading one needs only a word and a comma, so it fires on
-    every list, interjection and fronted adverbial in the book. Pinned by
+    So the leading match never rescues anything: where trailing is right it is
+    redundant, and where trailing is wrong it adds a *second* false positive
+    rather than correcting the first. The shape that would justify counting it -
+    `"Conn, hurry."`, where the name leads and a stray word trails - does not
+    occur anywhere in the corpus. The five trailing false positives are
+    one-offs, which is precisely what `_MIN_TIMES_ADDRESSED` discards; note its
+    comment already names `stoichiometry`.
+
+    None of the leading false positives can be filtered by extending
+    `_NOT_A_VOCATIVE`: they are ordinary nouns and imperatives (`Tea`, `Write`,
+    `Louder`, `Sit`, `Breakfast`), and the stoplist would have to become a
+    dictionary. The two patterns are genuinely asymmetric - a trailing vocative
+    needs a comma *and* the end of the utterance, a leading one needs only a
+    word and a comma, so it fires on every list, interjection and fronted
+    imperative in the book. Pinned by
     `test_a_leading_false_positive_never_outranks_the_real_trailing_vocative`."""
     trailing = _vocative_in_trailing_position(utterance)
     if trailing:
