@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/vocatives.py
-last_synced: 2026-09-17T14:28:47Z
-source_hash: df499b2539bbce5ad26e64dfc9715f61ed0672b6
+last_synced: 2026-09-17T14:59:27Z
+source_hash: 63250fb91356bcf77395328b3523a65a18c539d7
 ---
 
 ## Purpose
@@ -19,6 +19,10 @@ actually walk, and early enough that extraction could eventually be told about
 it rather than having its output patched afterwards.
 
 ## Public Interface
+- `auto_link_plan(found: NarratorAliases) -> tuple[list[str], list[str]]` —
+  `(names, epithets)` safe to link with nobody asked; `([], [])` is the common
+  case. `_epithets_for` is its helper, and the rule it implements is documented
+  at the end of this file.
 - `NarratorAliases` (dataclass) — `aliases: list[AliasCandidate]`,
   `addressed_by_narrator: list[tuple[str, int]]`,
   `ambiguous: list[tuple[str, int, int]]`,
@@ -194,10 +198,15 @@ the narrator" section.
   an addressee, which is a different problem from finding a vocative.
 
 ## `AliasCandidate` and `auto_link_plan`
-- `AliasCandidate(name, times_addressed, times_capitalised)` with
+- `AliasCandidate(name, times_addressed, times_capitalised, chapters)` with
   `reads_as_a_name` (≥80% capitalised) and `is_anyones_term_of_address`.
   `name` keeps the **surface form the book used**, so a linked alias reads like
-  the book rather than a lowercased token.
+  the book rather than a lowercased token. `chapters` is the set of chapter
+  indices the candidate was addressed in — recorded for the *to-narrator*
+  direction only, since what the narrator calls other people says nothing about
+  who is being addressed. It is defaulted to an empty set because every consumer
+  outside this module reads only the first three fields, and a caller building a
+  candidate by hand has no chapters to give.
 - **Capitalisation is counted only in trailing vocative position**
   (`_vocative_in_trailing_position`). A leading vocative is sentence-initial and
   capitalised whether it is "Conn" or "Boy", so counting those would make every
@@ -227,6 +236,60 @@ the narrator" section.
   `test_auto_link_plan_refuses_a_book_with_two_narrators`.
 - Verified on all five real books: Magic Thief links Conn+Connwaer as names and
   boy/lad/thief/cousin as epithets; the other four link nothing.
+
+### An epithet is surrendered to a rival name (`_epithets_for`)
+
+Grouping only catches a two-narrator book when **both** narrators have a
+spelling variant. Give the second narrator a single name and she forms a group
+of one, which never qualifies — so the first narrator's pair links as normal and
+every epithet in the book rides along with it, hers included. `girl` becomes one
+of Conn's names, `resolve_entity` matches it by exact `match_key`, and her facts
+accumulate on him. That is a merged identity: the invisible, unrepairable
+failure this module avoids everywhere else.
+
+So an epithet is dropped when some *other* qualifying name (outside the linked
+group) shares more of its chapters than the linked group does.
+
+**The rule has to be comparative, and that is measured, not a preference.** The
+obvious version — keep an epithet only where its chapters intersect the linked
+names' — is what the roadmap proposed, reads as the safer choice, and is wrong.
+On the real book the narrator is addressed *by name* in only 36 of his 78
+first-person chapters, so chapter overlap largely records which supporting
+character was on stage rather than who was being addressed:
+
+| epithet | chapters | ∩ linked | absolute rule | rival rule |
+|---|---|---|---|---|
+| boy | 38 | 20 | keep | keep |
+| lad | 11 | 9 | keep | keep |
+| thief | 3 | 3 | keep | keep |
+| blackbird | 2 | 1 | keep | keep |
+| shadow | 2 | **0** | **DROP** | keep |
+| cousin | 1 | **0** | **DROP** | keep |
+
+`shadow` is what Jaggus calls the narrator ("What do you think of it, my
+shadow?") and `cousin` is what Embre calls him — both read out of the text, both
+genuinely his. The absolute rule discards both. A *majority*-overlap variant is
+worse still: `boy`, the highest-value epithet in the whole feature, sits at
+20/38 = 0.53, so two chapters the other way would drop it — the same
+four-sighting fragility the capitalisation denominator has.
+
+**`_MIN_RIVAL_CHAPTERS = 2`**, the same principle as `_MIN_TIMES_ADDRESSED`: one
+sighting is not evidence. Measured — `cousin` and the known false positive
+`Magister` share exactly one chapter (66) and nothing else, and at a threshold of
+1 that coincidence took a genuine epithet off the narrator. At 2, all six
+survive and corpus output is byte-identical across all eight books.
+
+Sabotage-verified both ways: disabling the filter fails exactly
+`test_auto_link_plan_surrenders_an_epithet_to_a_rival_narrator` and
+`test_a_second_narrators_epithet_does_not_land_on_the_first`; substituting the
+absolute rule fails `test_an_epithet_with_no_rival_is_kept_even_sharing_no_
+chapter_with_a_name` plus three others.
+
+**Known limits, inherited rather than introduced:** two narrators who share most
+of their scenes are not separable this way, and neither is a second narrator the
+book only ever calls by an epithet. Both need a real multi-narrator book to
+calibrate against, and the corpus has none — all eight books have at most one
+first-person narrator.
 
 ## Correction: epithets were nearly discarded on fabricated evidence
 An earlier revision excluded epithets from linking, citing a query -

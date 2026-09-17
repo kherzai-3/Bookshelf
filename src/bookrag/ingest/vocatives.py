@@ -132,6 +132,13 @@ _MOSTLY_FIRST_PERSON_SHARE = 0.5
 # threshold barely matters; 0.8 leaves room for a stray sentence-initial catch.
 _NAME_CAPITALISATION_SHARE = 0.8
 
+# Chapters a rival name must share with an epithet before it can claim it away
+# from the linked group. The same principle as `_MIN_TIMES_ADDRESSED`: one
+# sighting is not evidence. Measured - on the real book `cousin` and the known
+# false positive `Magister` share exactly one chapter (66), and at a threshold
+# of 1 that coincidence took a genuine epithet off the narrator.
+_MIN_RIVAL_CHAPTERS = 2
+
 
 @dataclass
 class AliasCandidate:
@@ -140,6 +147,10 @@ class AliasCandidate:
     name: str  # the most common surface form, e.g. "Connwaer" or "boy"
     times_addressed: int
     times_capitalised: int  # in trailing position, where capitalisation means something
+    # Which chapters this candidate was addressed in. Defaulted because every
+    # consumer outside this module reads only the three fields above, and
+    # because a caller that builds a candidate by hand has no chapters to give.
+    chapters: set[int] = field(default_factory=set)
 
     @property
     def reads_as_a_name(self) -> bool:
@@ -329,7 +340,18 @@ def auto_link_plan(found: NarratorAliases) -> tuple[list[str], list[str]]:
 
     Never links an epithet on its own. Without a name to attach it to there is
     no evidence about *whose* epithet it is, and a lone "boy" would become a
-    character called boy."""
+    character called boy.
+
+    **An epithet is surrendered to a rival name that claims it better.** Every
+    vocative in the book lands in one pool labelled "the narrator", so a second
+    first-person narrator's epithet is attached to the first narrator's entity -
+    `girl` filed under Conn. `resolve_entity` then matches it exactly, and the
+    second narrator's facts accumulate on the first: a merged identity, which is
+    the invisible, unrepairable failure this module avoids everywhere else. So
+    an epithet is dropped when some *other* qualifying name overlaps its
+    chapters more than the linked group does. See `_epithets_for` for why the
+    test is comparative rather than absolute - the absolute version was measured
+    and is wrong."""
     names = [
         candidate
         for candidate in found.aliases
@@ -346,13 +368,57 @@ def auto_link_plan(found: NarratorAliases) -> tuple[list[str], list[str]]:
     if len(groups) != 1:
         return [], []
     linked = groups[0]
+    return linked, _epithets_for(found, linked, names)
 
-    epithets = [
+
+def _epithets_for(
+    found: NarratorAliases, linked: list[str], names: list[AliasCandidate]
+) -> list[str]:
+    """The epithets that belong to the linked group rather than to somebody else.
+
+    **Comparative, not absolute, and that distinction was measured.** The
+    obvious rule - keep an epithet only where its chapters intersect the linked
+    names' - reads as the safe one and is not. On the real book the narrator is
+    addressed *by name* in only 36 of his 78 first-person chapters, so chapter
+    overlap mostly records which supporting character was on stage: `shadow`
+    (Jaggus's term for the narrator) and `cousin` (Embre's) share no chapter
+    with a name sighting at all, and the absolute rule threw both away. Both
+    are genuinely the narrator's, read out of the text.
+
+    What actually indicates an epithet is not the narrator's is a *rival*: a
+    qualifying name, outside the linked group, that overlaps it more. In a
+    two-narrator book the narrators' chapters are largely disjoint, so the
+    second narrator's name out-claims the first's on their own epithets. On the
+    real book nothing out-claims anything and all six epithets survive
+    unchanged.
+
+    Known limit, inherited: two narrators who share most of their scenes are
+    not separable this way, and neither is a second narrator the book only ever
+    calls by an epithet."""
+    linked_lc = {name.lower() for name in linked}
+    linked_chapters: set[int] = set()
+    rivals: list[AliasCandidate] = []
+    for candidate in names:
+        if candidate.name.lower() in linked_lc:
+            linked_chapters |= candidate.chapters
+        else:
+            rivals.append(candidate)
+
+    def out_claimed(epithet: AliasCandidate) -> bool:
+        mine = len(epithet.chapters & linked_chapters)
+        return any(
+            len(epithet.chapters & rival.chapters) >= _MIN_RIVAL_CHAPTERS
+            and len(epithet.chapters & rival.chapters) > mine
+            for rival in rivals
+        )
+
+    return [
         candidate.name
         for candidate in found.aliases
-        if not candidate.reads_as_a_name and not candidate.is_anyones_term_of_address
+        if not candidate.reads_as_a_name
+        and not candidate.is_anyones_term_of_address
+        and not out_claimed(candidate)
     ]
-    return linked, epithets
 
 
 def _times_speaking(text: str, name: str) -> int:
@@ -406,6 +472,10 @@ def detect_narrator_aliases(chapters: list[Chapter]) -> NarratorAliases:
     to_narrator: Counter[str] = Counter()
     by_narrator: Counter[str] = Counter()
     surface_forms: dict[str, Counter[str]] = defaultdict(Counter)
+    # Where each candidate was addressed. Only the to-narrator direction is
+    # recorded: this exists to tell one addressee from another, and what the
+    # narrator calls other people says nothing about that.
+    chapters_of: dict[str, set[int]] = defaultdict(set)
 
     for chapter in chapters:
         if len(chapter.text.split()) < _MIN_NARRATION_WORDS:
@@ -427,6 +497,7 @@ def detect_narrator_aliases(chapters: list[Chapter]) -> NarratorAliases:
             # in a scene the narrator is present for, names the narrator.
             (by_narrator if speaker == "I" else to_narrator)[name] += 1
             if speaker != "I":
+                chapters_of[name].add(chapter.index)
                 # Surface forms, from the one position where capitalisation is
                 # evidence. This is what later sorts a name from an epithet.
                 surface = _vocative_in_trailing_position(span.group(1))
@@ -457,6 +528,7 @@ def detect_narrator_aliases(chapters: list[Chapter]) -> NarratorAliases:
                 name=max(forms, key=forms.get) if forms else name,
                 times_addressed=count,
                 times_capitalised=sum(n for form, n in forms.items() if form[:1].isupper()),
+                chapters=chapters_of[name],
             )
         )
 

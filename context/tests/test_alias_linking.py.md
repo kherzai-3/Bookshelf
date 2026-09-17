@@ -1,7 +1,7 @@
 ---
 source: tests/test_alias_linking.py
-last_synced: 2026-09-17T14:28:47Z
-source_hash: fb173dbba3eca9da42071c78124e83b21b81f31c
+last_synced: 2026-09-17T14:59:27Z
+source_hash: 0ba29b0b0bd488c2e61571a3435c2164fe95a288
 ---
 
 ## Purpose
@@ -41,6 +41,27 @@ else, or it passes for the wrong reason — the fallback would return Conn's fac
 along with everything else and the assertion would be measuring nothing. The
 question is shaped as "the boy that Benet trained", which is also the realistic
 hazard: a question about some *other* boy.
+
+**The epithet-attachment tests encode a measurement, not a preference.** Three
+tests pin `_epithets_for`:
+- `..._surrenders_an_epithet_to_a_rival_narrator` is the bug. Grouping only
+  refuses a book with two qualifying name *groups*; give the second narrator one
+  spelling and she forms a group of one, so the first narrator's pair links as
+  normal and her `girl` rides along onto him.
+- `..._an_epithet_with_no_rival_is_kept_even_sharing_no_chapter_with_a_name` is
+  the counterweight, and the reason the rule is comparative. The obvious
+  absolute version — require overlap with the linked names' chapters — drops
+  `shadow` and `cousin` on the real book, both genuinely addressed to the
+  narrator. Without this test the bug test above is satisfied by the rule that
+  breaks the one book the feature works on.
+- `..._one_shared_chapter_does_not_hand_an_epithet_to_a_rival` pins
+  `_MIN_RIVAL_CHAPTERS = 2`. `cousin` and `Magister` coincide in exactly one
+  chapter of the real book, and at a threshold of 1 that took a real epithet
+  off the narrator.
+
+`_candidate`/`_a_name` take an optional `chapters` set; tests not about chapter
+evidence leave it empty, which reads as "no rival competes" and leaves their
+behaviour unchanged.
 
 **The two-narrator case is the one that bites hardest.**
 `test_auto_link_plan_refuses_a_book_with_two_narrators` pins that two name

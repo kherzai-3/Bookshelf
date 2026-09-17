@@ -16,13 +16,18 @@ from bookrag.ingest.vocatives import AliasCandidate, NarratorAliases, auto_link_
 from bookrag.query import Fact, select_relevant_facts
 
 
-def _candidate(name: str, times_addressed: int = 4, times_capitalised: int = 0) -> AliasCandidate:
-    return AliasCandidate(name, times_addressed, times_capitalised)
+def _candidate(
+    name: str,
+    times_addressed: int = 4,
+    times_capitalised: int = 0,
+    chapters: set[int] | None = None,
+) -> AliasCandidate:
+    return AliasCandidate(name, times_addressed, times_capitalised, chapters or set())
 
 
-def _a_name(name: str, times: int = 4) -> AliasCandidate:
+def _a_name(name: str, times: int = 4, chapters: set[int] | None = None) -> AliasCandidate:
     """A vocative capitalised every time it was seen in trailing position."""
-    return _candidate(name, times, times)
+    return _candidate(name, times, times, chapters)
 
 
 def _narrator(*aliases: AliasCandidate) -> NarratorAliases:
@@ -164,6 +169,66 @@ def test_auto_link_plan_still_links_one_narrator_beside_an_unrelated_name() -> N
     plan = _narrator(_a_name("Conn"), _a_name("Connwaer"), _a_name("Magister"), _candidate("boy"))
 
     assert auto_link_plan(plan) == (["Conn", "Connwaer"], ["boy"])
+
+
+def test_auto_link_plan_surrenders_an_epithet_to_a_rival_narrator() -> None:
+    """**The half of the two-narrator bug that grouping does not reach.**
+
+    Refusing a book with two qualifying name *groups* only helps when both
+    narrators have a spelling variant. Give the second narrator a single name
+    and she forms a group of one, which never qualifies - so the first
+    narrator's pair is linked as normal and every epithet in the book rides
+    along with it, hers included. `girl` lands on Conn, and because
+    `resolve_entity` matches an epithet by exact `match_key`, her facts then
+    accumulate on him: a merged identity, which is the failure this module
+    treats as unrecoverable everywhere else.
+
+    Her *name* out-claims his on her own chapters, and that is the signal."""
+    plan = _narrator(
+        _a_name("Conn", chapters={0, 2, 4}),
+        _a_name("Connwaer", chapters={0, 2, 4}),
+        _candidate("boy", chapters={0, 2, 4}),
+        _a_name("Row", chapters={1, 3, 5}),
+        _candidate("girl", chapters={1, 3, 5}),
+    )
+
+    assert auto_link_plan(plan) == (["Conn", "Connwaer"], ["boy"])
+
+
+def test_an_epithet_with_no_rival_is_kept_even_sharing_no_chapter_with_a_name() -> None:
+    """**The rule has to be comparative, and this is the measurement that says
+    so.** The obvious version - keep an epithet only where its chapters
+    intersect the linked names' - reads as the safe choice and is wrong. On the
+    real book the narrator is addressed by name in only 36 of his 78
+    first-person chapters, so chapter overlap largely records which supporting
+    character was on stage: `shadow` (what Jaggus calls him) and `cousin` (what
+    Embre calls him) share *no* chapter with a name sighting, and the absolute
+    rule discarded both. Both are genuinely his, read out of the text.
+
+    With nobody else competing for it, an epithet stays."""
+    plan = _narrator(
+        _a_name("Conn", chapters={0, 2}),
+        _a_name("Connwaer", chapters={0, 2}),
+        _candidate("shadow", chapters={7, 9}),
+    )
+
+    assert auto_link_plan(plan) == (["Conn", "Connwaer"], ["shadow"])
+
+
+def test_one_shared_chapter_does_not_hand_an_epithet_to_a_rival() -> None:
+    """The same principle as `_MIN_TIMES_ADDRESSED`: a single sighting is not
+    evidence. Real case - `cousin` (Embre's term for the narrator) and the known
+    false positive `Magister` both appear in chapter 66 and nowhere else
+    together, and at a threshold of one shared chapter that coincidence was
+    enough to take a genuine epithet off the narrator."""
+    plan = _narrator(
+        _a_name("Conn", chapters={0, 2}),
+        _a_name("Connwaer", chapters={0, 2}),
+        _a_name("Magister", chapters={8, 9, 66}),
+        _candidate("cousin", chapters={66}),
+    )
+
+    assert auto_link_plan(plan) == (["Conn", "Connwaer"], ["cousin"])
 
 
 def test_auto_link_plan_links_three_spellings_of_one_name_as_one_group() -> None:

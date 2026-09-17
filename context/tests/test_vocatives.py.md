@@ -1,7 +1,7 @@
 ---
 source: tests/test_vocatives.py
-last_synced: 2026-09-17T14:15:09Z
-source_hash: d5cdd3f3154d5faf54f58ba27cc477bfc4592dee
+last_synced: 2026-09-17T14:59:27Z
+source_hash: f954932ca93374d0dc789f149e1405efd22f1370
 ---
 
 ## Purpose
@@ -12,7 +12,7 @@ the numbers each encodes live in
 `context/src/bookrag/ingest/vocatives.py.md`.
 
 ## Public Interface
-Thirteen tests plus `_I_NARRATE` / `_HE_NARRATES` narration fixtures and the
+Fifteen tests plus `_I_NARRATE` / `_HE_NARRATES` narration fixtures and the
 `_chapter` / `_said_by_another` / `_said_by_narrator` builders.
 
 ## Key Decisions
@@ -65,6 +65,22 @@ Thirteen tests plus `_I_NARRATE` / `_HE_NARRATES` narration fixtures and the
   - `..._the_surface_form_the_book_used_is_what_gets_reported` pins that the
     reported name reads like the book ("Connwaer"), not a lowercased token,
     since that string ends up in `entities.json` as something a reader asks about.
+
+- **Two chapter-evidence tests, and the second is the only end-to-end cover for
+  the two-narrator bug.** `auto_link_plan` tells one addressee from another by
+  comparing `AliasCandidate.chapters`, so that field has to be populated
+  correctly from real chapter text.
+  - `..._each_candidate_records_the_chapters_it_was_addressed_in` asserts the
+    field directly, including that the to-narrator direction is the only one
+    recorded.
+  - `..._a_second_narrators_epithet_does_not_land_on_the_first` builds two
+    first-person narrators in alternating chapters, the second called by a
+    single name so she forms no qualifying group, and runs the whole
+    detect → plan path. It asserts both that *both* narrators' vocatives are
+    harvested (the pooling is real and unavoidable at detection time) and that
+    only the first narrator's epithet survives the plan. This file is the only
+    home for it: `test_alias_linking.py`'s version builds `AliasCandidate`s by
+    hand and so cannot catch the detector failing to record chapters at all.
 
 ## Dependencies
 - Internal: `bookrag.ingest.vocatives`, `bookrag.ingest.chapter.Chapter`

@@ -7,7 +7,7 @@ than invented - the numbers each one encodes are in
 """
 
 from bookrag.ingest.chapter import Chapter
-from bookrag.ingest.vocatives import detect_narrator_aliases
+from bookrag.ingest.vocatives import auto_link_plan, detect_narrator_aliases
 
 # Narration only - no dialogue. Deliberately dense in first-person pronouns
 # (the real book runs ~7 per 100 words) and comfortably over the 50-word floor,
@@ -265,6 +265,59 @@ def test_the_surface_form_the_book_used_is_what_gets_reported() -> None:
     (candidate,) = detect_narrator_aliases(chapters).aliases
 
     assert candidate.name == "Connwaer"
+
+
+def test_each_candidate_records_the_chapters_it_was_addressed_in() -> None:
+    """`auto_link_plan` tells one addressee from another by comparing chapter
+    sets, so this is the evidence that rule runs on. Recorded for the
+    to-narrator direction only - what the narrator calls other people says
+    nothing about who is being addressed."""
+    chapters = [
+        _chapter(0, _I_NARRATE, *([_said_by_another("Come along, boy.")] * 2)),
+        _chapter(1, _I_NARRATE, *([_said_by_another("You are late, Conn.")] * 2)),
+        _chapter(2, _I_NARRATE, *([_said_by_another("Come along, boy.")] * 2)),
+    ]
+
+    by_name = {c.name: c for c in detect_narrator_aliases(chapters).aliases}
+
+    assert by_name["boy"].chapters == {0, 2}
+    assert by_name["Conn"].chapters == {1}
+
+
+def test_a_second_narrators_epithet_does_not_land_on_the_first() -> None:
+    """**The two-narrator bug end to end, through the real detector.**
+
+    Two first-person narrators in alternating chapters. The second is called
+    only "Row", so her name forms a group of one and never qualifies - the
+    refusal that catches two *groups* never fires, the first narrator's pair is
+    linked as normal, and before this every epithet in the book rode along with
+    it. "girl" became one of Conn's names.
+
+    The unit-level version of this lives in `test_alias_linking.py`; this one
+    exists because that one builds `AliasCandidate`s by hand, and so cannot
+    catch the detector failing to record chapters in the first place."""
+    conn = [
+        _chapter(index, _I_NARRATE,
+                 _said_by_another("Come along, boy."),
+                 _said_by_another("You are late, Conn."),
+                 _said_by_another("Wipe your feet, Connwaer."))
+        for index in (0, 2, 4)
+    ]
+    row = [
+        _chapter(index, _I_NARRATE,
+                 _said_by_another("Come along, girl."),
+                 _said_by_another("You are late, Row."))
+        for index in (1, 3, 5)
+    ]
+
+    found = detect_narrator_aliases(sorted(conn + row, key=lambda c: c.index))
+    names, epithets = auto_link_plan(found)
+
+    # Both narrators' vocatives are harvested - the detector cannot tell whose
+    # chapter is whose, and that pooling is the bug.
+    assert {"Conn", "Connwaer", "Row", "boy", "girl"} <= {c.name for c in found.aliases}
+    assert names == ["Conn", "Connwaer"]
+    assert epithets == ["boy"]
 
 
 def test_front_matter_is_not_judged_for_narration() -> None:
