@@ -29,28 +29,28 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/extract/__init__.py](src/bookrag/extract/__init__.py.md) — `extract` subpackage marker.
 - [src/bookrag/extract/resolve.py](src/bookrag/extract/resolve.py.md) — entity name → `entity_id` resolution against `data/library/entities.json`.
 - [src/bookrag/extract/pipeline.py](src/bookrag/extract/pipeline.py.md) — `extract_book`: runs a provider over every chapter, writes `facts.jsonl`.
-- [tests/helpers.py](../tests/helpers.py.md) — shared synthetic epub/pdf builders.
-- [tests/test_epub_loader.py](../tests/test_epub_loader.py.md) — covers `epub_loader` (chapters + metadata) with a synthetic in-test epub.
-- [tests/test_consolidate.py](../tests/test_consolidate.py.md) — covers `ingest.consolidate`'s trigger decision and merge logic.
-- [tests/test_pdf_loader.py](../tests/test_pdf_loader.py.md) — covers `pdf_loader` (chapters + metadata), TOC and no-TOC fallback paths.
-- [tests/test_storage.py](../tests/test_storage.py.md) — covers `storage.py`, including the series/chapter-2-collision guarantee.
-- [tests/test_storage_series_reading_order.py](../tests/test_storage_series_reading_order.py.md) — covers `series_reading_order`.
-- [tests/test_cli.py](../tests/test_cli.py.md) — end-to-end `bookrag ingest|extract|eval` coverage, plus CLI-plumbing coverage of `list|show|remove|aliases|doctor`.
-- [tests/test_library.py](../tests/test_library.py.md) — covers `library.py`'s list/show/remove/doctor logic in depth, plus name-variant detection and `link_names`.
-- [tests/test_env.py](../tests/test_env.py.md) — covers `env.py`'s blank-means-unset rule, and that copying `.env.example` to `.env` leaves every default intact.
-- [tests/test_hooks.py](../tests/test_hooks.py.md) — covers the context-doc enforcement hooks: which paths block a turn, which must not, that the block decision stays valid JSON, and what `check_drift.sh` reports vs. stays silent about.
-- [tests/test_placement.py](../tests/test_placement.py.md) — covers GPU/CPU placement reporting: ModelPlacement, the /api/ps read, and the warning a user sees.
-- [tests/test_titles.py](../tests/test_titles.py.md) — covers `titles.guess_title_author`, including the real `Finite-and-Infinite-Games-by-James-Carse` case.
-- [tests/test_resolve.py](../tests/test_resolve.py.md) — covers entity resolution (exact/alias match, type separation).
-- [tests/test_fake_provider.py](../tests/test_fake_provider.py.md) — covers `FakeProvider`'s deterministic extraction.
-- [tests/test_extraction_pipeline.py](../tests/test_extraction_pipeline.py.md) — covers `extract_book`, including series entity-seeding.
-- [tests/test_query.py](../tests/test_query.py.md) — covers `facts_as_of`'s spoiler-safety guarantee across a series.
-- [tests/test_spoiler_safety.py](../tests/test_spoiler_safety.py.md) — the ship gate: end-to-end proof that a chapter-N render contains nothing from, and derives nothing from, past chapter N.
-- [tests/test_vocatives.py](../tests/test_vocatives.py.md) — covers narrator-alias detection: speaker split, per-chapter narration mode, quote styles, and the noise filters.
-- [tests/test_alias_linking.py](../tests/test_alias_linking.py.md) — pins the alias/epithet split: epithets reach `resolve_entity` and never `select_relevant_facts`, plus `auto_link_plan`'s rules.
-- [tests/test_eval.py](../tests/test_eval.py.md) — covers `groundedness_score`, `run_eval`'s read-only guarantee, and `summarize`.
-- [tests/test_ingestion_report.py](../tests/test_ingestion_report.py.md) — covers `classify_ingestion`/`write_ingestion_report`.
-- [tests/test_parsing.py](../tests/test_parsing.py.md) — covers `providers.parsing.parse_facts`.
-- [tests/test_prompts.py](../tests/test_prompts.py.md) — guards the shipped prompt text against embedding real books' content, which a model copies into its output.
-- [tests/test_ollama_provider.py](../tests/test_ollama_provider.py.md) — real integration smoke test against a running Ollama, skipped when unreachable.
-- [tests/test_registry.py](../tests/test_registry.py.md) — covers `get_provider`'s model-override/env-var resolution and unknown-provider error.
+- [tests/helpers.py](tests/helpers.py.md) — shared synthetic epub/pdf builders.
+- [tests/test_epub_loader.py](tests/test_epub_loader.py.md) — covers `epub_loader` (chapters + metadata) with a synthetic in-test epub.
+- [tests/test_consolidate.py](tests/test_consolidate.py.md) — covers `ingest.consolidate`'s trigger decision and merge logic.
+- [tests/test_pdf_loader.py](tests/test_pdf_loader.py.md) — covers `pdf_loader` (chapters + metadata), TOC and no-TOC fallback paths.
+- [tests/test_storage.py](tests/test_storage.py.md) — covers `storage.py`, including the series/chapter-2-collision guarantee.
+- [tests/test_storage_series_reading_order.py](tests/test_storage_series_reading_order.py.md) — covers `series_reading_order`.
+- [tests/test_cli.py](tests/test_cli.py.md) — end-to-end `bookrag ingest|extract|eval` coverage, plus CLI-plumbing coverage of `list|show|remove|aliases|doctor`.
+- [tests/test_library.py](tests/test_library.py.md) — covers `library.py`'s list/show/remove/doctor logic in depth, plus name-variant detection and `link_names`.
+- [tests/test_env.py](tests/test_env.py.md) — covers `env.py`'s blank-means-unset rule, and that copying `.env.example` to `.env` leaves every default intact.
+- [tests/test_hooks.py](tests/test_hooks.py.md) — covers the context-doc enforcement hooks: which paths block a turn, which must not, that the block decision stays valid JSON, and what `check_drift.sh` reports vs. stays silent about.
+- [tests/test_placement.py](tests/test_placement.py.md) — covers GPU/CPU placement reporting: ModelPlacement, the /api/ps read, and the warning a user sees.
+- [tests/test_titles.py](tests/test_titles.py.md) — covers `titles.guess_title_author`, including the real `Finite-and-Infinite-Games-by-James-Carse` case.
+- [tests/test_resolve.py](tests/test_resolve.py.md) — covers entity resolution (exact/alias match, type separation).
+- [tests/test_fake_provider.py](tests/test_fake_provider.py.md) — covers `FakeProvider`'s deterministic extraction.
+- [tests/test_extraction_pipeline.py](tests/test_extraction_pipeline.py.md) — covers `extract_book`, including series entity-seeding.
+- [tests/test_query.py](tests/test_query.py.md) — covers `facts_as_of`'s spoiler-safety guarantee across a series.
+- [tests/test_spoiler_safety.py](tests/test_spoiler_safety.py.md) — the ship gate: end-to-end proof that a chapter-N render contains nothing from, and derives nothing from, past chapter N.
+- [tests/test_vocatives.py](tests/test_vocatives.py.md) — covers narrator-alias detection: speaker split, per-chapter narration mode, quote styles, and the noise filters.
+- [tests/test_alias_linking.py](tests/test_alias_linking.py.md) — pins the alias/epithet split: epithets reach `resolve_entity` and never `select_relevant_facts`, plus `auto_link_plan`'s rules.
+- [tests/test_eval.py](tests/test_eval.py.md) — covers `groundedness_score`, `run_eval`'s read-only guarantee, and `summarize`.
+- [tests/test_ingestion_report.py](tests/test_ingestion_report.py.md) — covers `classify_ingestion`/`write_ingestion_report`.
+- [tests/test_parsing.py](tests/test_parsing.py.md) — covers `providers.parsing.parse_facts`.
+- [tests/test_prompts.py](tests/test_prompts.py.md) — guards the shipped prompt text against embedding real books' content, which a model copies into its output.
+- [tests/test_ollama_provider.py](tests/test_ollama_provider.py.md) — real integration smoke test against a running Ollama, skipped when unreachable.
+- [tests/test_registry.py](tests/test_registry.py.md) — covers `get_provider`'s model-override/env-var resolution and unknown-provider error.
