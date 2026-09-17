@@ -17,6 +17,7 @@ from bookrag.cli import (
     extract_start_notes,
     main,
     narrator_alias_lines,
+    no_narrator_names_lines,
 )
 from bookrag.extract.resolve import load_entities, save_entities
 from bookrag.ingest.vocatives import AliasCandidate, NarratorAliases
@@ -772,7 +773,11 @@ def test_aliases_command_says_so_plainly_for_a_third_person_book(
     tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Most novels are third person. Saying "nothing to report" and why beats
-    an empty list, which reads like a failure."""
+    an empty list, which reads like a failure.
+
+    Pins the CLI plumbing; `no_narrator_names_lines`' own tests own the wording
+    for each case. The count line leads, so the explanation never arrives
+    without the evidence behind it."""
     epub_path = tmp_path / "sample.epub"
     build_narrative_epub(epub_path)
     main(["ingest", str(epub_path)])
@@ -783,7 +788,50 @@ def test_aliases_command_says_so_plainly_for_a_third_person_book(
 
     output = capsys.readouterr().out
     assert exit_code == 0
-    assert "does not read as first-person" in output
+    assert "No names found for a narrator" in output
+    assert "0 of 2 chapters read as first-person narration" in output
+    assert "nothing says who it was aimed at" in output
+
+
+def test_a_trace_of_first_person_is_reported_as_a_count_not_as_a_claim() -> None:
+    """A book was called first-person on the strength of **one chapter in
+    2,334**.
+
+    `is_first_person` is true if any chapter clears the density gate, which is
+    the right bar for *harvesting* - a first-person chapter's vocatives are that
+    chapter's however rare it is. It is the wrong bar for telling a reader what
+    their book is. Measured on the corpus, the old wording was false for three
+    of eight books: Reverend Insanity 1/2334, Atomic Habits 2/36, Moby Dick
+    11/142 - and it then blamed the missing names on the data ("no name is used
+    often enough"), when the real reason is that there is almost no first-person
+    prose to attribute dialogue against.
+
+    The counts go first and always. The sentence after them describes what the
+    pass had to work with, never what the book is - Moby Dick is narrated by
+    Ishmael throughout, so any wording calling it third person is wrong in the
+    other direction."""
+    trace = NarratorAliases(first_person_chapters=[7], chapters_considered=2334)
+
+    lines = no_narrator_names_lines("reverend-insanity", trace)
+
+    assert "1 of 2334 chapters read as first-person narration" in lines[1]
+    body = " ".join(lines)
+    assert "too small a share" in body
+    assert "no name is used" not in body.lower()
+    assert "third person" not in body.lower()
+
+
+def test_a_genuinely_first_person_book_with_no_names_says_exactly_that() -> None:
+    """The other side of the same message: when the book really is first person
+    throughout, "no name is used often enough" is the true explanation and must
+    survive. Without this the fix above could be satisfied by deleting the
+    honest branch along with the dishonest one."""
+    throughout = NarratorAliases(first_person_chapters=list(range(78)), chapters_considered=84)
+
+    body = " ".join(no_narrator_names_lines("magic-thief", throughout))
+
+    assert "78 of 84 chapters read as first-person narration" in body
+    assert "No name is used for the narrator often enough" in body
 
 
 def test_aliases_link_creates_an_entity_extraction_will_resolve_into(

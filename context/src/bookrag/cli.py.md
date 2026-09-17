@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-16T21:10:59Z
-source_hash: 8bad70ea3c830226c243a4d890a798449c4a0e5d
+last_synced: 2026-09-17T14:21:10Z
+source_hash: e2946d592022026907136e4e2e8e5f620167bbb3
 ---
 
 ## Purpose
@@ -36,6 +36,19 @@ actual logic (see that file's context doc for the real behavior).
 - `_print_section(header, lines) -> None` — a titled, indented block preceded
   by a blank line. Prints **nothing at all** for an empty `lines`, header
   included; see Key Decisions.
+- `no_narrator_names_lines(book_id, found: NarratorAliases) -> list[str]` — why
+  `bookrag aliases` found nothing, stated as what was measured rather than as a
+  claim about the book. It replaced `'<book>' reads as first-person, but no name
+  is used for the narrator often enough to report`, which leaned on
+  `is_first_person` (true if **one** chapter clears the density gate) and was
+  therefore false for three of the eight books in the corpus — Reverend Insanity
+  1/2334, Atomic Habits 2/36, Moby Dick 11/142 — and then blamed the absent
+  names on the data. The chapter counts now lead and are always printed; the
+  sentence after them picks one of three branches (no first-person chapters at
+  all / too small a share / genuinely first person throughout). Deliberately
+  never says "third person" for the middle branch: Moby Dick is narrated by
+  Ishmael throughout and only fails the density gate because most chapters are
+  expository, so that wording would be wrong in the other direction.
 - `narrator_alias_lines(found: NarratorAliases) -> list[str]` — renders
   `ingest.vocatives.detect_narrator_aliases`'s result under ingest's "Names for
   the narrator" section. Returns `[]` for a third-person book, which is most of

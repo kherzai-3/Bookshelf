@@ -110,6 +110,20 @@ _ANYONES_TERM_OF_ADDRESS = frozenset(
     "sir dear madam ma'am maam boss mate lord lady master mistress friend".split()
 )
 
+# Share of considered chapters that must read as first person before the book
+# is worth reporting as a narrator's book at all. Measured across all eight
+# books in the corpus the gap is enormous, and nothing sits near the middle:
+# The Magic Thief runs 78/84 (0.93), and every other book is at or below
+# 11/142 - Moby Dick 0.08, Atomic Habits 0.06, and Reverend Insanity a single
+# chapter in 2,334 (0.0004). That lower band is a handful of first-person
+# passages inside an otherwise third-person book.
+#
+# This gates *reporting only*, never detection. Harvesting stays per chapter,
+# because a first-person chapter's vocatives are that chapter's however rare
+# the chapter is - and Moby Dick is genuinely narrated by Ishmael even though
+# only 11 of its chapters clear the density gate.
+_MOSTLY_FIRST_PERSON_SHARE = 0.5
+
 # Share of trailing-position sightings that must be capitalised before a
 # vocative reads as a *name* rather than an epithet. Trailing position only:
 # a leading vocative is sentence-initial and capitalised whatever it is.
@@ -163,7 +177,27 @@ class NarratorAliases:
 
     @property
     def is_first_person(self) -> bool:
+        """Whether *any* chapter reads as first person - deliberately a low bar,
+        because harvesting is per-chapter and one first-person chapter's
+        vocatives are still legitimately that chapter's. Use
+        `reads_as_first_person_throughout` for the different question of whether
+        the book has a narrator worth collecting names for."""
         return bool(self.first_person_chapters)
+
+    @property
+    def first_person_share(self) -> float:
+        """Fraction of considered chapters that read as first person."""
+        if not self.chapters_considered:
+            return 0.0
+        return len(self.first_person_chapters) / self.chapters_considered
+
+    @property
+    def reads_as_first_person_throughout(self) -> bool:
+        """Whether enough of the book is first person to be worth reporting as
+        a narrator's book. `is_first_person` alone is a trap for the reader:
+        Reverend Insanity clears it on **one chapter in 2,334**, and was
+        reported as first-person narration on that basis."""
+        return self.first_person_share >= _MOSTLY_FIRST_PERSON_SHARE
 
 
 def _best_quote_pair(text: str) -> tuple[tuple[str, str] | None, list[re.Match]]:

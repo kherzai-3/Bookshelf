@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
-last_synced: 2026-09-16T21:10:59Z
-source_hash: ec878fe28145e98a97b166c68ee5e24bd5a5c66d
+last_synced: 2026-09-17T14:21:10Z
+source_hash: 9795512fc6945a678273a106c4e47205a565b3f7
 ---
 
 ## Purpose
@@ -156,6 +156,17 @@ Also covers, added since the above:
   owns the proof that extraction honours a link. The third-person test pins that
   the command explains itself rather than printing an empty list, which reads
   like a failure on the majority of novels.
+
+- **`no_narrator_names_lines`** (`test_a_trace_of_first_person_is_reported_as_a_
+  count_not_as_a_claim`, `..._a_genuinely_first_person_book_with_no_names_says_
+  exactly_that`) — unit tests on the renderer rather than CLI round-trips,
+  because the fixtures that matter (1 first-person chapter in 2,334; 78 in 84)
+  are corpus shapes no synthetic epub reproduces cheaply. The pair is
+  deliberate: the first pins that a *trace* of first-person narration is
+  reported as a count and not as a claim, the second that the honest "no name
+  is used often enough" branch survives for a book that really is first person
+  throughout — without it, the first test could be satisfied by deleting both
+  branches.
 
 ## Key Decisions
 - The `_library_root` autouse fixture points `BOOKRAG_LIBRARY_ROOT` at a

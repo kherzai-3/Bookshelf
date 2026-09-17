@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/vocatives.py
-last_synced: 2026-09-17T14:15:09Z
-source_hash: bd5076c3032717f627d509e0bbc139b41e335b7f
+last_synced: 2026-09-17T14:21:10Z
+source_hash: 331bfaa4209d445578a60a57fbdba590761980a7
 ---
 
 ## Purpose
@@ -23,8 +23,9 @@ it rather than having its output patched afterwards.
   `addressed_by_narrator: list[tuple[str, int]]`,
   `ambiguous: list[tuple[str, int, int]]`,
   `speakers: list[tuple[str, int, int]]`, `first_person_chapters: list[int]`,
-  `chapters_considered: int`, `quote_style: str | None`, plus an
-  `is_first_person` property.
+  `chapters_considered: int`, `quote_style: str | None`, plus
+  `is_first_person`, `first_person_share` and
+  `reads_as_first_person_throughout` properties.
 - `detect_narrator_aliases(chapters: list[Chapter]) -> NarratorAliases`
 - Consumed by `cli.narrator_alias_lines` (the ingest section) and
   `bookrag aliases <book_id>`. **Nothing here is ever applied** - linking is
@@ -115,6 +116,22 @@ an answer.**
   `_LEADING_VOCATIVE`). Verified by sabotage: dropping `you\s+` from a second
   copy fails `test_a_vocative_introduced_by_you_or_my_is_still_the_same_sighting`
   and nothing else in the suite.
+- **`is_first_person` is "at least one chapter", and that is deliberately the
+  wrong bar for talking to a reader.** It is the right bar for *harvesting* -
+  a first-person chapter's vocatives are that chapter's however rare the
+  chapter is. But `bookrag aliases` used it to assert that a book "reads as
+  first-person", which measured across the eight-book corpus is false for
+  three of them: **Reverend Insanity clears it on 1 chapter of 2,334**, Atomic
+  Habits on 2 of 36, Moby Dick on 11 of 142. `first_person_share` and
+  `reads_as_first_person_throughout` (`_MOSTLY_FIRST_PERSON_SHARE = 0.5`)
+  answer the separate question. The corpus has nothing in the middle: Magic
+  Thief 0.93, everything else ≤ 0.08.
+
+  The threshold gates **reporting only, never detection** — `corpus_check.py`
+  confirms output is byte-identical across all eight books. And the wording it
+  selects describes what the pass had to work with, not what the book is:
+  Moby Dick *is* narrated by Ishmael throughout, so calling it third person
+  would be wrong in the other direction. See `cli.no_narrator_names_lines`.
 - **Speech verbs are a closed list.** Generalising to "any word ending -ed or
   -s" was tried and immediately degraded attribution: it matched ordinary verbs
   in the following sentence and filed the narrator's own lines under someone

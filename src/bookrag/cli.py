@@ -807,13 +807,9 @@ def _aliases(args: argparse.Namespace) -> int:
         print(f"\n  Undo with: bookrag aliases {args.book_id} --unlink\n")
 
     found = detect_narrator_aliases(chapters)
-    if not found.is_first_person:
-        print(f"'{args.book_id}' does not read as first-person narration - nothing to detect.")
-        print("  This pass only works where the text says who is speaking to whom. In third")
-        print("  person a vocative is still findable, but nothing says who it was aimed at.")
-        return 0
     if not found.aliases:
-        print(f"'{args.book_id}' reads as first-person, but no name is used for the narrator often enough to report.")
+        for line in no_narrator_names_lines(args.book_id, found):
+            print(line)
         return 0
 
     print(f"Names other characters use for the narrator of '{args.book_id}':")
@@ -1039,6 +1035,49 @@ def sanity_summary(chapters: list[Chapter], edge_count: int = 3) -> list[str]:
         lines.append("last: " + " | ".join(label(c) for c in chapters[-edge_count:]))
     # Returns content, not formatting - indentation belongs to whoever renders
     # it (`_print_section` on the console, `write_ingestion_report` in the file).
+    return lines
+
+
+def no_narrator_names_lines(book_id: str, found: NarratorAliases) -> list[str]:
+    """Why `bookrag aliases` found nothing, said in terms of what was actually
+    measured instead of a claim about the book.
+
+    This used to assert `'<book>' reads as first-person, but no name is used for
+    the narrator often enough to report`, on the strength of
+    `is_first_person` - which is true if **one** chapter clears the density
+    gate. Measured on the corpus, that is a false statement for three of eight
+    books: Reverend Insanity clears it on 1 chapter of 2,334, Atomic Habits on
+    2 of 36, Moby Dick on 11 of 142. The old wording asserted the wrong thing
+    about the book and then blamed the missing names on the data.
+
+    The counts are the honest answer, so they are always printed. The sentence
+    after them describes what the *pass* had to work with rather than what the
+    book is - Moby Dick really is narrated by Ishmael, and only 11 of its
+    chapters are first-person prose, so any wording that called it third person
+    would be wrong in the other direction.
+    """
+    first_person, considered = len(found.first_person_chapters), found.chapters_considered
+    lines = [
+        f"No names found for a narrator of '{book_id}'.",
+        f"  {first_person} of {considered} chapters read as first-person narration"
+        + (f" ({found.quote_style} quotes)." if found.quote_style else "."),
+    ]
+    if not found.is_first_person:
+        lines.extend(
+            [
+                "  This pass only works where the text says who is speaking to whom. In third",
+                "  person a vocative is still findable, but nothing says who it was aimed at.",
+            ]
+        )
+    elif not found.reads_as_first_person_throughout:
+        lines.extend(
+            [
+                "  That is too small a share to read a narrator's names from: most chapters",
+                "  carry too little first-person prose to attribute their dialogue against.",
+            ]
+        )
+    else:
+        lines.append("  No name is used for the narrator often enough to report.")
     return lines
 
 
