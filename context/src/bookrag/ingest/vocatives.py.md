@@ -204,6 +204,21 @@ the narrator" section.
   vocative is a proper noun, which is cheap and already implied by the data.
 - Third-person attribution is unsolved and deliberately out of scope. It needs
   an addressee, which is a different problem from finding a vocative.
+- **A mid-utterance vocative is a third position, and nothing covers it.** Both
+  patterns are anchored — `_LEADING_VOCATIVE` at the start, `_TRAILING_VOCATIVE`
+  at the end — so a vocative with utterance on both sides of it is invisible.
+  Found while verifying the eight-book ingest on 2026-09-17: the one genuine
+  `Ishmael` vocative in Moby Dick is Peleg saying *"Well then, down ye go here,
+  Ishmael, for the three hundredth lay."* It is never harvested, and it is worth
+  being exact about why — **it is rejected by the pattern, not by
+  `_MIN_TIMES_ADDRESSED`**, because it never becomes a sighting to count. The
+  roadmap records it as "correctly rejected by the single-sighting floor", which
+  it never reaches. This also bounds sub-case (b): scanning *narration* for a
+  reflexive self-naming tag would not catch this one either, since it is inside
+  dialogue. They are two separate gaps.
+  Not fixed, and not obviously worth fixing: a mid-utterance `", <word>,"` shape
+  is exactly the loose pattern that makes the leading position noisy (see
+  `_vocative`), so it would need its own measurement before anyone builds it.
 
 ## `AliasCandidate` and `auto_link_plan`
 - `AliasCandidate(name, times_addressed, times_capitalised,
