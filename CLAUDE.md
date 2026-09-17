@@ -131,6 +131,28 @@ actions" policy, applied specifically to this repo's branch model. `master`
 is the user's checkpoint of record; only they decide when `development`'s
 state is ready to become it.
 
+**Keep the history linear. Never create a merge commit.** When the user does
+approve a release, fast-forward:
+
+```
+git push origin development:master    # then, locally:
+git checkout master && git merge --ff-only development && git checkout development
+```
+
+`--no-ff` was used once (`febb954`) and is the thing to avoid. It leaves
+`master` and `development` pointing at *different commits with byte-identical
+trees*, permanently, and adds one such commit per release — needless divergent
+state whose only payoff is a summary message that belongs in the individual
+commits anyway. If a fast-forward is ever refused, that means `master` has
+genuinely moved and the right response is to ask the user, not to reach for
+`--no-ff` or `--force`.
+
+**Run the test suite once, before the release, on `development`.** Re-running
+it after a fast-forward tests byte-identical content and proves nothing — the
+trees are the same by definition. The only case that warrants a second run is
+a merge that was *not* a fast-forward, which under the rule above should not
+happen without asking first.
+
 **Partially hook-enforced, the same way the context-doc convention is:**
 - A `Stop` hook (`.claude/hooks/check_pending_commit.sh`) notices when
   `git status` shows uncommitted changes and reminds about this convention —
