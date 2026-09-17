@@ -211,17 +211,33 @@ def _first_person_density(text: str) -> float:
     return len(re.findall(r"\b(?:I|me|my|mine|myself)\b", narration)) / len(words) * 100
 
 
+# The terminator may be a comma, not just a full stop: in `"Come along, boy,"
+# he said` the comma belongs to the sentence but sits inside the quotation
+# marks. Omitting it silently drops every vocative in an utterance that
+# continues into its attribution - which is most of them.
+_TRAILING_VOCATIVE = re.compile(r",\s*(?:my\s+|you\s+)?([A-Za-z][A-Za-z'-]{2,14})\s*[.?!,;]?$")
+_LEADING_VOCATIVE = re.compile(r"([A-Za-z][A-Za-z'-]{2,14}),\s")
+
+
 def _vocative_in_trailing_position(utterance: str) -> str | None:
     """The vocative from the unambiguous position only, surface form intact.
 
     Split out from `_vocative` because capitalisation is only evidence *here*.
     A leading vocative sits at the start of a sentence and is capitalised
     whether it is "Conn" or "Boy", so counting those would make every epithet
-    look like a name."""
-    trailing = re.search(r",\s*(?:my\s+|you\s+)?([A-Za-z][A-Za-z'-]{2,14})\s*[.?!,;]?$", utterance)
-    if not trailing:
+    look like a name.
+
+    **`_vocative` delegates to this rather than re-matching.** The two used to
+    carry byte-identical copies of the pattern above and of the
+    `_NOT_A_VOCATIVE` check, which they cannot be allowed to disagree about:
+    this function produces `times_capitalised` and `_vocative` produces the
+    `times_addressed` it is measured against, so a drift between them computes
+    the name/epithet ratio across two different sets of sightings and corrupts
+    the split silently."""
+    match = _TRAILING_VOCATIVE.search(utterance)
+    if not match:
         return None
-    name = trailing.group(1)
+    name = match.group(1)
     return None if name.lower() in _NOT_A_VOCATIVE else name
 
 
@@ -232,16 +248,10 @@ def _vocative(utterance: str) -> str | None:
     final word of an utterance is a vocative and very little else. Leading
     position ("Conn, come here") has to be filtered, because it is also where
     every interjection in English lives ("Well, ...", "Righty-o, ...")."""
-    # The terminator may be a comma, not just a full stop: in `"Come along,
-    # boy," he said` the comma belongs to the sentence but sits inside the
-    # quotation marks. Omitting it silently drops every vocative in an
-    # utterance that continues into its attribution - which is most of them.
-    trailing = re.search(r",\s*(?:my\s+|you\s+)?([A-Za-z][A-Za-z'-]{2,14})\s*[.?!,;]?$", utterance)
+    trailing = _vocative_in_trailing_position(utterance)
     if trailing:
-        name = trailing.group(1)
-        if name.lower() not in _NOT_A_VOCATIVE:
-            return name.lower()
-    leading = re.match(r"([A-Za-z][A-Za-z'-]{2,14}),\s", utterance)
+        return trailing.lower()
+    leading = _LEADING_VOCATIVE.match(utterance)
     if leading:
         name = leading.group(1)
         if name.lower() not in _NOT_A_VOCATIVE:

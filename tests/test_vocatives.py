@@ -196,6 +196,77 @@ def test_a_candidate_who_also_speaks_is_another_character() -> None:
     assert [name for name, _, _ in found.speakers] == ["trammel"]
 
 
+def test_capitalisation_sorts_a_name_from_an_epithet_in_trailing_position() -> None:
+    """The name/epithet split, measured on real detector output rather than on a
+    hand-built `AliasCandidate`.
+
+    This whole file had no capitalisation coverage, which mattered because two
+    functions have to agree to produce the ratio: `_vocative` counts the
+    sighting and `_vocative_in_trailing_position` decides whether it was
+    capitalised. They carried byte-identical copies of the same pattern and the
+    same stoplist, so a change to one silently measured the numerator over a
+    different set of sightings than the denominator. `_vocative` now delegates,
+    and this is what fails if that is ever undone."""
+    chapters = [
+        _chapter(
+            i,
+            _I_NARRATE,
+            _said_by_another("You are late, Conn."),
+            _said_by_another("Come along, boy."),
+        )
+        for i in range(2)
+    ]
+
+    found = detect_narrator_aliases(chapters)
+    by_name = {c.name: c for c in found.aliases}
+
+    assert by_name["Conn"].times_capitalised == by_name["Conn"].times_addressed == 2
+    assert by_name["Conn"].reads_as_a_name
+    assert by_name["boy"].times_capitalised == 0
+    assert not by_name["boy"].reads_as_a_name
+
+
+def test_a_vocative_introduced_by_you_or_my_is_still_the_same_sighting() -> None:
+    """"..., you thief." and "..., my boy." are the two determiner forms the
+    trailing pattern explicitly allows, and nothing covered them.
+
+    They are the sharpest test of the coupling: `_vocative` counts the sighting
+    and `_vocative_in_trailing_position` decides whether it was capitalised, so
+    if only one of them knows about `you `/`my ` the two disagree about which
+    word the vocative even *is* - `_vocative` returns "thief" while the other
+    returns nothing, and the name/epithet ratio is computed over a set of
+    sightings that never happened. Verified by sabotage: dropping `you\\s+` from
+    one copy of the pattern fails this test and nothing else in the suite."""
+    chapters = [
+        _chapter(
+            i,
+            _I_NARRATE,
+            _said_by_another("Get down here, you thief."),
+            _said_by_another("Steady on, my Conn."),
+        )
+        for i in range(2)
+    ]
+
+    by_name = {c.name: c for c in detect_narrator_aliases(chapters).aliases}
+
+    assert by_name["thief"].times_addressed == 2
+    assert by_name["thief"].times_capitalised == 0
+    assert by_name["Conn"].times_addressed == by_name["Conn"].times_capitalised == 2
+
+
+def test_the_surface_form_the_book_used_is_what_gets_reported() -> None:
+    """A linked alias has to read like the book, not like a lowercased token -
+    it ends up in `entities.json` as a name a reader can ask questions about.
+    The surface form only survives via the trailing-position path, so this also
+    pins that `_vocative` and `_vocative_in_trailing_position` agree about
+    *which* sightings they saw."""
+    chapters = [_chapter(i, _I_NARRATE, *([_said_by_another("Wipe your feet, Connwaer.")] * 2)) for i in range(2)]
+
+    (candidate,) = detect_narrator_aliases(chapters).aliases
+
+    assert candidate.name == "Connwaer"
+
+
 def test_front_matter_is_not_judged_for_narration() -> None:
     chapters = [
         Chapter(0, "Copyright", "All rights reserved."),

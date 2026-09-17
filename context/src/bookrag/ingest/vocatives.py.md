@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/vocatives.py
-last_synced: 2026-09-16T19:53:59Z
-source_hash: 6ab52b8eab9d18e52cd0f76c0a1de878c322d0ed
+last_synced: 2026-09-17T14:15:09Z
+source_hash: bd5076c3032717f627d509e0bbc139b41e335b7f
 ---
 
 ## Purpose
@@ -19,7 +19,7 @@ actually walk, and early enough that extraction could eventually be told about
 it rather than having its output patched afterwards.
 
 ## Public Interface
-- `NarratorAliases` (dataclass) — `aliases: list[tuple[str, int]]`,
+- `NarratorAliases` (dataclass) — `aliases: list[AliasCandidate]`,
   `addressed_by_narrator: list[tuple[str, int]]`,
   `ambiguous: list[tuple[str, int, int]]`,
   `speakers: list[tuple[str, int, int]]`, `first_person_chapters: list[int]`,
@@ -103,6 +103,18 @@ an answer.**
   marks. Allowing only `.?!` silently drops every vocative in an utterance that
   continues into its attribution, which is most of them. Caught by
   `test_curly_single_quotes_are_found_too`, not by inspection.
+- **The trailing pattern exists once, and `_vocative` delegates to
+  `_vocative_in_trailing_position`.** The two used to hold byte-identical copies
+  of the pattern *and* of the `_NOT_A_VOCATIVE` check, which they cannot be
+  allowed to disagree about: `_vocative` produces `times_addressed` and
+  `_vocative_in_trailing_position` produces the `times_capitalised` measured
+  against it, so any drift computes `reads_as_a_name` over two different sets of
+  sightings and mis-sorts names from epithets **silently**. Nothing coupled
+  them, and this file's own tests asserted nothing about capitalisation at all.
+  Both patterns are now module-level compiled constants (`_TRAILING_VOCATIVE`,
+  `_LEADING_VOCATIVE`). Verified by sabotage: dropping `you\s+` from a second
+  copy fails `test_a_vocative_introduced_by_you_or_my_is_still_the_same_sighting`
+  and nothing else in the suite.
 - **Speech verbs are a closed list.** Generalising to "any word ending -ed or
   -s" was tried and immediately degraded attribution: it matched ordinary verbs
   in the following sentence and filed the narrator's own lines under someone

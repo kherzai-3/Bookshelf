@@ -1,7 +1,7 @@
 ---
 source: tests/test_vocatives.py
-last_synced: 2026-09-16T19:53:59Z
-source_hash: 4b213453ef5a13cdda0cf780d9f3a86187f2dab4
+last_synced: 2026-09-17T14:15:09Z
+source_hash: d5cdd3f3154d5faf54f58ba27cc477bfc4592dee
 ---
 
 ## Purpose
@@ -12,7 +12,7 @@ the numbers each encodes live in
 `context/src/bookrag/ingest/vocatives.py.md`.
 
 ## Public Interface
-Nine tests plus `_I_NARRATE` / `_HE_NARRATES` narration fixtures and the
+Thirteen tests plus `_I_NARRATE` / `_HE_NARRATES` narration fixtures and the
 `_chapter` / `_said_by_another` / `_said_by_narrator` builders.
 
 ## Key Decisions
@@ -44,6 +44,27 @@ Nine tests plus `_I_NARRATE` / `_HE_NARRATES` narration fixtures and the
   "spoken by someone other than the narrator" does not mean "addressed to the
   narrator". The fixture gives Trammel both an addressed line and two speaking
   lines, which is the real shape (`"Well, Trammel?" Brumbee asked`).
+
+- **Three capitalisation tests close a gap this file had from the start.** The
+  name/epithet split is the property that decides whether a candidate can be
+  linked or reach question matching, and nothing here asserted any part of it -
+  `reads_as_a_name` was only ever exercised in `test_alias_linking.py` on
+  *hand-built* `AliasCandidate` objects, so the path from real chapter text
+  through `_vocative_in_trailing_position` to `times_capitalised` was covered by
+  exactly one CLI test.
+  - `..._sorts_a_name_from_an_epithet_in_trailing_position` asserts the ratio on
+    real detector output.
+  - `..._a_vocative_introduced_by_you_or_my_is_still_the_same_sighting` is the
+    sharp one. `", you thief."` and `", my boy."` are the two determiner forms
+    the trailing pattern allows and nothing covered them, which made them the
+    place where `_vocative` and `_vocative_in_trailing_position` could most
+    easily disagree about *which word the vocative is*. Verified by sabotage:
+    with a divergent second copy of the pattern this fails and nothing else in
+    the suite does — the first sabotage attempt, against a fixture without a
+    determiner, passed cleanly and proved the earlier test too weak.
+  - `..._the_surface_form_the_book_used_is_what_gets_reported` pins that the
+    reported name reads like the book ("Connwaer"), not a lowercased token,
+    since that string ends up in `entities.json` as something a reader asks about.
 
 ## Dependencies
 - Internal: `bookrag.ingest.vocatives`, `bookrag.ingest.chapter.Chapter`
