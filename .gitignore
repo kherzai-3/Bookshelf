@@ -3,8 +3,11 @@ __pycache__/
 .venv/
 .pytest_cache/
 *.egg-info/
-.claude/context_state/dirty.txt
-.claude/context_state/commit_reminder_ack.txt
+# Per-clone hook bookkeeping (dirty.txt, commit_reminder_ack.txt,
+# explained_commit.txt). Ignored as a directory rather than file by file -
+# listing them individually meant a newly added state file was tracked by
+# default, and explained_commit.txt was committed once that way.
+.claude/context_state/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 data/

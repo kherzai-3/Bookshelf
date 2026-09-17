@@ -165,6 +165,24 @@ happen without asking first.
 - It stays silent while `.claude/context_state/dirty.txt` is non-empty —
   no point suggesting a commit before `check_dirty.sh`'s own concern
   (context docs out of sync) is resolved.
+- A second `Stop` hook (`.claude/hooks/explain_commit.sh`) closes the loop on
+  the other side: once a commit has actually landed, it blocks the turn once
+  and requires a plain-language summary of what was committed and why, then
+  tells the user the work is at a clean checkpoint they can `/compact` from.
+  It tracks `HEAD` in `.claude/context_state/explained_commit.txt`, acks the
+  new sha *before* blocking (so one commit never blocks twice), and adopts the
+  current `HEAD` silently on first run rather than demanding an explanation of
+  history that predates it.
+
+  **It cannot compact, and deliberately doesn't pretend to.** No hook event or
+  output field triggers compaction — `PreCompact`/`PostCompact` only *react* to
+  one already under way — so it emits a `systemMessage` asking the user to run
+  `/compact`. If that ever changes, this is the hook to revisit.
+
+  It is a `Stop` hook rather than a `PostToolUse` on `git commit` because a
+  commit is usually not the last thing a turn does; interrupting at the commit
+  itself would cut across work still in flight, whereas `Stop` is the point
+  where the turn is believed finished and dropping context costs nothing.
 - There is deliberately no hook that blocks a `master` merge or a push - a
   hook can't distinguish "the user just asked for this" from "the model
   decided to do this on its own," so that distinction has to stay a judgment

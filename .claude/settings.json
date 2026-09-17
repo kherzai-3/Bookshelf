@@ -21,6 +21,10 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/check_pending_commit.sh\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/explain_commit.sh\""
           }
         ]
       }
