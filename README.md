@@ -323,6 +323,49 @@ On success, if the source file lives under `data/incoming/` (or whatever
 copied into the library, so there's no reason to keep the staging copy. A
 source file ingested from anywhere else is never touched.
 
+#### Linking a narrator's names, automatically
+
+If the book has a **first-person narrator**, ingest reads how other
+characters address them and links the names it finds into one character
+before extraction ever runs, printing what it did:
+
+```
+'Conn' also answers to Connwaer
+  and is referred to as boy, lad, thief, shadow, blackbird, cousin
+  Wrong? `bookrag aliases <book-id> --unlink` undoes it, before or after extraction.
+```
+
+This matters because it happens *before* extraction: an entity that already
+carries the aliases absorbs every later mention, so the character is never
+split in the first place. Names and terms of address are kept in two
+separate lists - a name reaches both entity resolution and question
+matching, an epithet reaches only entity resolution, so "boy" can collect a
+fact filed under "boy" without making every question containing that word
+retrieve this character.
+
+**It fires in one narrow case, and stays silent otherwise** - which is the
+correct answer for most books, but worth knowing so its silence isn't read
+as a failure:
+
+- **First person only.** A third-person book has no narrator to address, so
+  nothing is detected. Identity linking for third-person books goes through
+  `bookrag doctor --merge-name-variants` instead (see "Managing your
+  library"), which works on names rather than on who is speaking.
+- **Two or more spellings of a name are required.** Detection needs two
+  independent signals, and one of them is a string relationship between two
+  names - so a narrator with a single name links nothing. Most first-person
+  narrators have one name.
+- **Speaker attribution only reads single-token names.** The attribution
+  pattern matches one capitalised word, so a book whose characters have
+  multi-token names ("Fang Yuan", "Mrs Hudson") yields no attributable
+  speakers and therefore no detections at all. Measured, not theorised - see
+  `context/src/bookrag/ingest/vocatives.py.md`.
+
+`bookrag aliases <book-id>` shows what was found and what was linked.
+`--unlink` undoes it, but note that undoing it *after* extraction means the
+facts already carry the merged `entity_id`: a genuine undo needs
+`--unlink` plus `extract --restart`, which is a full re-extraction.
+
 ### Extracting facts
 
 Once a book is ingested, extract chapter-scoped facts about its characters,
@@ -578,6 +621,11 @@ bookrag show <book-id>          # full detail for one book, including entity cou
 bookrag remove <book-id>        # asks for confirmation, then deletes the book + its facts
 bookrag remove <book-id> --yes  # skip the confirmation prompt
 
+bookrag aliases <book-id>       # show the names a book uses for its narrator
+bookrag aliases <book-id> --auto        # link them into one character
+bookrag aliases <book-id> --link A,B    # link two names by hand
+bookrag aliases <book-id> --unlink      # undo a link (see the caveat below)
+
 bookrag doctor                  # read-only consistency check
 bookrag doctor --fix            # apply the safe, obvious cleanups it finds
 bookrag doctor --merge-name-variants   # merge "Baron Arald" and "Arald" into one person
@@ -633,6 +681,17 @@ outright, because a wrong merge is invisible and cannot be undone by merging
 again. Similar spelling alone is never enough: "Skandia" and "Skandians" are
 a place and its people, and nothing but the book's own words will link two
 names that merely start alike.
+
+That caution has a measured cost, and it falls hardest on the characters
+that need this most: a character with several titles sits inside several
+longer forms of their *own* name, which the rule cannot tell apart from two
+people sharing a given name, so it refuses. See Known limitations - this is
+known-wrong rather than merely conservative, and the fix is planned.
+
+`bookrag aliases` is the other half of this, and works from the opposite
+signal - who addresses whom, rather than what names look like. It applies
+only to first-person narrators and normally runs by itself at ingest; see
+"Linking a narrator's names, automatically".
 
 ### Where books end up
 
@@ -790,8 +849,44 @@ only guards what it is pointed at.
 - **No fuzzy entity coreference.** `bookrag extract` resolves entity names
   via case-insensitive exact match only - "the old man" won't automatically
   link to a character already known as "Ishmael" unless the provider's own
-  output happens to name them consistently. Aliases can be added to
-  `data/library/entities.json` by hand today; automatic linking is future work.
+  output happens to name them consistently. Automatic linking is no longer
+  entirely future work: ingest links a first-person narrator's names before
+  extraction (see "Linking a narrator's names, automatically"), and `bookrag
+  doctor --merge-name-variants` merges name variants afterwards. Neither is
+  coreference - both work from names and forms of address, not from a
+  descriptive phrase like "the old man", which still links to nothing.
+- **A third-person character with many titles or assumed identities stays
+  fragmented, and the merge rules get *less* likely to fire the more names
+  they have.** Reported from real use on a translated web novel whose
+  protagonist appears as "Fang Yuan", "Gu Yue Fang Yuan",
+  "Lord/Elder/Demon King Fang Yuan", and nine assumed identities. Measured
+  against the real ingested text: the shipped rules link **3 of ~30** surface
+  forms, and only because "lord" happens to sit in the honorifics list.
+  Three separate causes, all confirmed:
+  - the honorifics list is Western-only, so "Elder Fang Yuan" (94 mentions
+    across 35 chapters) strips to nothing, and only a *leading* title is
+    stripped, so "Demon King Fang Yuan" keeps its rank;
+  - the ambiguity guard **inverts**. Refusing a name that sits inside more
+    than one longer name is right for two characters sharing a given name,
+    but "Fang Yuan" sits inside four longer forms of *itself*, so the richer
+    the character, the more certainly nothing is proposed;
+  - the one rule that could catch an assumed identity - the book stating the
+    link in its own words - is starved by its shortlist, which only ever
+    offers it single-token names where one is a prefix of the other. On this
+    book the shortlist was empty, so the rule never ran, even though the text
+    says "Fang Yuan, the so-called Chang Shan Yin" and "Fang Yuan called
+    himself Qi Sea Ancestor".
+
+  **Two things make this harder than it looks, and are why it is not simply
+  a matter of loosening the rules.** A name can *transfer*: the same book has
+  the protagonist take a historic character's name, so one string means two
+  different people depending on the chapter - and the book states the
+  non-identity in words a proximity rule reads as the opposite ("I am Fang
+  Yuan, not Wu Shuai"). And **aliases carry no chapter scope at all**. Facts
+  do, so no merged entity can leak a later fact; what leaks is the alias list
+  itself, since showing "Fang Yuan, also known as Qi Sea Ancestor" to a reader
+  at chapter 100 gives away a chapter-1853 reveal. Planned, not built - see
+  Future ideas.
 - **Small local models are less reliable at strict JSON than Claude -
   mitigated with real, grammar-level structural guarantees, not just a
   request.** `llama3.2:3b`'s first real test produced a JSON array with a
@@ -972,6 +1067,15 @@ only guards what it is pointed at.
   `select_relevant_facts`/the answer prompt would also need to become
   timeline-aware to actually pick the right event for a question rather
   than just the facts. Needs its own planning pass before building.
+  **It does not own character identity.** Asked whether it could supply the
+  identity links third-person books are missing, the answer is no, and the
+  dependency runs the other way: a timeline built over entities that are
+  still fragmented across nine names attributes one character's arc to nine
+  actors, which is a larger version of the bug it exists to fix. Identity
+  stays in the alias record, which is shaped as an event
+  (`chapter`, `entity`, `name`, `taken_from`, `evidence`) so this construct
+  can consume those as its first event type - including the genuinely
+  multi-entity case of a name transferring from one character to another.
 
 - **Surface how a thing changed, instead of silently resolving it.** Today
   `ANSWER_SYSTEM_PROMPT` resolves two conflicting same-category facts by
@@ -1036,14 +1140,28 @@ only guards what it is pointed at.
   **16 clusters covering 34 entities, all 16 correct** - including "Baron
   Arald"/"Arald" (39 + 10 facts) and a three-way "Battlemaster David"/"Sir
   David"/"David".
-  **What's still open is the epithet half** - "the boy", "bird". All three
-  detection rules rest on a string relationship between the two names, and an
-  epithet has none; it is also chapter-scoped in a way a real name isn't, so
-  "the boy" may mean someone else entirely two chapters later. That needs
-  either a model pass over each book's cast or a naming-construction scan of
-  the text, and both were deliberately deferred - see
-  `context/src/bookrag/library.py.md` for why the cheap version of the second
-  one was tried and rejected.
+  **The epithet half is now closed for first-person narrators.** "The boy"
+  shares no string relationship with "Conn", so no rule *here* could reach it;
+  it needed a different signal entirely - not what the names look like, but
+  who is addressing whom. Ingest now reads forms of address and links them
+  before extraction (see "Linking a narrator's names, automatically"), which
+  on the reported book captures "boy", "lad", "thief", "shadow", "blackbird"
+  and "cousin". That path is first-person only and needs two spellings of a
+  name, so it does nothing for most books.
+  **What's still open is the same problem in third-person books**, where
+  there is no narrator to be addressed and a character can accumulate titles
+  and assumed identities instead - measured on a real book as 3 of ~30 forms
+  linked. See the matching entry under Known limitations for the three
+  confirmed causes, and for the two constraints that make it harder than
+  loosening the rules: a name can transfer between characters, and an alias
+  carries no chapter scope, so an unscoped link is itself a spoiler.
+  The planned shape: fix the title morphology first (it needs no
+  re-extraction), then give an alias a `from_chapter`, then widen the
+  stated-link rule behind a negation guard. **Identity stays in the alias
+  record rather than being derived from the planned timeline construct** -
+  resolving who a character *is* has to precede attributing events to them,
+  or the timeline inherits the fragmentation. The alias record is shaped as
+  an event so the timeline can read it instead of re-deriving it.
   Worth recording what the design survey found, since it is counter-intuitive:
   **similar spelling is not evidence of anything.** Proposing a merge whenever
   one name is a prefix of another was 0-for-6 on real data
