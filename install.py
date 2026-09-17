@@ -285,9 +285,20 @@ def recorded_hash(doc_path):
     return None
 
 
+# Files outside src/ and tests/ that still carry a context doc. Must stay
+# identical to check_drift.sh's own root_tracked list - see check_context_docs.
+# An explicit list rather than a root-level scan, because the repo root is where
+# throwaway scripts land and each one would be reported as missing a doc.
+ROOT_TRACKED = ("install.py",)
+
+
 def source_files():
-    """Every .py under src/ and tests/, as repo-relative slash-separated paths."""
+    """Every .py under src/ and tests/, plus ROOT_TRACKED, as repo-relative
+    slash-separated paths."""
     found = []
+    for relative in ROOT_TRACKED:
+        if os.path.isfile(os.path.join(ROOT, relative)):
+            found.append(relative)
     for top in ("src", "tests"):
         base = os.path.join(ROOT, top)
         if not os.path.isdir(base):
@@ -317,6 +328,13 @@ def check_context_docs():
     rewrote - which is most of what an earlier "stale docs" backlog turned out
     to be. The hook stays authoritative; this is the same check for anyone not
     running Claude Code.
+
+    **This function checks itself.** install.py is in ROOT_TRACKED, so a change
+    here without a matching context/install.py.md update is reported by the next
+    run - by this very code. That is the point: this file is the one place in the
+    project that duplicates a hook's logic, and nothing else was watching it. It
+    is covered by the drift check rather than by track_dirty.sh's per-edit gate,
+    because the risk is silent divergence over time, not an unreviewed edit.
     """
     import hashlib
 

@@ -3,6 +3,7 @@
 One line per source file: path, then a one-line purpose. Keep in sync whenever a
 context doc under `context/` is added, removed, or its purpose changes materially.
 
+- [install.py](install.py.md) — one-step installer (venv, deps, `.env`, data dirs, context-doc check, Ollama report). The only documented file outside `src/` and `tests/`; covered by `check_drift.sh`, deliberately not by `track_dirty.sh`.
 - [src/bookrag/__init__.py](src/bookrag/__init__.py.md) — package marker, declares `__version__`.
 - [src/bookrag/ingest/__init__.py](src/bookrag/ingest/__init__.py.md) — `ingest` subpackage marker.
 - [src/bookrag/ingest/chapter.py](src/bookrag/ingest/chapter.py.md) — shared `Chapter` data model used by every loader.
@@ -37,7 +38,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [tests/test_cli.py](../tests/test_cli.py.md) — end-to-end `bookrag ingest|extract|eval` coverage, plus CLI-plumbing coverage of `list|show|remove|aliases|doctor`.
 - [tests/test_library.py](../tests/test_library.py.md) — covers `library.py`'s list/show/remove/doctor logic in depth, plus name-variant detection and `link_names`.
 - [tests/test_env.py](../tests/test_env.py.md) — covers `env.py`'s blank-means-unset rule, and that copying `.env.example` to `.env` leaves every default intact.
-- [tests/test_hooks.py](../tests/test_hooks.py.md) — covers the context-doc enforcement hooks: which paths block a turn, which must not, and that the block decision stays valid JSON.
+- [tests/test_hooks.py](../tests/test_hooks.py.md) — covers the context-doc enforcement hooks: which paths block a turn, which must not, that the block decision stays valid JSON, and what `check_drift.sh` reports vs. stays silent about.
 - [tests/test_placement.py](../tests/test_placement.py.md) — covers GPU/CPU placement reporting: ModelPlacement, the /api/ps read, and the warning a user sees.
 - [tests/test_titles.py](../tests/test_titles.py.md) — covers `titles.guess_title_author`, including the real `Finite-and-Infinite-Games-by-James-Carse` case.
 - [tests/test_resolve.py](../tests/test_resolve.py.md) — covers entity resolution (exact/alias match, type separation).

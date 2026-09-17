@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # SessionStart hook: informational-only safety net for changes the PostToolUse hook
 # can't see (manual edits outside Edit/Write/NotebookEdit, e.g. via Bash redirects).
-# Walks src/ and tests/, compares each file's sha1 against the source_hash recorded
-# in its mirrored context/<path>.md frontmatter, and reports mismatches via
-# hookSpecificOutput.additionalContext so the model sees it at session start.
+# Walks src/ and tests/ plus a short list of named root-level files, compares each
+# file's sha1 against the source_hash recorded in its mirrored context/<path>.md
+# frontmatter, and reports mismatches via hookSpecificOutput.additionalContext so
+# the model sees it at session start.
 #
 # Three things this deliberately does, each from a real false result:
 #
@@ -28,7 +29,35 @@ cat >/dev/null # consume stdin (unused)
 root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 ctx_dir="$root/context"
 
+# Files outside src/ and tests/ that still carry a context doc. An explicit list
+# rather than a root-level `find`: the repo root is where throwaway scripts land,
+# and sweeping it would report each one as "(no context doc)" - the same noise
+# problem that point 3 above already had to solve once.
+#
+# install.py is here because it duplicates this script's own logic (its
+# check_context_docs() is a second implementation of the check below, for
+# contributors not running Claude Code) and hand-copies two values from
+# pyproject.toml. Nothing else would notice if either drifted. It is deliberately
+# *not* added to track_dirty.sh: this is a change-detection net, not a per-edit
+# gate, and install.py does not need reviewing every time it is touched.
+root_tracked=(install.py)
+
 mismatches=()
+
+for rel in "${root_tracked[@]}"; do
+  f="$root/$rel"
+  [[ -f "$f" ]] || continue
+  ctxfile="$ctx_dir/$rel.md"
+  if [[ -f "$ctxfile" ]]; then
+    actual="$(tr -d '\r' < "$f" | sha1sum | awk '{print $1}')"
+    recorded="$(grep -m1 '^source_hash:' "$ctxfile" | sed 's/^source_hash:[[:space:]]*//' || true)"
+    if [[ "$actual" != "$recorded" ]]; then
+      mismatches+=("$rel")
+    fi
+  else
+    mismatches+=("$rel (no context doc)")
+  fi
+done
 
 for dir in src tests; do
   target="$root/$dir"

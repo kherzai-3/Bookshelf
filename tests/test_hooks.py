@@ -146,3 +146,111 @@ def test_stop_hook_asks_for_a_lockfile_review_for_pyproject(tmp_path: Path) -> N
     reason = json.loads(result.stdout)["reason"]
     assert "requirements.txt" in reason
     assert "README.md" in reason
+
+
+# --------------------------------------------------------------------------
+# check_drift.sh - the session-start safety net for edits track_dirty.sh
+# never saw. Informational only: it reports, it never blocks.
+# --------------------------------------------------------------------------
+
+
+def sha1_of(text: str) -> str:
+    """The hash the convention actually records: CR-stripped, like
+    `tr -d '\\r' < <file> | sha1sum`."""
+    import hashlib
+
+    return hashlib.sha1(text.encode("utf-8").replace(b"\r", b"")).hexdigest()
+
+
+def seed(root: Path, relative: str, body: str, *, doc_hash: str | None = "match") -> None:
+    """Write a source file and, unless doc_hash is None, its context doc.
+
+    `doc_hash="match"` records the real hash (in sync); any other string is
+    recorded verbatim (drifted).
+    """
+    source = root / relative
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text(body, encoding="utf-8")
+    if doc_hash is None:
+        return
+    doc = root / "context" / (relative + ".md")
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    recorded = sha1_of(body) if doc_hash == "match" else doc_hash
+    doc.write_text(
+        f"---\nsource: {relative}\nsource_hash: {recorded}\n---\n\n## Purpose\nx.\n",
+        encoding="utf-8",
+    )
+
+
+def drift(root: Path) -> str:
+    """Run check_drift.sh; return its additionalContext, or "" when silent."""
+    result = run_hook("check_drift.sh", {}, root)
+    assert result.returncode == 0, result.stderr
+    if not result.stdout.strip():
+        return ""
+    payload = json.loads(result.stdout)
+    return payload["hookSpecificOutput"]["additionalContext"]
+
+
+def test_drift_hook_is_silent_when_every_doc_matches(tmp_path: Path) -> None:
+    seed(tmp_path, "src/bookrag/cli.py", "print('hi')\n")
+    seed(tmp_path, "tests/test_cli.py", "def test_x(): pass\n")
+
+    assert drift(tmp_path) == ""
+
+
+def test_drift_hook_reports_a_source_that_changed_without_its_doc(tmp_path: Path) -> None:
+    seed(tmp_path, "src/bookrag/cli.py", "print('new')\n", doc_hash="0" * 40)
+
+    assert "src/bookrag/cli.py" in drift(tmp_path)
+
+
+def test_drift_hook_reports_a_source_with_no_doc_at_all(tmp_path: Path) -> None:
+    seed(tmp_path, "src/bookrag/new_thing.py", "x = 1\n", doc_hash=None)
+
+    assert "src/bookrag/new_thing.py (no context doc)" in drift(tmp_path)
+
+
+def test_drift_hook_ignores_crlf_so_a_checkout_is_not_reported_as_drift(
+    tmp_path: Path,
+) -> None:
+    """`.gitattributes` stores LF, so a checkout that rewrites a file can leave
+    CRLF in the working tree with no content change. Hashing raw bytes reported
+    seven such files at once; the CR strip is what makes the check trustworthy.
+    """
+    body = "print('hi')\n"
+    seed(tmp_path, "src/bookrag/cli.py", body)
+    (tmp_path / "src" / "bookrag" / "cli.py").write_bytes(body.replace("\n", "\r\n").encode())
+
+    assert drift(tmp_path) == ""
+
+
+def test_drift_hook_ignores_pycache(tmp_path: Path) -> None:
+    """A .pyc can have no context doc, so reporting one buries the real findings."""
+    seed(tmp_path, "src/bookrag/cli.py", "print('hi')\n")
+    cache = tmp_path / "src" / "bookrag" / "__pycache__"
+    cache.mkdir(parents=True)
+    (cache / "cli.cpython-312.pyc").write_bytes(b"\x00\x01")
+
+    assert drift(tmp_path) == ""
+
+
+def test_drift_hook_covers_install_py(tmp_path: Path) -> None:
+    """install.py sits outside src/ and tests/ and is deliberately not tracked by
+    track_dirty.sh, so this hook is the *only* thing watching it. It matters
+    because install.py re-implements this hook's own check for contributors not
+    running Claude Code, and hand-copies values from pyproject.toml."""
+    seed(tmp_path, "install.py", "print('installer')\n", doc_hash="0" * 40)
+
+    assert "install.py" in drift(tmp_path)
+
+
+def test_drift_hook_does_not_sweep_other_root_files(tmp_path: Path) -> None:
+    """Only a named list, never a root-level scan - the repo root is where
+    throwaway scripts land, and each would otherwise be reported as missing a
+    doc, which is the noise the __pycache__ exclusion already had to fix once."""
+    seed(tmp_path, "src/bookrag/cli.py", "print('hi')\n")
+    (tmp_path / "scratch.py").write_text("temp = 1\n", encoding="utf-8")
+    (tmp_path / "conftest.py").write_text("temp = 2\n", encoding="utf-8")
+
+    assert drift(tmp_path) == ""

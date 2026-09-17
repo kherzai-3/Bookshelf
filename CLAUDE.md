@@ -35,8 +35,20 @@ about to change it or the context doc is insufficient.
   Edit/Write, e.g. a manual save) and reports it as informational context — it
   does not block. It hashes CR-stripped content and ignores `__pycache__`.
   This is the safety net for edits the `PostToolUse` hook never saw; the
-  blocking path above is the primary enforcement, and the two now cover the
-  same set of files.
+  blocking path above is the primary enforcement.
+- **The two do not cover quite the same set, on purpose.** `check_drift.sh` also
+  checks a short list of named root-level files — currently just `install.py`
+  (see `root_tracked` in that script, mirrored as `ROOT_TRACKED` in
+  `install.py`). `install.py` is the one file that duplicates logic living
+  elsewhere: its `check_context_docs()` re-implements `check_drift.sh` for
+  contributors not running Claude Code, and it hand-copies `requires-python` and
+  `[project.scripts]` from `pyproject.toml`. Nothing else would notice if any of
+  those drifted. It is deliberately **not** in `track_dirty.sh`: the risk is
+  silent divergence over time, not an unreviewed edit, so editing `install.py`
+  does not block a turn — it just gets reported at the next session start, and
+  by `install.py` itself on its next run. The root list is explicit rather than a
+  scan because the repo root is where throwaway scripts land, and each would
+  otherwise be reported as missing a doc. See `tests/test_hooks.py`.
 - `install.py` runs the same check (`--skip-doc-check` opts out), so a
   contributor not using Claude Code still sees stale docs. The hook stays
   authoritative; keep the two consistent if either changes.
@@ -101,7 +113,10 @@ raw-byte hash of a CRLF file is what breaks, not the other way round.
 install.py          one-step installer (venv + deps + .env + Ollama check).
                      Stdlib-only and deliberately 3.6-parseable, so a
                      too-old interpreter gets a readable message rather than
-                     a SyntaxError. Not under src/, so not hook-tracked.
+                     a SyntaxError. Not under src/, so not tracked by
+                     track_dirty.sh - but it does have context/install.py.md
+                     and check_drift.sh watches it. See above for why the two
+                     hooks treat it differently.
 src/bookrag/        Python package: ingest/ (epub/pdf -> Chapter), storage.py
                      (data/library/ persistence), cli.py (`bookrag ingest ...`)
 context/            mirrored context docs, see above
