@@ -1,7 +1,7 @@
 ---
 source: tests/test_alias_linking.py
-last_synced: 2026-09-16T20:32:36Z
-source_hash: 5bc375618394b4e30b59698fc82592261135b35a
+last_synced: 2026-09-17T14:28:47Z
+source_hash: fb173dbba3eca9da42071c78124e83b21b81f31c
 ---
 
 ## Purpose
@@ -41,6 +41,17 @@ else, or it passes for the wrong reason — the fallback would return Conn's fac
 along with everything else and the assertion would be measuring nothing. The
 question is shaped as "the boy that Benet trained", which is also the realistic
 hazard: a question about some *other* boy.
+
+**The two-narrator case is the one that bites hardest.**
+`test_auto_link_plan_refuses_a_book_with_two_narrators` pins that two name
+pairs stay two people. The rule checked both signals pairwise and then treated
+every survivor as one set, so `Conn`/`Connwaer` plus `Row`/`Rowena` came back
+as a single four-name character — and `auto_link_plan` feeds `link_names` at
+ingest without asking, so that lands in `entities.json` before extraction runs.
+`..._still_links_one_narrator_beside_an_unrelated_name` is its required
+counterweight: the narrowing must not cost the real Magic Thief shape, where a
+capitalised bystander (`Magister`) sits beside the one true pair. Without it,
+the refusal test would be satisfied by a rule that never links anything.
 
 **`auto_link_plan` cases are drawn from measured failures, not invented ones.**
 `Magister` is the case that killed capitalisation-alone: 5/5 capitalised in the

@@ -82,6 +82,43 @@ def looks_like_a_name_variant(first: str, second: str) -> bool:
     return len(short) >= 3 and short != long and long.startswith(short)
 
 
+def group_name_variants(names: list[str]) -> list[list[str]]:
+    """Partition `names` into groups that plausibly name one person, by
+    `looks_like_a_name_variant`. Input order is preserved; a name with no
+    partner comes back alone.
+
+    **Grouping is not the same as pairing, and the difference is a real bug.**
+    A caller that keeps every name having *any* variant partner and then treats
+    the survivors as one set fuses two unrelated people the moment each has a
+    spelling variant of their own: `Conn`/`Connwaer` and `Row`/`Rowena` are two
+    pairs, not one character with four names. That is exactly what
+    `ingest.vocatives.auto_link_plan` did, and because it links without asking
+    at ingest, the result was two narrators silently declared one character.
+
+    `library._connected_clusters` does the same shape of work over
+    `(a, b, reason)` triples and carries the reasons through; the two could
+    converge, but folding this into that signature would mean inventing reasons
+    here only to discard them.
+    """
+    parent = list(range(len(names)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            if looks_like_a_name_variant(names[i], names[j]):
+                parent[find(j)] = find(i)
+
+    groups: dict[int, list[str]] = {}
+    for index, name in enumerate(names):
+        groups.setdefault(find(index), []).append(name)
+    return list(groups.values())
+
+
 def resolve_entity(
     name: str, entity_type: str, book_id: str, entities: dict, scope: list[str] | None = None
 ) -> str:

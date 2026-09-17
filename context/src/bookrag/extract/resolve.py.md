@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/resolve.py
-last_synced: 2026-09-16T19:53:59Z
-source_hash: adc6d4343a41f51789a4a09936295f724874f538
+last_synced: 2026-09-17T14:28:47Z
+source_hash: f9ffaedacbae87e23b6daed0fa9b67c3c63c2ca6
 ---
 
 ## Purpose
@@ -19,6 +19,23 @@ registry's load/save.
   `book_id` against an existing match) and returns the resolved
   `entity_id`. Matches via `match_key` (see Key Decisions), not raw
   string equality.
+- `group_name_variants(names: list[str]) -> list[list[str]]` — partitions names
+  into groups that plausibly name one person, by `looks_like_a_name_variant`.
+  Input order preserved; a name with no partner comes back alone.
+
+  **Exists because pairing is not grouping, and the gap was a live bug.**
+  `looks_like_a_name_variant` answers a question about a *pair*, so a caller
+  that keeps every name having any partner and treats the survivors as one set
+  fuses unrelated people: `Conn`/`Connwaer` plus `Row`/`Rowena` came back as a
+  single four-name character. `ingest.vocatives.auto_link_plan` did exactly
+  that and links **without asking, at ingest**, so a two-narrator book had its
+  narrators silently declared one person in `entities.json`. It now requires
+  exactly one group of 2+ and links nothing otherwise.
+
+  `library._connected_clusters` does the same shape of work over
+  `(a, b, reason)` triples and threads the reasons through. The two could
+  converge, but reusing that signature here would mean inventing reasons only
+  to discard them.
 - `prune_book_from_entities(entities: dict, book_id: str) -> tuple[int, int]`
   — **mutates `entities` in place**: removes `book_id` from every entity's
   `book_ids`, dropping any entity this leaves with none. Returns

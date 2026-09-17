@@ -1,4 +1,27 @@
-from bookrag.extract.resolve import resolve_entity
+from bookrag.extract.resolve import group_name_variants, resolve_entity
+
+
+def test_group_name_variants_keeps_two_peoples_name_pairs_apart() -> None:
+    """The property the whole function exists for. `looks_like_a_name_variant`
+    answers a question about a *pair*, and a caller that collects every name
+    with any partner and treats the result as one set fuses unrelated people.
+    Two pairs must stay two groups.
+
+    `ingest.vocatives.auto_link_plan` is the caller this was built for, and it
+    links without asking at ingest - so the flattened version silently declared
+    two first-person narrators to be one character."""
+    groups = group_name_variants(["Conn", "Connwaer", "Row", "Rowena"])
+
+    assert sorted(sorted(g) for g in groups) == [["Conn", "Connwaer"], ["Row", "Rowena"]]
+
+
+def test_group_name_variants_is_transitive_and_keeps_a_loner_alone() -> None:
+    """Three spellings of one name are one group, not two overlapping pairs;
+    an unrelated name is a group of one, which callers requiring 2+ members
+    then ignore for free."""
+    groups = group_name_variants(["Conn", "Connwaer", "Connwaerdin", "Magister"])
+
+    assert sorted(sorted(g) for g in groups) == [["Conn", "Connwaer", "Connwaerdin"], ["Magister"]]
 
 
 def test_new_name_creates_a_new_entity() -> None:

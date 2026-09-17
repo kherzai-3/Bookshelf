@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/vocatives.py
-last_synced: 2026-09-17T14:21:10Z
-source_hash: 331bfaa4209d445578a60a57fbdba590761980a7
+last_synced: 2026-09-17T14:28:47Z
+source_hash: df499b2539bbce5ad26e64dfc9715f61ed0672b6
 ---
 
 ## Purpose
@@ -212,6 +212,19 @@ the narrator" section.
   `_ANYONES_TERM_OF_ADDRESS` (`sir`, `dear`, ...). **Never links an epithet
   alone** - without a name to attach it to there is no evidence whose epithet
   it is, and a lone "boy" would become a character called boy.
+- **The variant check groups; it does not merely pair.** Both signals were
+  applied per *pair*, and every name that had any partner went into one flat
+  list treated as one character. A book alternating between two first-person
+  narrators who each have a spelling variant produced
+  `['Conn', 'Connwaer', 'Row', 'Rowena']` — two pairs, fused, written to
+  `entities.json` **automatically at ingest with nobody asked**, which is the
+  worst shape a wrong answer can have here. `auto_link_plan` now takes
+  `resolve.group_name_variants` and requires exactly one group of 2+; two
+  qualifying groups is a two-narrator book and links nothing, because nothing
+  in the text says which narrator a given epithet belongs to. A lone
+  capitalised bystander (`Magister`) is a group of one and is ignored for free,
+  so the Magic Thief case is unchanged. Sabotage-verified against
+  `test_auto_link_plan_refuses_a_book_with_two_narrators`.
 - Verified on all five real books: Magic Thief links Conn+Connwaer as names and
   boy/lad/thief/cousin as epithets; the other four link nothing.
 

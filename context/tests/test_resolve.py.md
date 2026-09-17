@@ -1,7 +1,7 @@
 ---
 source: tests/test_resolve.py
-last_synced: 2026-09-13T16:40:00Z
-source_hash: 6b95bf1b11277b263523c49b805e506bb4e63bf6
+last_synced: 2026-09-17T14:28:47Z
+source_hash: 66be93f2cef4ee6b15f68487630740934022143b
 ---
 
 ## Purpose
@@ -12,6 +12,17 @@ the real "Wargal"/"Wargals"/"The Wargals"/"The Wargal" case unifies to one
 entity within a type, and confirms this normalization doesn't relax the
 existing type-scoping (the same name still resolves separately per
 `entity_type`).
+
+Two further tests cover `group_name_variants`, which partitions names into
+groups that plausibly name one person:
+- `..._keeps_two_peoples_name_pairs_apart` is the property the function exists
+  for. Its caller (`ingest.vocatives.auto_link_plan`) links without asking at
+  ingest, so flattening two pairs into one set declared two first-person
+  narrators to be one character.
+- `..._is_transitive_and_keeps_a_loner_alone` pins that three spellings of one
+  name are one group rather than overlapping pairs, and that an unrelated name
+  comes back as a group of one — which callers requiring 2+ members then ignore
+  for free, with no special case.
 
 Since the identity-scoping change, four tests pin down *which books* may share
 an entity — the question that used to have no answer at all:

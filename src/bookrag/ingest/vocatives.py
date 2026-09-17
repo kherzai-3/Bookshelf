@@ -37,7 +37,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
-from bookrag.extract.resolve import looks_like_a_name_variant
+from bookrag.extract.resolve import group_name_variants
 from bookrag.ingest.chapter import Chapter
 
 # Publishers differ, and a hardcoded pair fails *silently* - it returns zero
@@ -335,16 +335,17 @@ def auto_link_plan(found: NarratorAliases) -> tuple[list[str], list[str]]:
         for candidate in found.aliases
         if candidate.reads_as_a_name and not candidate.is_anyones_term_of_address
     ]
-    linked: list[str] = []
-    for index, candidate in enumerate(names):
-        if any(
-            looks_like_a_name_variant(candidate.name, other.name)
-            for position, other in enumerate(names)
-            if position != index
-        ):
-            linked.append(candidate.name)
-    if len(linked) < 2:
+    # Grouped, not merely paired. Keeping every name that has *any* variant
+    # partner and calling the survivors one character fuses two narrators the
+    # moment each has a spelling variant of their own: `Conn`/`Connwaer` plus
+    # `Row`/`Rowena` came back as a single four-name character, declared
+    # automatically at ingest with nobody asked. Two qualifying groups means a
+    # book with two narrators, and the honest answer there is to link neither -
+    # nothing in the text says which of them any given epithet belongs to.
+    groups = [group for group in group_name_variants([c.name for c in names]) if len(group) >= 2]
+    if len(groups) != 1:
         return [], []
+    linked = groups[0]
 
     epithets = [
         candidate.name

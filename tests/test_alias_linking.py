@@ -132,6 +132,51 @@ def test_auto_link_plan_ignores_a_capitalised_name_that_relates_to_nothing() -> 
     assert names == ["Conn", "Connwaer"]
 
 
+def test_auto_link_plan_refuses_a_book_with_two_narrators() -> None:
+    """**Two narrators must not become one character.**
+
+    The rule needs a name to have a variant partner, and that was checked
+    pairwise against *any* other name - so every survivor was thrown into one
+    flat list and declared one person. A book alternating between two
+    first-person narrators who each have a spelling variant of their own
+    produced `['Conn', 'Connwaer', 'Row', 'Rowena']`: two pairs, silently fused,
+    written to `entities.json` at ingest with nobody asked.
+
+    Linking neither is the right answer rather than a cautious one. Nothing in
+    the text says which narrator a given epithet belongs to, and the epithets
+    are the larger half of the win - see
+    `test_auto_link_plan_links_two_spellings_of_a_name_and_their_epithets`.
+    """
+    plan = _narrator(
+        _a_name("Conn"), _a_name("Connwaer"),
+        _a_name("Row"), _a_name("Rowena"),
+        _candidate("boy"), _candidate("girl"),
+    )
+
+    assert auto_link_plan(plan) == ([], [])
+
+
+def test_auto_link_plan_still_links_one_narrator_beside_an_unrelated_name() -> None:
+    """The narrowing above must not cost the normal case. A lone capitalised
+    bystander ("Magister") is its own group of one, which never qualifies, so
+    the single real pair is still linked - this is the real Magic Thief shape
+    and the corpus check depends on it."""
+    plan = _narrator(_a_name("Conn"), _a_name("Connwaer"), _a_name("Magister"), _candidate("boy"))
+
+    assert auto_link_plan(plan) == (["Conn", "Connwaer"], ["boy"])
+
+
+def test_auto_link_plan_links_three_spellings_of_one_name_as_one_group() -> None:
+    """Grouping is transitive: "Conn", "Connwaer" and "Connwaerdin" are one
+    person, and a rule that only grouped the pairs it directly compared would
+    split them."""
+    plan = _narrator(_a_name("Conn"), _a_name("Connwaer"), _a_name("Connwaerdin"))
+
+    names, _ = auto_link_plan(plan)
+
+    assert names == ["Conn", "Connwaer", "Connwaerdin"]
+
+
 def test_auto_link_plan_links_nothing_when_only_one_name_is_found() -> None:
     """Two unrelated names are two characters, not one - so with nothing to
     link, the epithets have no owner and must not be linked either. A lone
