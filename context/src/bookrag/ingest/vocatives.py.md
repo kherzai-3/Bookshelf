@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/vocatives.py
-last_synced: 2026-09-17T18:30:20Z
-source_hash: b9b1a5d8dd3f7db4c79cf137d6a196261b95dd49
+last_synced: 2026-09-17T18:34:45Z
+source_hash: f75ae00f423d11b91736211b46e83471ad507180
 ---
 
 ## Purpose
@@ -145,9 +145,17 @@ an answer.**
   narrator is addressed by it more often than they use it for others. Real
   case: `nevery` landed 2 against 12 and is reported under `ambiguous`.
 - **`_MIN_TIMES_ADDRESSED = 2`.** The trailing-vocative shape also matches an
-  utterance merely ending in ", <word>." - real one-offs harvested from the
-  reported book include "hurry", "quiet" and "stoichiometry". Every genuine
-  alias in that book cleared 2.
+  utterance merely ending in ", <word>." - re-measured 2026-09-17, it discards
+  18 one-offs on the reported book, the non-name noise among them being
+  `hmmm`, `either`, `coming`, `lot`, `love`. Every genuine alias cleared 2.
+
+  **The examples here used to read `hurry`, `quiet`, `stoichiometry`, and all
+  three were wrong** - none is a trailing match anywhere in that book, gated or
+  ungated. They are *leading*-position words (`"Hurry, boy,"`,
+  `"Stoichiometry, hmmm,"`). This mattered beyond tidiness: those three were
+  cited as the evidence that `_vocative` "prefers the wrong one", which is what
+  put the one-vocative-per-utterance change on the roadmap. The words offered
+  as proof of the bug are in fact instances of the behaviour being correct.
 - **Third-person books return nothing on purpose.** Vocatives are still
   extractable there (Ranger's Apprentice yields `will`, `halt`, `horace`,
   `gilan`, `boy`), but nothing in the text says *who* a given "boy" was aimed

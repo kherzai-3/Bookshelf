@@ -62,9 +62,17 @@ _FIRST_PERSON_PER_100_WORDS = 4.0
 _MIN_NARRATION_WORDS = 50
 
 # A single sighting is not evidence. The trailing-vocative shape also matches
-# an utterance that merely ends in ", <word>." - real one-offs harvested from
-# the reported book include "hurry", "quiet", "stoichiometry". Every genuine
-# alias in that book clears 2, and the long tail below it is entirely noise.
+# an utterance that merely ends in ", <word>." - re-measured on the reported
+# book, 18 such one-offs are discarded here, and the non-name noise among them
+# is "hmmm", "either", "coming", "lot", "love". Every genuine alias in that
+# book clears 2, and the long tail below it is entirely noise.
+#
+# These examples previously read "hurry", "quiet", "stoichiometry". None of the
+# three is a trailing match anywhere in that book - zero across every chapter,
+# narration gate or no narration gate. They are *leading*-position words
+# ("Hurry, boy," / "Stoichiometry, hmmm,"), and citing them here as trailing
+# noise is what supported a queued change to prefer the leading vocative
+# instead. The measurement that retired that idea is in `_vocative`.
 _MIN_TIMES_ADDRESSED = 2
 
 # A closed list, deliberately. Generalising to "any word ending -ed or -s"
