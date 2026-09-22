@@ -155,6 +155,49 @@ def build_first_person_epub(path: Path) -> None:
     epub.write_epub(str(path), book)
 
 
+def build_titled_character_epub(path: Path) -> None:
+    """A *third-person* novel that calls one character by a bare name and by
+    an invented rank - the shape `names.person_link_groups` looks for, and the
+    only fixture exercising third-person auto-linking at ingest end to end.
+
+    Deliberately not first person, so `ingest.vocatives` stays silent and the
+    link can only have come from the residue rule. "Magister" is not in
+    `library._TITLES` on purpose: a rank a wordlist already contains would not
+    prove anything this feature adds.
+
+    The counts matter and are not arbitrary. The bare name has to clear 100
+    sightings and outnumber the decorated form five times over (the
+    auto-linking ratio), the decorated form has to clear 10, and the character
+    has to be caught speaking at least three times - otherwise
+    `reads_as_a_person` cannot tell him from a place."""
+    book = epub.EpubBook()
+    book.set_identifier("titled-character-id")
+    book.set_title("Titled Character Book")
+    book.set_language("en")
+    book.add_author("Titled Character Author")
+
+    bare = "Nevery walked the length of the hall in silence. " * 80
+    decorated = "Magister Nevery frowned at the locked door. " * 10
+    # Determiner-free and caught speaking: the two signals that separate a
+    # person from a place when no entity types exist yet.
+    speaking = "Nevery said nothing at all about it. " * 4
+    text = bare + decorated + speaking + NARRATIVE_PADDING
+
+    items = []
+    for number, title in enumerate(("Chapter One", "Chapter Two"), start=1):
+        chapter = epub.EpubHtml(title=title, file_name=f"chap{number}.xhtml")
+        chapter.content = f"<html><body><h1>{title}</h1><p>{text}</p></body></html>"
+        book.add_item(chapter)
+        items.append(chapter)
+
+    book.toc = tuple(items)
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", *items]
+
+    epub.write_epub(str(path), book)
+
+
 def build_fragmented_epub(path: Path, fragment_count: int = 40, words_per_fragment: int = 100) -> None:
     """A page-scanned-style epub: many small, untitled spine documents with
     no heading markup at all - mirrors a real Internet-Archive-produced

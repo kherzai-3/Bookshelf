@@ -17,6 +17,7 @@ from bookrag.ingest import epub_loader, pdf_loader
 from bookrag.ingest.chapter import Chapter
 from bookrag.ingest.consolidate import consolidate_fragments, should_consolidate
 from bookrag.ingest.vocatives import NarratorAliases, auto_link_plan, detect_narrator_aliases
+from bookrag.names import person_link_groups
 from bookrag.library import (
     detect_duplicate_entities,
     link_names,
@@ -303,7 +304,11 @@ def _ingest(args: argparse.Namespace) -> int:
     _print_section("Sanity check", sanity_summary(chapters))
     found = detect_narrator_aliases(chapters)
     _print_section("Names for the narrator", narrator_alias_lines(found))
-    _print_section("Linked", auto_link_narrator(book_id, found, enabled=not args.no_auto_link))
+    _print_section(
+        "Linked",
+        auto_link_narrator(book_id, found, enabled=not args.no_auto_link)
+        + auto_link_title_variants(book_id, chapters, enabled=not args.no_auto_link),
+    )
 
     report_path = write_ingestion_report(
         book_id, chapters, raw_chapter_count=raw_chapter_count if raw_chapter_count != len(chapters) else None
@@ -345,6 +350,91 @@ def auto_link_narrator(book_id: str, found: NarratorAliases, enabled: bool = Tru
     lines.extend(
         [
             "  Their facts will be catalogued as one character instead of several.",
+            f"  Wrong? `bookrag aliases {book_id} --unlink` undoes it, before or after extraction.",
+        ]
+    )
+    return lines
+
+
+_TITLE_GROUPS_SHOWN = 6
+# Above this many forms a group is summarised by count. Set to 2 because a
+# three-form group is as likely to be all sentence-initial noise ("But Lang
+# Ya", "If Lang Ya", "When Lang Ya" - real output) as it is to be the
+# interesting case, and there is no cheap way to tell them apart that does not
+# amount to classifying the prefix, which is precisely what the residue rule
+# exists to avoid.
+_TITLE_FORMS_LISTED = 2
+
+
+def auto_link_title_variants(book_id: str, chapters: list, enabled: bool = True) -> list[str]:
+    """Link "Lord Fang Yuan" to "Fang Yuan" at ingest, without asking.
+
+    **The third-person counterpart to `auto_link_narrator`, and it exists for
+    the same reason.** `doctor --merge-name-variants` has been able to find
+    these since rank 02, and a reader's flow - download, drop in
+    `data/incoming/`, ingest, extract, chat - never goes near it. A link nobody
+    performs is a link that never happens.
+
+    **Why this has to run before extraction rather than after.**
+    `resolve_entity` matches an incoming name against a known entity's aliases,
+    so an entity that already carries "Lord Fang Yuan" when chapter 110 is
+    extracted absorbs the mention instead of minting a second character. Run
+    afterwards the same information only supports a merge, which is what
+    `doctor` offers; run here, the fragmentation never forms.
+
+    **The guard is different from `doctor`'s, because the evidence is.** After
+    extraction there are entity types and `library` simply requires both sides
+    to be characters. Here there are none, so `names.reads_as_a_person` reads
+    personhood out of the prose - and the seeding path writes
+    `type="character"`, so linking a place would not merely be wrong, it would
+    be inert: extraction would mint its own setting entity and leave the seeded
+    one an orphan.
+
+    Announces the wait before taking it. On the longest book in the corpus the
+    scan is around two minutes, and a silent two minutes mid-ingest is
+    indistinguishable from a hang - the same complaint that produced
+    `extract_start_notes`.
+    """
+    if not enabled:
+        return []
+
+    print(
+        "  Reading how the book writes its characters' names "
+        "(a minute or two on a long book) ...",
+        flush=True,
+    )
+    groups = person_link_groups(chapter.text for chapter in chapters)
+    if not groups:
+        return []
+
+    for group in groups:
+        link_names(
+            book_id,
+            [group.name, *group.decorated],
+            reason="detected at ingest: a decorated form of a name the book uses on its own",
+        )
+
+    # Listed only while the list stays readable. On a long book the
+    # protagonist collects 33 forms, most of them sentence-initial ordinary
+    # words ("But Fang Yuan", "And Fang Yuan"), which the rule links on
+    # purpose and correctly - the prefix's identity never has to be decided -
+    # but which read as a bug in a summary. They are harmless downstream:
+    # `resolve_entity` matches an alias exactly, and
+    # `query._name_matches_question` needs the whole alias to appear in the
+    # question. So the count is the honest summary and `bookrag aliases` has
+    # the full list.
+    lines = []
+    for group in groups[:_TITLE_GROUPS_SHOWN]:
+        if len(group.decorated) <= _TITLE_FORMS_LISTED:
+            lines.append(f"'{group.name}' also answers to {', '.join(group.decorated)}")
+        else:
+            lines.append(f"'{group.name}' also answers to {len(group.decorated)} other forms of that name")
+    if len(groups) > _TITLE_GROUPS_SHOWN:
+        lines.append(f"... and {len(groups) - _TITLE_GROUPS_SHOWN} more name(s) linked the same way")
+    lines.extend(
+        [
+            "  Each will be catalogued as one character instead of several.",
+            f"  See them all with `bookrag aliases {book_id}`.",
             f"  Wrong? `bookrag aliases {book_id} --unlink` undoes it, before or after extraction.",
         ]
     )

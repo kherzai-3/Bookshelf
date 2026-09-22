@@ -12,10 +12,10 @@ import json
 import re
 import shutil
 import uuid
-from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from bookrag.names import NameFrequencies, name_frequencies, residue_of
 from bookrag.extract.resolve import (
     load_entities,
     looks_like_a_name_variant,
@@ -462,115 +462,13 @@ def _stated_variant_pairs(book_id: str, members: list[dict], root: Path) -> list
     ]
 
 
-# The residue rule. Thresholds measured over the whole eight-book corpus, not
-# tuned on one book - see _residue_variant_pairs for the scoring.
-_RESIDUE_MIN_DECORATED = 10  # the decorated form is real, not a hapax
-_RESIDUE_MIN_BARE = 100  # the bare name is established in its own right
-# Left where the corpus was scored, deliberately: relaxing it to 3.0 adds 13
-# links across the 8 books and several look right on inspection ("Captain
-# Kerrn" -> "Kerrn", "The Baron" -> "Baron"). None of the 13 were hand-scored,
-# so moving it would put the precision figure below out of date rather than
-# improve it. Retuning it is a measurement job, not a code change.
-_RESIDUE_RATIO = 5.0  # and outnumbers the decorated form this many times over
-_RESIDUE_MIN_LOWERCASE = 25  # at which point the book treats the word as ordinary
-
-# Maximal runs of capitalised words, which is what makes the comparison mean
-# anything: "Fang Yuan" counts only its bare mentions, and "Lord Fang Yuan" is
-# counted separately rather than folded into it.
-_CAPITALISED_RUN = re.compile(r"[A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+){0,4}")
-_WORD = re.compile(r"[A-Za-z]+")
-
-
-@dataclass
-class _NameFrequencies:
-    """How one book uses each capitalised run and each lowercase word."""
-
-    runs: Counter  # maximal capitalised run -> occurrences
-    lowercase: Counter  # lowercase word -> occurrences
-    inside: Counter  # token -> occurrences inside a *longer* run
-
-
-def _name_frequencies(book_id: str, root: Path) -> _NameFrequencies | None:
+def _name_frequencies(book_id: str, root: Path) -> NameFrequencies | None:
+    """This book's name statistics, or None if its chapters are gone."""
     try:
         chapters = load_chapters(book_id, root)
     except FileNotFoundError:
         return None
-
-    runs: Counter = Counter()
-    lowercase: Counter = Counter()
-    for chapter in chapters:
-        for word in _WORD.findall(chapter.text):
-            if word.islower():
-                lowercase[word] += 1
-        for match in _CAPITALISED_RUN.finditer(chapter.text):
-            runs[" ".join(match.group(0).split())] += 1
-
-    inside: Counter = Counter()
-    for run, count in runs.items():
-        tokens = run.split()
-        if len(tokens) > 1:
-            for token in set(tokens):
-                inside[token] += count
-    return _NameFrequencies(runs=runs, lowercase=lowercase, inside=inside)
-
-
-def _residue_stands_alone(residue: str, freq: _NameFrequencies) -> bool:
-    """Whether what is left after stripping a prefix is a name in its own
-    right. Two guards, each catching a failure the other misses - measured, not
-    assumed. On Reverend Insanity guard A alone proposes 355 links and strips
-    surnames and category nouns ("Moonlight Gu" -> "Gu", "Liu Wen Wu" -> "Wu");
-    guard B alone proposes 221 and strips capitalised pronouns ("Chi Qu You" ->
-    "You", "Qin Bai He" -> "He"). Together, 203 links and 2 wrong."""
-    tokens = _name_tokens(residue)
-    if len(tokens) > 1:
-        # A multi-token residue is already a name shape; neither guard applies,
-        # and "Gu Yue Fang Yuan" -> "Fang Yuan" is the case that needs this.
-        return True
-    token = tokens[0]
-    # (A) The book itself treats the word as ordinary vocabulary. Deliberately
-    # a per-book count and nothing wider: an earlier version also required the
-    # word to appear in 6 of the 8 books in *this* library, which measured 3
-    # links better but cannot ship - a three-book library can never satisfy it,
-    # and the rule would silently degrade to guard B alone. Dropping it loses
-    # "Four Flavours Liquor" -> "Liquor", which was a scored error anyway.
-    if freq.lowercase[token.lower()] >= _RESIDUE_MIN_LOWERCASE:
-        return False
-    # (B) The bare form outnumbers the token's use inside longer names. A
-    # family name or a category noun fails this: it almost only ever appears
-    # attached to something else.
-    return freq.runs[residue] > freq.inside[residue]
-
-
-def _residue_of(name: str, freq: _NameFrequencies) -> str | None:
-    """The better-attested name left behind when leading tokens are stripped,
-    or None to keep the name whole. **Nothing here classifies the prefix**, and
-    that is the point - see _residue_variant_pairs."""
-    tokens = _name_tokens(name)
-    if len(tokens) < 2:
-        return None
-    # "Tug and Blaze" is two horses the extractor filed as one entity. Stripping
-    # to "Blaze" would pick one of them as the survivor of a compound. Only a
-    # *non-leading* conjunction makes that shape: a leading one is a
-    # sentence-initial word ("And Fang Yuan"), which is the case this rule
-    # deliberately links straight back to the bare name - vetoing those too
-    # costs 4 correct links across the corpus and protects nothing.
-    if any(token.strip(".,").lower() in _CONJUNCTIONS for token in tokens[1:]):
-        return None
-    decorated = freq.runs.get(" ".join(tokens), 0)
-    if decorated < _RESIDUE_MIN_DECORATED:
-        return None
-
-    best, best_count = None, 0
-    for index in range(1, len(tokens)):
-        residue = " ".join(tokens[index:])
-        count = freq.runs.get(residue, 0)
-        if count < _RESIDUE_MIN_BARE or count < decorated * _RESIDUE_RATIO:
-            continue
-        if not _residue_stands_alone(residue, freq):
-            continue
-        if count > best_count:
-            best, best_count = residue, count
-    return best
+    return name_frequencies(chapter.text for chapter in chapters)
 
 
 def _residue_variant_pairs(book_id: str, members: list[dict], root: Path) -> list[tuple[str, str, str]]:
@@ -660,7 +558,7 @@ def _residue_variant_pairs(book_id: str, members: list[dict], root: Path) -> lis
 
     pairs = []
     for entity in decorated:
-        residue = _residue_of(entity["canonical_name"], freq)
+        residue = residue_of(entity["canonical_name"], freq)
         if residue is None:
             continue
         # The text decides which residue wins; the registry only has to agree.

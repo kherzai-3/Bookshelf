@@ -27,6 +27,7 @@ from tests.helpers import (
     build_fragmented_epub,
     build_narrative_epub,
     build_sample_epub,
+    build_titled_character_epub,
 )
 
 
@@ -1227,6 +1228,68 @@ def test_ingest_links_a_first_person_narrators_names_without_being_asked(
     assert "'Conn' also answers to Connwaer" in output
     # An automatic, heuristic-driven merge has to say how to undo itself.
     assert "--unlink" in output
+
+
+def test_ingest_links_a_titled_third_person_character_without_being_asked(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The third-person half of automatic linking, and the same argument as
+    the first-person half above: `doctor --merge-name-variants` has been able
+    to find these since rank 02, and a reader's flow never reaches it.
+
+    This has to happen *before* extraction to be worth anything.
+    `resolve_entity` matches an incoming name against a known entity's
+    aliases, so an entity already carrying "Magister Nevery" absorbs the
+    chapter-110 mention instead of minting a second character. Run afterwards,
+    the same evidence only supports a merge.
+
+    "Magister" is deliberately not in `library._TITLES`: a rank the wordlist
+    already contains would not prove anything the residue rule adds."""
+    epub_path = tmp_path / "titled.epub"
+    build_titled_character_epub(epub_path)
+
+    exit_code = main(["ingest", str(epub_path)])
+
+    assert exit_code == 0
+    (entity,) = _characters(_library_root)
+    assert entity["canonical_name"] == "Nevery"
+    assert entity["aliases"] == ["Magister Nevery"]
+
+    output = capsys.readouterr().out
+    assert "'Nevery' also answers to Magister Nevery" in output
+    assert "--unlink" in output
+
+
+def test_ingest_announces_the_name_scan_before_it_starts(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The scan is around two minutes on the longest book in the corpus, and a
+    silent two minutes mid-ingest is indistinguishable from a hang - the exact
+    complaint that produced `extract_start_notes`. Asserts on *ordering*,
+    because a presence-only check would pass even if the warning printed after
+    the wait it is warning about."""
+    epub_path = tmp_path / "titled.epub"
+    build_titled_character_epub(epub_path)
+
+    main(["ingest", str(epub_path)])
+
+    output = capsys.readouterr().out
+    assert "Reading how the book writes its characters' names" in output
+    assert output.index("Reading how the book writes") < output.index("'Nevery' also answers to")
+
+
+def test_ingest_no_auto_link_leaves_a_titled_character_separate(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The escape hatch covers both linkers, not just the narrator one."""
+    epub_path = tmp_path / "titled.epub"
+    build_titled_character_epub(epub_path)
+
+    exit_code = main(["ingest", str(epub_path), "--no-auto-link"])
+
+    assert exit_code == 0
+    assert _characters(_library_root) == []
+    assert "also answers to" not in capsys.readouterr().out
 
 
 def test_ingest_no_auto_link_leaves_the_names_separate(

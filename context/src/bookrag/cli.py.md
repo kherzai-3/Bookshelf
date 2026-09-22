@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-17T14:21:10Z
-source_hash: e2946d592022026907136e4e2e8e5f620167bbb3
+last_synced: 2026-09-22T21:20:00Z
+source_hash: 131fa68a61aa52a99ff8aa40bba1428a92820ae1
 ---
 
 ## Purpose
@@ -428,8 +428,51 @@ book directories. Unlike `--merge-duplicates` it needs no confirmation
 prompt - there is no judgement call about which entity to keep, since the
 split is determined entirely by which book each fact already lives in.
 
-## Automatic narrator linking at ingest
-- `auto_link_narrator(book_id, found, enabled) -> list[str]` — called at the
+## Automatic linking at ingest
+
+Two linkers run at the end of `_ingest` and print into one "Linked" section.
+`auto_link_narrator` handles a *first-person narrator's* several names;
+`auto_link_title_variants` handles *any character* whose name also appears
+decorated. Both exist for the same reason and both are governed by
+`ingest --no-auto-link`.
+
+### `auto_link_title_variants(book_id, chapters, enabled) -> list[str]`
+
+The third-person counterpart, build-order 02c. `doctor
+--merge-name-variants` has been able to find these since rank 02 and a
+reader's flow never reaches it; a link nobody performs is a link that never
+happens.
+
+- **It has to run before extraction to be worth anything.** `resolve_entity`
+  matches an incoming name against a known entity's aliases, so an entity
+  already carrying "Lord Fang Yuan" absorbs the chapter-110 mention instead of
+  minting a second character. Run afterwards the same evidence only supports a
+  merge, which is what `doctor` offers.
+- **A different guard from `doctor`'s, because the evidence differs.** After
+  extraction there are entity types; here there are none, so
+  `names.reads_as_a_person` reads personhood out of the prose. This is not
+  fussiness: `seed_alias_group` writes `type="character"`, so linking a place
+  would be inert as well as wrong — extraction would mint its own setting
+  entity and leave the seeded one an orphan.
+- **A stricter ratio than `doctor`'s**, for the same reason: a wrong merge
+  here is silent and undoing it means `--unlink` plus a re-extraction. See
+  `names.py`'s context doc.
+- **Announces the wait before taking it.** The scan is ~2 minutes on the
+  2,360-chapter book, and a silent two minutes mid-ingest is indistinguishable
+  from a hang — the complaint that produced `extract_start_notes`. Printed
+  with `flush=True` for the same reason that banner is.
+- **Prints counts, not forms, once a group gets large.** The protagonist of a
+  long book collects 33 decorated forms, most of them sentence-initial
+  ordinary words (`But Fang Yuan`, `And Fang Yuan`). Those are linked
+  deliberately and correctly — the rule never has to decide what the prefix
+  is — but listing them reads as a bug. They are harmless downstream:
+  `resolve_entity` matches an alias exactly, and
+  `query._name_matches_question` needs the whole alias to appear in the
+  question. So groups of 2 or fewer are listed, larger ones are counted, and
+  `bookrag aliases <book>` has the full list.
+
+### `auto_link_narrator(book_id, found, enabled) -> list[str]`
+- called at the
   end of `_ingest`, printed under a "Linked" section. **This is what makes the
   detection worth running.** A reader's flow is download → `data/incoming/` →
   ingest → extract, so a feature waiting to be invoked is invisible - exactly

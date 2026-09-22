@@ -15,6 +15,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/query.py](src/bookrag/query.py.md) — `facts_as_of`: the spoiler-safety filter primitive; `format_context` renders facts for a provider.
 - [src/bookrag/eval.py](src/bookrag/eval.py.md) — read-only provider comparison: side-by-side report + groundedness score.
 - [src/bookrag/cli.py](src/bookrag/cli.py.md) — `bookrag ingest|extract|eval|chat|list|show|remove|aliases|doctor` CLI entry point.
+- [src/bookrag/names.py](src/bookrag/names.py.md) — the residue rule: which decorated forms of a name (`Lord Fang Yuan`, `Magister Nevery`) are the same character, read from the book's own prose, plus the text-only personhood test the ingest path needs because it has no entity types.
 - [src/bookrag/library.py](src/bookrag/library.py.md) — library-wide list/show/remove/aliases/doctor: extraction-status summaries, index/entities.json cleanup, the duplicate/cross-book/name-variant detectors, and `link_names` (declare several names one character, before or after extraction).
 - [src/bookrag/titles.py](src/bookrag/titles.py.md) — last-resort title/author guess from a filename.
 - [src/bookrag/env.py](src/bookrag/env.py.md) — reads settings from the environment/`.env`; a blank value counts as unset, not as an empty-string override.
@@ -36,6 +37,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [tests/test_storage.py](tests/test_storage.py.md) — covers `storage.py`, including the series/chapter-2-collision guarantee.
 - [tests/test_storage_series_reading_order.py](tests/test_storage_series_reading_order.py.md) — covers `series_reading_order`.
 - [tests/test_cli.py](tests/test_cli.py.md) — end-to-end `bookrag ingest|extract|eval` coverage, plus CLI-plumbing coverage of `list|show|remove|aliases|doctor`.
+- [tests/test_names.py](tests/test_names.py.md) — covers the residue rule over text (the auto-linking path) and the personhood guard, one test per signal.
 - [tests/test_library.py](tests/test_library.py.md) — covers `library.py`'s list/show/remove/doctor logic in depth, plus name-variant detection and `link_names`.
 - [tests/test_env.py](tests/test_env.py.md) — covers `env.py`'s blank-means-unset rule, and that copying `.env.example` to `.env` leaves every default intact.
 - [tests/test_hooks.py](tests/test_hooks.py.md) — covers the context-doc enforcement hooks: which paths block a turn, which must not, that the block decision stays valid JSON, and what `check_drift.sh` reports vs. stays silent about.

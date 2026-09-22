@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/library.py
-last_synced: 2026-09-22T17:40:00Z
-source_hash: 85fb5b59d10347ecbed6788e93ce1efcad303e55
+last_synced: 2026-09-22T21:20:00Z
+source_hash: 0295f4973ebaa03351022038e2c0a9c33be4fe12
 ---
 
 ## Purpose
@@ -361,6 +361,14 @@ relationship is what currently makes the text evidence trustworthy.
 
 ## The residue rule (`_residue_variant_pairs`)
 
+> **The rule itself now lives in `bookrag.names`** — see
+> `context/src/bookrag/names.py.md` for the mechanism, the guards and the
+> scoring. This section covers only what the `doctor` path does with it. The
+> same core also runs at *ingest* (`cli.auto_link_title_variants`), where it
+> links without asking; the two differ in their final guard because the
+> evidence available differs, and in the ratio because the cost of being wrong
+> differs.
+
 Build-order item **02c(i)+(ii)+(vi)**: a character fragmented across a title,
 a clan prefix and a bare name. Reported case - *Reverend Insanity*'s
 protagonist is `Fang Yuan`, `Gu Yue Fang Yuan`, `Lord`/`Elder Fang Yuan` and
@@ -421,7 +429,8 @@ fixed before scoring rather than after.
   25+ times in the book *and* appeared in 6 of the library's 8 books. That
   cannot ship: a three-book library can never satisfy it, so the rule would
   silently degrade to guard B alone. Dropping it loses 3 links, of which 2
-  were scored errors - **237 links, 230 correct, 97.0%**.
+  were scored errors - **237 links, 230 correct, 97.0%** at the 5x ratio, and
+  **250 / 240 / 96.0%** at the 3x this path now uses (see `names.py`).
 - **Characters only, which the scoring could not have told us.** The
   hand-scoring ran over raw text and had no entity types in it. Sorting the
   surviving links by type afterwards, all 7 remaining errors are things rather
@@ -439,10 +448,11 @@ be *productive* - to decorate several different identities - removes 5 of the
 from 96.3% to 97.8% by losing roughly 53 correct links. Same posture as the
 prefix heuristic under rank 02.
 
-**The 5x ratio is left where the corpus was scored.** Relaxing it to 3.0 adds
-13 links across the 8 books and several look right on inspection (`Captain
-Kerrn` → `Kerrn`, `The Baron` → `Baron`). None of the 13 were hand-scored, so
-moving it would put the precision figure out of date rather than improve it.
+**This path uses the looser 3x ratio, and that was a decision about cost, not
+evidence.** The 13 links it adds were hand-scored afterwards: 10 correct, 3
+wrong. A wrong *proposal* costs one keystroke to decline, so the extra recall
+is worth it here; the ingest path keeps 5x because a wrong *merge* is applied
+silently. See `names.py`'s context doc for the full table.
 
 **What it does not reach**, so the phase-order question on 02c is unchanged:
 every link is a decorated form of a name already present. It reaches none of

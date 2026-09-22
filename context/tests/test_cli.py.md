@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
-last_synced: 2026-09-17T18:23:32Z
-source_hash: a10ccc47a54f893805f5b14d409aaf918424aa1f
+last_synced: 2026-09-22T21:20:00Z
+source_hash: 016ba0d50d514f605319b8be97e842be9d8903eb
 ---
 
 ## Purpose
@@ -154,8 +154,24 @@ Also covers, added since the above:
   tester's re-ingest reproduces the same fragmented library it was meant to
   fix. These run with no terminal attached, which is the property that rules
   out the interactive prompt this replaced. The third-person test is the
-  restraint half: most books are third person, there is no attribution signal
-  there, and ingest has to stay silent rather than guess.
+  restraint half: most books are third person, there is no *vocative*
+  attribution signal there, and ingest has to stay silent rather than guess.
+
+- **Third-person auto-linking at ingest**
+  (`test_ingest_links_a_titled_third_person_character_without_being_asked`,
+  `test_ingest_announces_the_name_scan_before_it_starts`,
+  `test_ingest_no_auto_link_leaves_a_titled_character_separate`) — the 02c
+  counterpart, on the same argument: `doctor --merge-name-variants` has found
+  these since rank 02 and a reader's flow never reaches it. Note this does
+  **not** contradict `test_a_third_person_book_is_left_alone` above, which is
+  about the *narrator* detector having nothing to say; a third-person book
+  with a titled character now gets linked by a different rule reading a
+  different signal.
+
+  The announce test asserts on **ordering**, not presence: the scan is around
+  two minutes on the longest book in the corpus, and a presence-only check
+  would pass even if the warning printed after the wait it warns about. Same
+  failure mode, and same fix, as `extract_start_notes`.
 
 - **The `aliases` command** (`test_aliases_command_says_so_plainly_for_a_third_
   person_book`, `..._link_creates_an_entity_extraction_will_resolve_into`,

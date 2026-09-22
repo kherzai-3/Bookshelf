@@ -1,7 +1,7 @@
 ---
 source: tests/helpers.py
-last_synced: 2026-09-16T20:32:36Z
-source_hash: 0ad0d203eb45ad47b5a683d420755e2cf93c08c9
+last_synced: 2026-09-22T21:20:00Z
+source_hash: 77e726293bb23c5cd1e95010212f186bc8fd051d
 ---
 
 ## Purpose
@@ -36,6 +36,13 @@ have something real to assert against.
   utterances spoken by a *named* character. Detection on it yields Conn 4/4
   capitalised, Connwaer 4/4, boy 0/4 — so `auto_link_plan` returns
   `(["Conn", "Connwaer"], ["boy"])`.
+- `build_titled_character_epub(path)` — a *third-person* novel calling one
+  character "Nevery" and "Magister Nevery". The only fixture exercising
+  third-person auto-linking (`names.person_link_groups`) at ingest end to end.
+  Deliberately not first person, so `ingest.vocatives` stays silent and any
+  link can only have come from the residue rule; and "Magister" is
+  deliberately absent from `library._TITLES`, since a rank the wordlist
+  already contains would prove nothing this feature adds.
 - `_I_NARRATE: str` — private; the first-person counterpart to
   `NARRATIVE_PADDING`, proper-noun-free but dense in `I`/`my`/`me` (~16 per 100
   words against `vocatives._FIRST_PERSON_PER_100_WORDS`'s floor of 4.0).
@@ -66,3 +73,9 @@ have something real to assert against.
   anyone but the narrator is, in a two-hander, addressed *to* the narrator.
 - The speaker ("Nevery") is never itself addressed, so it never lands in the
   ambiguous column and never competes with the real aliases.
+- `build_titled_character_epub`'s counts are not arbitrary and are the whole
+  fixture. The bare name has to clear 100 sightings *and* outnumber the
+  decorated form five times over (`names.AUTOLINK_RATIO`), the decorated form
+  has to clear 10, and the character has to be caught speaking at least three
+  times — without that last part `names.reads_as_a_person` cannot tell him
+  from a place, and the link silently does not happen.
