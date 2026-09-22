@@ -739,6 +739,57 @@ in an interactive session is answered independently, though each now gets
 its own freshly-filtered context) and no way to bump `--chapter` mid-session
 - restart with a new `--chapter` value instead.
 
+#### Where an answer came from
+
+Every answer is followed by a **Sources** block saying where in your own copy
+each fact came from:
+
+```
+Sources:
+  The Ruins of Gorlan, Chapter Three, 66% in - "Will had never heard Halt speak before."
+  The Ruins of Gorlan, Chapter Two, 72% in - "He looked up and actually started with surprise as he
+  met the dark, unfathomable gaze of Halt, the Ranger."
+  Finite and Infinite Games, pp. 79-85 - "A finite game is played for the purpose of winning."
+```
+
+**The quote is the part that actually finds the passage.** A chapter number
+belongs to one printing and a page number to one scan, but a sentence belongs
+to the book — you can search for it in any reader, any edition, any format.
+The label before it is orientation.
+
+bookrag writes these itself rather than asking the model to cite its sources,
+because a small local model asked for a citation will invent one, and a
+citation that might be fabricated is worse than none. Every source line is
+computed from the library, so it is either correct or absent.
+
+The label is the best thing your book actually offers, in this order:
+
+1. **A page range** (`pp. 79-85`) when the source has real pagination — a PDF,
+   or a page-scanned epub. Preferred over a chapter title, because a book can
+   have a title for every chapter and have all of them be useless: every
+   chapter of *Finite and Infinite Games* is titled, and they are all PDF
+   bookmark IDs like `FAIG0080`.
+2. **The book's own chapter name** (`Chapter Three`, `CHAPTER 100. Leg and
+   Arm.`) — read from the epub's table of contents when the chapter text
+   itself has no heading, which is how most books get one.
+3. **`chapter N`**, the bare index, when the book offers nothing else.
+
+For a split omnibus the volume is named, not the file it came from — "The
+Burning Bridge, Chapter Fourteen", never "Ranger's Apprentice 1 & 2 Bindup,
+chapter 48".
+
+**A quote is shown only when the match is confident.** Measured against 49
+real extracted statements, 40 got a quote and 39 of those were correct
+(97.5%); the other 9 get a location with no quote. That is deliberate — a
+citation pointing at the wrong sentence tells you the book says something it
+does not, and you would have no way to tell it apart from a correct one.
+
+Citations never read any chapter but the one a fact came from, and never
+show anything derived from the whole book (no "chapter 12 of 75", no
+percentage through the *book*) — both would leak. This is covered by the
+spoiler-safety gate, not just by intention; see
+[The spoiler-safety gate](#the-spoiler-safety-gate).
+
 ### Managing your library
 
 ```bash
@@ -1412,26 +1463,34 @@ only guards what it is pointed at.
   already filtered to the current chapter. Worth separating the cheap
   derived half from the genuinely model-authored half (plotline) before
   designing.
-- **Citations back to where a fact came from.** Requested so a reader can
-  open their own copy and find the passage - e.g. a physical description of
-  a character, traced to the page that states it. Facts already carry
-  `chapter_index`, so the coarse version exists; what's missing is anything
-  finer, and the finer version is harder than it looks. `extract_book` passes
-  whole chapter text to the model and stores only the returned statement - no
-  character offset, no sentence anchor - so locating the source text again
-  means either re-finding it after the fact (fuzzy match of the statement
-  back against the chapter, cheap and approximate) or capturing an offset at
-  extraction time (exact, but a schema change, and a small local model
-  quoting offsets reliably is an open question). Two things also degrade the
-  output regardless of mechanism: a `text-bound` book's "chapters" are
-  self-created fragments a human cannot find in a printed copy, and a
-  stitched omnibus makes even a correct chapter number meaningless (that
-  half is now fixed for epubs — see above — which was the reason to do the
-  omnibus split before this).
-  Fuzzy-matching the statement back to a sentence, then reporting
-  "chapter N, about 60% through", is likely the best available answer for
-  those books and should be designed for explicitly rather than treated as a
-  degraded case.
+- ~~Citations back to where a fact came from.~~ **Built** — see
+  [Where an answer came from](#where-an-answer-came-from). The fuzzy route
+  was the right call: no schema change, no re-extraction, and measured at
+  97.5% precision on real extractor output.
+
+  **The framing in this entry was wrong in a way worth keeping.** It treated
+  the problem as "locate the source text", with the stitched omnibus as a
+  blocker because a chapter number would be meaningless. The actual
+  requirement is a *rendered location the reader can act on*, and what the
+  database keys a chapter as never mattered. That reframing is why the quote
+  — not the chapter number, not the page — turned out to be the primary
+  locator: it is the only part of a citation that survives a different
+  edition. It also means the omnibus split was never strictly a prerequisite,
+  though it does make the labels better.
+
+  Two things this entry did not anticipate, both found by measuring:
+  - **Most books already knew their chapter names and ingest was discarding
+    them.** Three of eight were classified `text-bound` purely because their
+    titles live in the epub's navigation rather than its markup. Reading the
+    table of contents took Ranger's Apprentice from 1 titled chapter of 75 to
+    75, and The Eye of the World from 0 of 108 to 54.
+  - **The two books with no usable titles at all have page numbers**, from a
+    PDF outline and from `page_N.html` spine filenames. So no book in the
+    corpus falls back to a bare chapter index.
+
+  Still open: the confidence threshold is calibrated on 49 statements from
+  one book, and a wider extracted library would settle it properly. A book
+  that is unpaged *and* whose passage does not match stops at the chapter.
 - **Answers that read as answers, not as a list of facts.** Reported from
   real use: `chat` sometimes returns what is effectively the fact dump it was
   given rather than a reply to the question. This is partly a prompt problem

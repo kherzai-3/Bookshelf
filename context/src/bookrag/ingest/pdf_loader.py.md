@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/pdf_loader.py
-last_synced: 2026-09-22T21:40:00Z
-source_hash: 563a5f6bee0c0945cb0bf28fb080b59faf565c27
+last_synced: 2026-09-22T23:30:00Z
+source_hash: 22e60da96d089694e2028e6d99ee7628448a23b9
 ---
 
 ## Purpose
@@ -36,6 +36,15 @@ downstream extraction is format-agnostic.
 - Chapter boundaries are page ranges between one entry's start page and the
   next's (or end of document for the last entry); text within a chapter is
   the concatenation of `page.get_text()` over that page range.
+- **That page range is now recorded on the `Chapter`, 1-indexed.** It is the
+  best locator any book in the corpus has, and the *only* one available for
+  a PDF whose outline entries are meaningless bookmark IDs - the real
+  observed case, *Finite and Infinite Games*, where all 18 chapters are
+  titled and every title is "FAIG0001"-style noise. 1-indexed to match both
+  the outline's own numbers and what a PDF reader shows: a citation is
+  useless if its number disagrees with the page box the reader types into.
+  See `bookrag/locate.py`, which ranks pages above a chapter title for
+  exactly this book.
 
 ## Dependencies
 - Internal: `bookrag.ingest.chapter.Chapter` (shared with `epub_loader.py`)

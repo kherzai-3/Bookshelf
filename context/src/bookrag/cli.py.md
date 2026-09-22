@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-22T21:40:00Z
-source_hash: 9d34c6ab0330844f54d8f621df91687fdf665593
+last_synced: 2026-09-22T23:30:00Z
+source_hash: 2c4df0ab4b1d35e5708c2f38abeea85f090221ba
 ---
 
 ## Purpose
@@ -72,6 +72,12 @@ actual logic (see that file's context doc for the real behavior).
   neither with production. Found by `test_cli.py`'s first real ingest of a
   first-person epub; the lesson is that a hand-built fixture for a dataclass
   that recently changed shape is worth nothing.
+- `source_lines(facts, root=None) -> list[str]` — where the facts behind a
+  `chat` answer came from, rendered via `bookrag.locate` and printed under a
+  "Sources" heading. Deduplicated by rendered location (several facts
+  routinely share a passage) and capped at `_SOURCES_SHOWN` = 6, because an
+  unfiltered list is not a source list - it is the fact dump rank 03 exists
+  to remove, printed again with locations attached.
 - `next_step_lines(book_id, chapter_count) -> list[str]` — the post-ingest
   guidance (the `extract` command, the `--log`/follow recipe, that Ctrl+C is
   safe, the `--provider fake` path). Returns lines so `_print_section` owns
@@ -337,6 +343,21 @@ actual logic (see that file's context doc for the real behavior).
   of one. With the decision hoisted, all five volumes land at 21-22
   chapters and a 2,337-3,702 median.
 
+### Citing an answer's sources
+- **The tool prints the citations, the model never does.** A small local
+  model asked to cite its sources invents them, and a citation that might be
+  fabricated is worse than none - so every source line is computed from the
+  library and is either correct or absent. This is the same reasoning that
+  makes extraction schema-constrained rather than politely requested.
+- Both `chat` paths (one-shot `--question` and the REPL) cite the facts that
+  were actually selected for the answer, not every fact known at that
+  chapter, so the block reflects what the model was given.
+- Ordered by chapter rather than by relevance: a reader scanning the block is
+  asking "how far back does this go", not "which fact mattered most".
+- `source_lines` takes a `root` so `tests/test_spoiler_safety.py` can render
+  it - the gate treats citations as a render surface, which is the only way
+  it reaches them.
+
 ### Splitting an omnibus (`_ingest_omnibus`)
 - `_ingest` loads via `loader.load_chapters_with_sources` (both loaders
   expose it), asks `ingest.omnibus.detect_volumes`, and hands off to
@@ -428,7 +449,8 @@ actual logic (see that file's context doc for the real behavior).
 - Internal: `bookrag.ingest.epub_loader`, `bookrag.ingest.pdf_loader`,
   `bookrag.ingest.chapter.Chapter`, `bookrag.ingest.consolidate`
   (`should_consolidate`, `consolidate_fragments`), `bookrag.ingest.omnibus`
-  (`OmnibusPlan`, `detect_volumes`, `volume_chapters`), `bookrag.storage`
+  (`OmnibusPlan`, `detect_volumes`, `volume_chapters`),
+  `bookrag.locate.cite_facts`, `bookrag.storage`
   (`save_book`, `load_chapters`, `load_metadata`, `library_root`,
   `incoming_root`), `bookrag.titles.guess_title_author`,
   `bookrag.extract.pipeline` (`extract_book`, `resume_start_index`), `bookrag.eval` (`run_eval`,

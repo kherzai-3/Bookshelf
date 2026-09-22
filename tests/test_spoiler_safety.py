@@ -36,6 +36,7 @@ from pathlib import Path
 
 import pytest
 
+from bookrag.cli import source_lines
 from bookrag.extract.pipeline import extract_book
 from bookrag.ingest.chapter import Chapter
 from bookrag.providers.fake_provider import FakeProvider
@@ -120,11 +121,22 @@ def _build_library(root: Path, source: Path, chapters: list[Chapter], **kwargs) 
 
 
 def _render(book_id: str, chapter_index: int, question: str, root: Path) -> str:
-    """Exactly what `cli.py`'s chat loop assembles and hands to a provider.
+    """Everything a `bookrag chat` turn puts in front of a reader.
+
     Kept in one place so these tests can never drift into checking a path the
-    product doesn't actually take."""
+    product doesn't actually take - and so that **adding a render surface
+    means adding it here**, which is the only way the two flagship tests below
+    ever reach it.
+
+    The source block is part of this on purpose. Citations quote the book's
+    own text back to the reader, which is a far more direct way to leak a
+    chapter than a fact statement is: a paraphrase might omit the spoiler, a
+    verbatim quote cannot. `bookrag.locate` is written to read only the
+    chapter a cited fact belongs to, and this is what proves it rather than
+    asserting it."""
     facts = facts_as_of(book_id, chapter_index, root=root)
-    return format_context(select_relevant_facts(question, facts, root=root), root=root)
+    used = select_relevant_facts(question, facts, root=root)
+    return "\n".join([format_context(used, root=root), *source_lines(used, root=root)])
 
 
 def _source(tmp_path: Path) -> Path:

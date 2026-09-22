@@ -40,3 +40,17 @@ def test_extract_metadata_reads_title_and_author(tmp_path: Path) -> None:
 
     assert metadata["title"] == "Test PDF Book"
     assert metadata["author"] == "Test PDF Author"
+
+
+def test_chapters_record_the_pages_they_span(tmp_path: Path) -> None:
+    """A PDF's outline gives page numbers directly, and they are the only
+    locator a book whose outline entries are meaningless bookmark IDs
+    ("FAIG0080") will ever have. 1-indexed to match what a PDF reader shows -
+    a citation is useless if its number disagrees with the page box the
+    reader types into."""
+    pdf_path = tmp_path / "sample.pdf"
+    build_sample_pdf(pdf_path)
+
+    chapters = load_chapters(pdf_path)
+
+    assert [c.pages for c in chapters] == [[1, 1], [2, 2]]

@@ -64,7 +64,14 @@ def consolidate_fragments(
         if not buffer:
             return
         title = next((c.title for c in buffer if c.title), None)
-        merged.append(Chapter(index=len(merged), title=title, text="\n\n".join(c.text for c in buffer)))
+        merged.append(
+            Chapter(
+                index=len(merged),
+                title=title,
+                text="\n\n".join(c.text for c in buffer),
+                pages=_merged_pages(buffer),
+            )
+        )
         buffer.clear()
 
     for chapter in chapters:
@@ -73,3 +80,18 @@ def consolidate_fragments(
             flush()
     flush()
     return merged
+
+
+def _merged_pages(buffer: list[Chapter]) -> list[int] | None:
+    """The page span a merged chapter covers, first page to last.
+
+    Consolidation is exactly where page numbers earn their keep and exactly
+    where they would otherwise be lost: the books that need merging are the
+    page-sized ones, so a real case is 160 one-page PDF fragments becoming 18
+    chapters, or 285 scanned epub pages becoming 36. Dropping the numbers here
+    would leave those books - the ones with no usable chapter titles - with no
+    locator at all."""
+    spans = [c.pages for c in buffer if c.pages]
+    if not spans:
+        return None
+    return [min(s[0] for s in spans), max(s[-1] for s in spans)]

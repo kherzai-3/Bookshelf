@@ -1,7 +1,7 @@
 ---
 source: tests/test_consolidate.py
-last_synced: 2026-09-13T16:40:00Z
-source_hash: 9c7a1779f542e38b9049c96cdaad01668eddda24
+last_synced: 2026-09-22T23:30:00Z
+source_hash: 6219accd6fe458c3aa872636ccfeade27d0cc2c4
 ---
 
 ## Purpose
@@ -25,3 +25,9 @@ and merge logic (`consolidate_fragments`) directly against hand-built
   whose bookmark "titles" were internal tool-generated ids defeated
   consolidation completely under the old title-respecting rule (146 fragments
   stayed 146); under these rules the same book consolidates to 18 chapters.
+- **Two tests pin that merging carries the page span through**, first page
+  to last, and that a merge of unpaged fragments keeps `None`. Consolidation
+  is where page numbers would otherwise be lost, and the books that need
+  merging (160 one-page PDF fragments; 285 scanned epub pages) are exactly
+  the ones with no usable chapter titles - so losing the span leaves them
+  with no locator at all.

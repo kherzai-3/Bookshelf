@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/consolidate.py
-last_synced: 2026-09-08T00:00:00Z
-source_hash: f7b426b46d4db19d8af03d28b8892f68449a77d4
+last_synced: 2026-09-22T23:30:00Z
+source_hash: f1b073099ee73d5ccc85d18012fd9d95550c6e8a
 ---
 
 ## Purpose
@@ -88,6 +88,14 @@ introduced on one page and elaborated on the next is two unrelated calls).
 ## Data Contracts
 - Input/output: `list[Chapter]` (shared dataclass from `ingest.chapter`) -
   a pure transformation, no I/O.
+
+- **Merging carries the page span through, first page to last.**
+  Consolidation is both where page numbers earn their keep and where they
+  would otherwise be lost: the books that need merging are the page-sized
+  ones, so the real cases are 160 one-page PDF fragments becoming 18 chapters
+  and 285 scanned epub pages becoming 36. Those two books have no usable
+  chapter titles either, so dropping the numbers here would leave them with
+  no locator at all. A merged chapter with no paged fragments keeps `None`.
 
 ## Dependencies
 - Internal: `bookrag.ingest.chapter.Chapter`

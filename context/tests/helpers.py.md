@@ -1,7 +1,7 @@
 ---
 source: tests/helpers.py
-last_synced: 2026-09-22T21:40:00Z
-source_hash: 485e9bfc381fcc94f89d12b556b10d314a702a84
+last_synced: 2026-09-22T23:30:00Z
+source_hash: a82713461c10f1c8c4440d09af5a5773be224b7e
 ---
 
 ## Purpose
@@ -51,6 +51,14 @@ have something real to assert against.
   all), mirroring a real page-scanned Internet-Archive epub (Atomic
   Habits' actual source: one physical page per spine file) - for tests
   that need `ingest.consolidate.should_consolidate` to actually trigger.
+- `build_toc_titled_epub(path)` — an epub whose chapters are named **only**
+  in its table of contents, with no heading markup anywhere. The real shape
+  behind the biggest locator win in the library (Ranger's Apprentice named 1
+  chapter of 75 in its markup and all 75 in its navigation).
+- `build_page_scanned_epub(path, pages=6)` — one physical page per spine
+  document, named `page_N.html`, no headings and an empty table of contents.
+  Atomic Habits' actual source, and the only corpus book whose sole locator
+  is the filename.
 - `build_omnibus_epub(path, volume_labels=..., chapters_per_volume=3,
   front_matter=2, back_matter=1, title="An Omnibus",
   appendix_in_last_volume=0)` — several books stitched into one file, with

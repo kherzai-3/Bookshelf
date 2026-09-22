@@ -24,7 +24,21 @@ def load_chapters(path: str | Path) -> list[Chapter]:
         text = "".join(doc[p].get_text() for p in range(start, end)).strip()
         if not text:
             continue
-        chapters.append(Chapter(index=len(chapters), title=title.strip() or None, text=text))
+        chapters.append(
+            Chapter(
+                index=len(chapters),
+                title=title.strip() or None,
+                text=text,
+                # Recorded 1-indexed, matching both the outline's own numbers
+                # and what a PDF reader shows - a citation is useless if its
+                # number disagrees with the page box the reader types into.
+                # This is the best locator any book in the corpus has, and it
+                # is the only one available for a PDF whose outline entries
+                # are meaningless bookmark IDs ("FAIG0001"), which is the real
+                # observed case.
+                pages=[start + 1, max(start + 1, end)],
+            )
+        )
     return chapters
 
 

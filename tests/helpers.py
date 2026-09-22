@@ -372,6 +372,66 @@ def build_thin_sections_epub(path: Path, sectioned_chapters: int = 1, loose_chap
     epub.write_epub(str(path), book)
 
 
+def build_toc_titled_epub(path: Path) -> None:
+    """An epub whose chapters are named **only** in its table of contents -
+    no `h1`/`h2`/`h3` anywhere in the documents themselves.
+
+    The real shape behind the biggest locator win in the library: Ranger's
+    Apprentice had 1 titled chapter of 75 and The Eye of the World 0 of 108,
+    while both epubs name every chapter in their navigation. Until
+    `epub_loader` read it, that left three books classified `text-bound` with
+    nothing a citation could point at.
+    """
+    book = epub.EpubBook()
+    book.set_identifier("toc-titled-id")
+    book.set_title("TOC Titled Book")
+    book.set_language("en")
+    book.add_author("TOC Author")
+
+    items = []
+    for number, label in enumerate(("Chapter One", "Chapter Two"), start=1):
+        # No heading markup at all - the label exists only in book.toc below.
+        item = epub.EpubHtml(file_name=f"chap{number}.xhtml")
+        item.content = f"<html><body><p>Chapter {number} body. {_bulk_filler(_UNCONSOLIDATED_CHAPTER_WORDS)}</p></body></html>"
+        item.title = label
+        book.add_item(item)
+        items.append(item)
+
+    book.toc = tuple(items)
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", *items]
+    epub.write_epub(str(path), book)
+
+
+def build_page_scanned_epub(path: Path, pages: int = 6) -> None:
+    """A page-scanned epub: one physical page per spine document, named
+    `page_N.html`, with no headings and an empty table of contents.
+
+    Atomic Habits' actual source, and the one book in the corpus with no
+    chapter titles *and* no navigation - so the page number encoded in the
+    filename is the only locator it will ever have.
+    """
+    book = epub.EpubBook()
+    book.set_identifier("page-scanned-id")
+    book.set_title("Page Scanned Book")
+    book.set_language("en")
+    book.add_author("Scan Author")
+
+    items = []
+    for n in range(pages):
+        item = epub.EpubHtml(file_name=f"page_{n}.html")
+        item.content = f"<html><body><p>Page {n} text. {_bulk_filler(120)}</p></body></html>"
+        book.add_item(item)
+        items.append(item)
+
+    book.toc = ()
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", *items]
+    epub.write_epub(str(path), book)
+
+
 def build_sample_pdf(path: Path) -> None:
     doc = pymupdf.open()
     p1 = doc.new_page()

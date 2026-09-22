@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import posixpath
+import re
 from pathlib import Path
+from urllib.parse import unquote
 
 import lxml.html
 from ebooklib import epub
@@ -36,6 +39,7 @@ def load_chapters_with_sources(path: str | Path) -> list[tuple[str, Chapter]]:
     is open and meaningless in `chapters.jsonl`.
     """
     book = epub.read_epub(str(path))
+    toc_labels = _toc_labels(book.toc)
     chapters: list[tuple[str, Chapter]] = []
     for idref, _linear in book.spine:
         item = book.get_item_with_id(idref)
@@ -43,11 +47,29 @@ def load_chapters_with_sources(path: str | Path) -> list[tuple[str, Chapter]]:
             continue
         if isinstance(item, epub.EpubNav):
             continue
+        name = item.get_name()
         tree = lxml.html.fromstring(item.get_content())
-        for title, text in _split_by_headings(tree):
+        segments = _split_by_headings(tree)
+        # The table of contents names the *document*, so it can only name a
+        # chapter that is the whole document. A spine file split into several
+        # chapters by internal headings already has its own per-chapter
+        # headings, which are better labels than one shared TOC entry.
+        fallback = _toc_label(toc_labels, name) if len(segments) == 1 else None
+        page = _page_number(name)
+        for title, text in segments:
             if not text:
                 continue
-            chapters.append((item.get_name(), Chapter(index=len(chapters), title=title, text=text)))
+            chapters.append(
+                (
+                    name,
+                    Chapter(
+                        index=len(chapters),
+                        title=title or fallback,
+                        text=text,
+                        pages=[page, page] if page is not None else None,
+                    ),
+                )
+            )
     return chapters
 
 
@@ -91,6 +113,64 @@ def _split_by_headings(tree: lxml.html.HtmlElement) -> list[tuple[str | None, st
     for heading, part in zip(headings, parts[1:]):
         segments.append((heading.text_content().strip() or None, part.strip()))
     return segments
+
+
+# A page-scanned epub (the Internet-Archive shape) names each spine document
+# after the physical page it holds: `page_0.html` ... `page_284.html`. That is
+# the only pagination such a file has, and for a book with no headings and no
+# table of contents it is the only thing that can tell a reader where a fact
+# came from. It is the *scan's* index, so it can sit a few pages off the
+# printed folio - which is why `bookrag.locate` never shows a page on its own,
+# only alongside a quote the reader can search for.
+_PAGE_NAMED_DOCUMENT = re.compile(r"(?:^|/)page[_-]?(\d{1,5})\.x?html?$", re.IGNORECASE)
+
+
+def _page_number(name: str) -> int | None:
+    match = _PAGE_NAMED_DOCUMENT.search(name or "")
+    return int(match.group(1)) if match else None
+
+
+def _toc_labels(toc) -> dict[str, str]:
+    """Every table-of-contents label, keyed by the document it points at.
+
+    Recovers chapter titles for books that have them in the navigation and
+    nowhere else. Measured on the library: this is the difference between
+    1 and 75 titled chapters in the Ranger's Apprentice bindup, 0 and 54 in
+    The Eye of the World, and it adds 47 to The Magic Thief collection. All
+    three were previously untitled enough to be classified `text-bound`,
+    which made every citation into them unusable.
+
+    First entry wins, so a volume heading that shares an href with its own
+    first chapter does not overwrite it.
+    """
+    labels: dict[str, str] = {}
+
+    def walk(entries) -> None:
+        for entry in entries:
+            if isinstance(entry, tuple):
+                section, children = entry
+                _record(labels, section)
+                walk(children)
+            else:
+                _record(labels, entry)
+
+    walk(toc)
+    return labels
+
+
+def _record(labels: dict[str, str], entry) -> None:
+    href = getattr(entry, "href", None)
+    title = (getattr(entry, "title", "") or "").strip()
+    if href and title:
+        labels.setdefault(_normalize_href(href), title)
+
+
+def _normalize_href(href: str) -> str:
+    return posixpath.normpath(unquote(href).split("#")[0])
+
+
+def _toc_label(labels: dict[str, str], name: str) -> str | None:
+    return labels.get(_normalize_href(name)) if name else None
 
 
 def extract_metadata(path: str | Path) -> dict[str, str | None]:

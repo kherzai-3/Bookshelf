@@ -87,3 +87,22 @@ def test_consolidate_fragments_keeps_first_title_when_several_are_present() -> N
 
 def test_consolidate_fragments_of_empty_list_is_empty() -> None:
     assert consolidate_fragments([]) == []
+
+
+def test_merging_keeps_the_page_span_it_covers() -> None:
+    """Consolidation is exactly where page numbers earn their keep and
+    exactly where they would otherwise be lost: the books that need merging
+    are the page-sized ones. Real case - 160 one-page PDF fragments become 18
+    chapters, and dropping the numbers would leave that book, which has no
+    usable titles either, with no locator at all."""
+    fragments = [Chapter(index=i, title=None, text="word " * 400, pages=[i + 1, i + 1]) for i in range(6)]
+
+    merged = consolidate_fragments(fragments, target_words=1200)
+
+    assert [c.pages for c in merged] == [[1, 3], [4, 6]]
+
+
+def test_merging_chapters_without_pages_keeps_none() -> None:
+    fragments = [Chapter(index=i, title=None, text="word " * 400) for i in range(4)]
+
+    assert all(c.pages is None for c in consolidate_fragments(fragments, target_words=800))

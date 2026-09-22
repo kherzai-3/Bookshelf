@@ -109,8 +109,12 @@ listing/grouping books without ever merging their chapter numbering.
   `index.json` naming one `source_filename` is otherwise unexplained, and
   because `source_book_id` names the one volume that actually holds the
   archived file. `null` for the overwhelming majority of books.
-- `chapters.jsonl`: one `{index, title, text}` object per line, in the same
-  order and shape as the `Chapter` dataclass. The spine document a chapter
+- `chapters.jsonl`: one `{index, title, text, pages}` object per line, in the
+  same order and shape as the `Chapter` dataclass. `pages` is `[first, last]`
+  inclusive or `null`, and is `null` for most epubs - only a PDF outline and
+  a page-scanned epub supply it. Read by `bookrag.locate`; nothing else
+  depends on it, and a chapter written before the field existed simply has no
+  key. The spine document a chapter
   came from is deliberately **not** stored, though `epub_loader` can report
   it - it is an internal epub path, meaningful only while the file is open.
 - `index.json`: `{"books": [{book_id, title, author, series}, ...]}` — one

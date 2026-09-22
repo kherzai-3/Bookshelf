@@ -1,7 +1,7 @@
 ---
 source: tests/test_epub_loader.py
-last_synced: 2026-09-08T00:00:00Z
-source_hash: 7037bb278b95484d63c436c21bf8faa12bf05972
+last_synced: 2026-09-22T23:30:00Z
+source_hash: 7f61d121842defd00eade13fbca2ec311ed050c5
 ---
 
 ## Purpose
@@ -27,3 +27,11 @@ regression found via the same book's actual source file.
   above it, this time with a real `<head><title>` present - the exact
   shape of Atomic Habits' actual source file, where this leak was found
   (see that file's context doc for the full root-cause trace).
+- **Four tests cover the locator evidence the loader recovers**, all added
+  for `bookrag.locate`: a chapter titled from the table of contents when its
+  document has no heading (the Ranger's Apprentice / Eye of the World shape,
+  worth 1->75 and 0->54 titled chapters); that a document split into several
+  chapters does *not* share one TOC label across all of them; that a
+  page-scanned epub records `page_N` filenames as page numbers; and that an
+  ordinary epub records none, because inventing a page number is worse than
+  having none.

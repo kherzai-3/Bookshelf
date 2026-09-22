@@ -18,6 +18,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/cli.py](src/bookrag/cli.py.md) — `bookrag ingest|extract|eval|chat|list|show|remove|aliases|doctor` CLI entry point.
 - [src/bookrag/names.py](src/bookrag/names.py.md) — the residue rule: which decorated forms of a name (`Lord Fang Yuan`, `Magister Nevery`) are the same character, read from the book's own prose, plus the text-only personhood test the ingest path needs because it has no entity types.
 - [src/bookrag/library.py](src/bookrag/library.py.md) — library-wide list/show/remove/aliases/doctor: extraction-status summaries, index/entities.json cleanup, the duplicate/cross-book/name-variant detectors, and `link_names` (declare several names one character, before or after extraction).
+- [src/bookrag/locate.py](src/bookrag/locate.py.md) — turns a fact into a place a reader can go: the passage it came from, plus the book's own name for where that sits (volume, chapter title, page range).
 - [src/bookrag/titles.py](src/bookrag/titles.py.md) — last-resort title/author guess from a filename.
 - [src/bookrag/env.py](src/bookrag/env.py.md) — reads settings from the environment/`.env`; a blank value counts as unset, not as an empty-string override.
 - [src/bookrag/providers/__init__.py](src/bookrag/providers/__init__.py.md) — `providers` subpackage marker.
@@ -48,6 +49,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [tests/test_resolve.py](tests/test_resolve.py.md) — covers entity resolution (exact/alias match, type separation).
 - [tests/test_fake_provider.py](tests/test_fake_provider.py.md) — covers `FakeProvider`'s deterministic extraction.
 - [tests/test_extraction_pipeline.py](tests/test_extraction_pipeline.py.md) — covers `extract_book`, including series entity-seeding.
+- [tests/test_locate.py](tests/test_locate.py.md) — covers citation rendering and the passage matcher, including the two defects real extractor output exposed and its refusal to guess.
 - [tests/test_query.py](tests/test_query.py.md) — covers `facts_as_of`'s spoiler-safety guarantee across a series.
 - [tests/test_spoiler_safety.py](tests/test_spoiler_safety.py.md) — the ship gate: end-to-end proof that a chapter-N render contains nothing from, and derives nothing from, past chapter N.
 - [tests/test_vocatives.py](tests/test_vocatives.py.md) — covers narrator-alias detection: speaker split, per-chapter narration mode, quote styles, and the noise filters.

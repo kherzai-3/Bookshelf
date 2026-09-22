@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/epub_loader.py
-last_synced: 2026-09-22T21:40:00Z
-source_hash: 10d1192b509640ae36afd5294f924f0250bace64
+last_synced: 2026-09-22T23:30:00Z
+source_hash: bb92e0487439915b708c4f1227ba4477f92d9423
 ---
 
 ## Purpose
@@ -18,6 +18,8 @@ settings, themes) can be scoped per chapter for spoiler-safety.
   came from.
 - `extract_metadata(path: str | Path) -> dict[str, str | None]` — best-effort
   `{"title", "author"}` from the epub's Dublin Core metadata.
+- Chapters now also carry `pages` when the file encodes them, and a `title`
+  taken from the table of contents when the document itself has no heading.
 
 ## Key Decisions
 - **The spine provenance exists for `ingest.omnibus`, and it cannot be
@@ -28,6 +30,29 @@ settings, themes) can be scoped per chapter for spoiler-safety.
   all of them. The name is deliberately **not** persisted — it is an internal
   epub path, useful while the file is open and meaningless in
   `chapters.jsonl`.
+- **A chapter with no heading is titled from the table of contents, and that
+  is the largest locator win in the library.** Measured: Ranger's Apprentice
+  went from **1 titled chapter of 75 to 75**, The Eye of the World from
+  **0 of 108 to 54** (the other 54 are 46-byte separator fragments with no
+  TOC entry of their own), and The Magic Thief collection gained 47. All
+  three epubs name every chapter in their navigation and none in their
+  markup, so before this they were classified `text-bound` and a citation
+  into them could only say "chapter 48". This was listed as an Open Question
+  on this page for weeks; `bookrag.locate` is what made it worth doing.
+- **The TOC label is used only when the document is *one* chapter.** A
+  table-of-contents entry names a document, so a spine file split into
+  several chapters by internal headings (the Project Gutenberg shape) would
+  otherwise have one shared label stamped across all of them — and it already
+  has better per-chapter headings of its own.
+- **`page_N.html` spine names are read as page numbers.** A page-scanned
+  epub (the Internet-Archive shape, real case: Atomic Habits) puts one
+  physical page in each spine document and names it after the page. That is
+  the only pagination such a file has, and for a book with no headings *and*
+  an empty table of contents it is the only locator it will ever get. It is
+  the scan's index, so it can sit a few pages off the printed folio — which
+  is why `locate` never shows a page on its own, only alongside a quote.
+  Confirmed the printed folio is not recoverable: zero of 285 pages carry a
+  bare number on their first or last line.
 - Chapter order comes from `book.spine`, not `book.toc` or file name sorting —
   the spine is the epub's authoritative reading order and can differ from
   either.
@@ -113,5 +138,7 @@ settings, themes) can be scoped per chapter for spoiler-safety.
   before `save_book`) rather than here, since it's a format-agnostic
   concern (equally applicable to a PDF that also comes out over-fragmented,
   not just epub-specific).
-- Chapter titles from `book.toc` (nav labels) aren't cross-referenced yet;
-  could improve title recall for epubs whose content lacks heading tags.
+- ~~Chapter titles from `book.toc` (nav labels) aren't cross-referenced
+  yet.~~ **Done** - see Key Decisions. It improved title recall on three of
+  the four books that needed it; the fourth (Atomic Habits) has an empty
+  table of contents and is covered by the page-number path instead.

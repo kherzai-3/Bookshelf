@@ -1,7 +1,7 @@
 ---
 source: tests/test_spoiler_safety.py
-last_synced: 2026-09-15T14:12:03Z
-source_hash: 6d1be593d54a3be6b9d5ce83ae8b4f79814376c5
+last_synced: 2026-09-22T23:30:00Z
+source_hash: 5aacd97549ff56ad8db017dfeb7f857102661d57
 ---
 
 ## Purpose
@@ -73,6 +73,19 @@ Four tests, plus module-level fixture material:
 - `_chapters(start, stop)` always re-indexes from 0. Handing `save_book` a book
   whose chapters begin at index 5 would be testing a shape the product never
   produces.
+
+- **`_render` is the definition of "what a reader sees", and adding a render
+  surface means adding it there.** That is the only way the two flagship
+  tests ever reach a new surface. Citations were added to it for exactly this
+  reason, and they are a sharper leak risk than anything before them: a fact
+  statement is a paraphrase that might omit a spoiler, but a citation quotes
+  the book's own text verbatim.
+- Sabotage-verified on the citation path specifically. Quoting chapter N+1
+  fails the sentinel *and* equivalence tests; adding a whole-book-derived
+  chapter count to a citation ("Chapter Four of 10") copies no future text at
+  all and fails **equivalence only** - a live demonstration of the case the
+  sentinel test structurally cannot see, on a surface added months after that
+  argument was first made.
 
 ## Dependencies
 - Internal: `bookrag.storage.save_book`, `bookrag.extract.pipeline.extract_book`,

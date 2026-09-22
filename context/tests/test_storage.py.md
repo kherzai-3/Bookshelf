@@ -1,7 +1,7 @@
 ---
 source: tests/test_storage.py
-last_synced: 2026-09-13T16:40:00Z
-source_hash: 3cda136c3fd3b823f10c972f5db7c2876c009fce
+last_synced: 2026-09-22T23:30:00Z
+source_hash: 0bf7dc3d34ad53b08d464c51053582a104e81852
 ---
 
 ## Purpose
@@ -23,3 +23,6 @@ taxonomy), and its rollback behavior on failure.
 - `test_save_book_leaves_no_partial_directory_on_failure` monkeypatches
   `_update_index` to raise partway through `save_book` and asserts the
   `book_dir` it had already started writing is gone afterward.
+- The `chapters.jsonl` record is asserted **in full** rather than key by key,
+  so adding a field to the on-disk chapter shape stays a deliberate act that
+  has to update this test. `pages` was added that way.

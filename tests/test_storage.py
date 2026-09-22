@@ -46,8 +46,21 @@ def test_save_book_writes_source_metadata_and_chapters(tmp_path: Path) -> None:
     assert metadata["content_type"] == "fiction"  # default when not specified
 
     lines = (book_dir / "chapters.jsonl").read_text(encoding="utf-8").splitlines()
-    assert json.loads(lines[0]) == {"index": 0, "title": "Chapter One", "text": "The hero arrives."}
-    assert json.loads(lines[1]) == {"index": 1, "title": "Chapter Two", "text": "The hero leaves."}
+    # `pages` is written as null for a book whose source has no pagination,
+    # which is most epubs. Asserted in full rather than by key so that adding
+    # a field to the on-disk chapter record stays a deliberate act.
+    assert json.loads(lines[0]) == {
+        "index": 0,
+        "title": "Chapter One",
+        "text": "The hero arrives.",
+        "pages": None,
+    }
+    assert json.loads(lines[1]) == {
+        "index": 1,
+        "title": "Chapter Two",
+        "text": "The hero leaves.",
+        "pages": None,
+    }
 
 
 def test_save_book_persists_an_explicit_content_type(tmp_path: Path) -> None:

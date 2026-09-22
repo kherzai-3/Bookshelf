@@ -30,6 +30,7 @@ from bookrag.library import (
     split_cross_book_entity,
     unlink_names,
 )
+from bookrag.locate import cite_facts
 from bookrag.providers.base import extraction_identity, model_placement
 from bookrag.providers.registry import get_provider
 from bookrag.query import facts_as_of, format_context, select_relevant_facts
@@ -904,8 +905,9 @@ def _chat(args: argparse.Namespace) -> int:
     facts = facts_as_of(args.book_id, args.chapter)
 
     if args.question is not None:
-        context = format_context(select_relevant_facts(args.question, facts), content_type=content_type)
-        print(provider.answer_question(args.question, context, content_type))
+        used = select_relevant_facts(args.question, facts)
+        print(provider.answer_question(args.question, format_context(used, content_type=content_type), content_type))
+        _print_section("Sources", source_lines(used))
         return 0
 
     print(
@@ -924,8 +926,40 @@ def _chat(args: argparse.Namespace) -> int:
         # question-dependent (see query.select_relevant_facts), so a fixed
         # context built before the first question was ever typed can't
         # reflect it.
-        context = format_context(select_relevant_facts(question, facts), content_type=content_type)
-        print(provider.answer_question(question, context, content_type))
+        used = select_relevant_facts(question, facts)
+        print(provider.answer_question(question, format_context(used, content_type=content_type), content_type))
+        _print_section("Sources", source_lines(used))
+
+
+# Enough to show where an answer came from without burying the answer itself.
+# An unfiltered list is not a source list, it is the fact dump rank 03 exists
+# to get rid of, printed a second time with locations attached.
+_SOURCES_SHOWN = 6
+
+
+def source_lines(facts: list, root: Path | None = None) -> list[str]:
+    """Where the facts behind an answer came from, in the reader's terms.
+
+    **This is the whole point of the citation work**, and it is printed by
+    the tool rather than asked of the model on purpose: a small local model
+    asked to cite its sources invents them, and a citation that might be
+    fabricated is worse than none. Everything here is computed from the
+    library, so a source line is either correct or absent.
+
+    Deduplicated by rendered location: several facts routinely come from one
+    passage, and repeating the same line once per fact makes the block look
+    like noise. Ordered by chapter, because a reader scanning it is asking
+    "how far back does this go", not "which fact was most relevant".
+    """
+    if not facts:
+        return []
+    seen: dict[str, None] = {}
+    for fact, citation in sorted(cite_facts(facts, root=root), key=lambda pair: pair[0].chapter_index):
+        seen.setdefault(citation.render(), None)
+    lines = list(seen)[:_SOURCES_SHOWN]
+    if len(seen) > _SOURCES_SHOWN:
+        lines.append(f"... and {len(seen) - _SOURCES_SHOWN} more")
+    return lines
 
 
 def _list(args: argparse.Namespace) -> int:
