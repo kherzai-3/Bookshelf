@@ -348,9 +348,10 @@ correct answer for most books, but worth knowing so its silence isn't read
 as a failure:
 
 - **First person only.** A third-person book has no narrator to address, so
-  nothing is detected. Identity linking for third-person books goes through
-  `bookrag doctor --merge-name-variants` instead (see "Managing your
-  library"), which works on names rather than on who is speaking.
+  this detector finds nothing. That is not the end of the story any more: a
+  *second* linker runs at the same moment and does work on third-person
+  books, grouping a character's titled names ("Magister Nevery" with
+  "Nevery"). See "Titles and other forms of a character's name" below.
 - **Two or more spellings of a name are required.** Detection needs two
   independent signals, and one of them is a string relationship between two
   names - so a narrator with a single name links nothing. Most first-person
@@ -362,6 +363,58 @@ as a failure:
   `context/src/bookrag/ingest/vocatives.py.md`.
 
 `bookrag aliases <book-id>` shows what was found and what was linked.
+
+### Titles and other forms of a character's name
+
+Also automatic, also at ingest, and it works on third-person books - where
+the narrator detector above has nothing to say. If a book calls someone both
+"Nevery" and "Magister Nevery", those become one character before extraction
+starts, so their facts never split in the first place.
+
+```
+Linked:
+  'Nevery' also answers to Magister Nevery
+  'Rowan' also answers to Duchess Rowan, Lady Rowan
+  'Crowe' also answers to Underlord Crowe
+```
+
+**No list of titles is involved**, which matters for books that invent their
+own. "Magister", "Underlord" and the Chinese clan prefix "Gu Yue" are not in
+any honorifics list and could not be - the book made them up. Instead of
+asking "is this word a rank?", the rule asks whether what is *left* after
+removing it is a name the book uses far more often on its own: "Nevery"
+appears 1,536 times and "Magister Nevery" 20, so the longer form is a
+decoration of the shorter.
+
+Two things keep it from merging a thing into a person. A real name is almost
+never preceded by "the" or "a" - nobody writes "the Fang Yuan" - and a
+character is caught speaking ("Nevery said"). A category fails the first test
+and a place fails the second.
+
+On a long book this adds a minute or two to ingest, which it says before it
+starts. It is the cheapest possible moment to spend that time: the
+alternative is discovering the split after a multi-hour extraction.
+
+`bookrag aliases <book-id>` lists every group with the reason it was linked,
+and `bookrag aliases <book-id> --unlink` undoes all of them. `bookrag ingest
+--no-auto-link` skips both linkers entirely.
+
+**Known limits**, all measured across the eight books this was built on
+(124 links, one wrong):
+
+- **A thing named after a person still merges into them.** "Mount Augustus"
+  links to "Augustus", who is a real character in that book. No test of the
+  text can separate those, because grammatically they are identical; the
+  entity types available after extraction can, which is why
+  `doctor --merge-name-variants` is stricter.
+- **Sentence-initial words get linked, harmlessly.** In a long book the
+  protagonist collects forms like "But Fang Yuan" and "And Fang Yuan". Those
+  are correct - they *are* that character - and they cost nothing, because a
+  question only matches an alias if the whole alias appears in it. Ingest
+  reports a count rather than listing them.
+- **An organisation or a place occasionally slips through**, if the book
+  writes its name bare and has its members speak. "Heavenly Court" is the
+  real example.
 `--unlink` undoes it, but note that undoing it *after* extraction means the
 facts already carry the merged `entity_id`: a genuine undo needs
 `--unlink` plus `extract --restart`, which is a full re-extraction.
@@ -929,9 +982,12 @@ only guards what it is pointed at.
   Thief*, "Captain Ahab", "The Aes Sedai" and "The Wargals", all titles a
   closed list cannot hold precisely because the book invented them.
 
-  **Shipped** as a fourth rule inside `doctor --merge-name-variants`, so
-  there is no new command to learn. Building it changed the measured design
-  twice, both times measured rather than argued:
+  **Shipped**, and on both paths: as a fourth rule inside
+  `doctor --merge-name-variants`, and - since a reader's flow never reaches
+  that command - automatically at ingest, before extraction, where it stops
+  the split forming at all. See "Titles and other forms of a character's
+  name" above for what that looks like. Building it changed the measured
+  design twice, both times measured rather than argued:
 
   - **"Ordinary English word" is now judged per book.** As scored it also
     asked whether the word appeared in 6 of the library's 8 books, which
@@ -949,11 +1005,10 @@ only guards what it is pointed at.
   above are real, but they were **already** found by `--merge-duplicates`,
   which normalises a leading "the" and a trailing "s" - the genuinely new
   reach is a character with *several* decorated forms, which the ambiguity
-  guard used to refuse outright. And the rule requires the bare name to be
-  five times commoner than the decorated one, which on inspection is
-  stricter than it needs to be: relaxing it to three would also catch
-  "Captain Kerrn" and "The Baron", at the cost of re-checking the proposals
-  by hand.
+  guard used to refuse outright. And the dominance requirement now differs
+  by path: `doctor` asks for 3x and ingest for 5x, because a proposal you
+  decline costs a keystroke and a silent merge costs a re-extraction. The 13
+  extra links 3x buys were hand-scored at 10 right, 3 wrong.
 
   **What this does not touch** is the assumed identities, which are where
   the volume is: it addresses the 0.67% of mentions carrying a title or clan
@@ -1221,22 +1276,25 @@ only guards what it is pointed at.
   on the reported book captures "boy", "lad", "thief", "shadow", "blackbird"
   and "cousin". That path is first-person only and needs two spellings of a
   name, so it does nothing for most books.
-  **What's still open is the same problem in third-person books**, where
-  there is no narrator to be addressed and a character can accumulate titles
-  and assumed identities instead - measured on a real book as 3 of ~30 forms
-  linked. See the matching entry under Known limitations for the four
-  confirmed causes, for the remainder rule that now addresses the first three,
-  and for the two constraints that make it harder than loosening the rules: a
-  name can transfer between characters, and an alias carries no chapter scope,
-  so an unscoped link is itself a spoiler.
-  The planned shape: fix the name morphology first (it needs no
+  **The morphology half of the third-person problem is now closed too, and
+  also runs at ingest** - a character's titled names are grouped before
+  extraction whether or not the book has a first-person narrator (see "Titles
+  and other forms of a character's name"). On the reported book that takes
+  the protagonist from 1 linked form to 34.
+  **What remains open is the assumed identities**, where a character takes a
+  wholly different name that shares no words with their own - and that is
+  where the volume is. See the matching entry under Known limitations for the
+  four confirmed causes and for the two constraints that make it harder than
+  loosening the rules: a name can transfer between characters, and an alias
+  carries no chapter scope, so an unscoped link is itself a spoiler.
+  The planned shape was: fix the name morphology first (it needs no
   re-extraction), then give an alias a `from_chapter`, then widen the
-  stated-link rule behind a negation guard. **The morphology half now has a
-  measured mechanism** - the remainder rule described under Known limitations,
-  which covers Western honorifics, eastern clan prefixes and book-invented
-  titles with one test and no wordlist. **Its phase position is an open
-  question rather than a settled one**, because the same measurement undercuts
-  the reason it was scheduled first: 99.33% of the reported character's 56,456
+  stated-link rule behind a negation guard. **The morphology half has now
+  shipped** - the remainder rule described under Known limitations, which
+  covers Western honorifics, eastern clan prefixes and book-invented titles
+  with one test and no wordlist. **Whether it should have gone first is still
+  an open question**, because the same measurement undercuts the reason it was
+  scheduled first: 99.33% of the reported character's 56,456
   mentions are the bare name, every title and clan form together accounts for
   376, and the assumed identities carry roughly 10,270. Morphology is cheap and
   worth doing, but being cheap is not a reason to do it first when the
