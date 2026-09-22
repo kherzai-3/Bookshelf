@@ -1,11 +1,27 @@
-"""Find the separately-published books stitched together inside one file.
+"""Find the separately-published books stitched together inside one file, and
+keep them as labels rather than as separate books.
 
 A bindup, a "complete collection" or a fan-compiled series epub is one file
-holding several real books end to end. Ingested whole it produces one book
+holding several real books end to end. Ingested naively it produces one book
 with five "Chapter 1"s, and every chapter number the tool reports afterwards
-is a number the reader cannot find in their own copy: `--chapter 40` means
-nothing to someone on chapter 6 of book 3. Spoiler scoping is coarser than it
-looks for the same reason - "up to chapter 40" spans two books.
+is a number the reader cannot find in their own copy.
+
+**What this module does not do any more: split.** An earlier version ingested
+each volume as its own `book_id`, re-indexed from zero. That was built on the
+assumption that a citation could only be as good as the storage layout, and
+the assumption was wrong - what a reader needs is a *rendered* location, and
+`bookrag.locate` renders one from a volume span just as well as from a
+directory. The split cost a great deal for that: it discarded every chapter
+outside a volume, it was decided once at ingest and undone only by
+re-ingesting, it forced a second ingest flag to escape it, and it made one
+file's 296 MB source either duplicated N times or shared by a back-reference
+between books. A span recorded in `metadata.json` has none of those
+properties and produces the same string.
+
+So the output here is a *map*: volume k covers chapters `start..end`. The
+file stays one book, chapter indices stay straight through, and
+`locate.volume_at` turns chapter 1847 into "Reverend Insanity Volume 12,
+chapter 13" when a reader is told where a fact came from.
 
 The signal is the file's own table of contents. Every omnibus in the corpus
 nests its chapters under one TOC section per book, and that section's spine
@@ -15,12 +31,10 @@ items give the span directly. The work here is not finding those sections -
 **Three conditions, and Moby Dick fails two of them independently.** Project
 Gutenberg's Moby Dick has five nested TOC sections ("ETYMOLOGY.", "CHAPTER
 100. Leg and Arm.", "Epilogue", ...) which are typesetting artifacts, not
-volumes. Taking nesting at face value would shatter a single novel into five
-"books", which is the worst outcome this detector can produce - far worse
-than leaving an omnibus whole, because it is silent and the reader has no
-reason to suspect it. So a candidate set must (1) not overlap, (2) cover
-nearly all of the book's text, and (3) hold a real book's worth of words
-each. Measured on the library:
+volumes. Taking nesting at face value would label one novel as five books.
+So a candidate set must (1) not overlap, (2) cover nearly all of the book's
+text, and (3) hold a real book's worth of words each. Measured on the
+library:
 
     book                 volumes  overlap  coverage  smallest volume
     Ranger's Apprentice        2       no     98.4%     64,897 words
@@ -33,6 +47,11 @@ spine item, and even setting that aside its sections hold under half the
 text. The three books that are omnibuses pass all three checks with no
 margin worth worrying about. The Eye of the World, The Perfect Run and
 Atomic Habits have no nested sections at all and never reach the checks.
+
+The guards matter less than they did when this drove a split - a wrong
+volume label is a wrong word in a citation, where a wrong split was five
+books in the library - but they are cheap and they are measured, so they
+stay.
 
 `MIN_VOLUME_WORDS` is set by a real volume, not by a guess: "The Magic
 Thief: A Proper Wizard" is a published novella of 7,405 words sitting
@@ -62,13 +81,11 @@ MIN_VOLUMES = 2
 
 # Well under the smallest real volume in the corpus (7,405 words) and well
 # over a dedication page, a map or a copyright notice - the section shapes
-# that would otherwise be minted as their own book.
+# that would otherwise be labelled as their own book.
 MIN_VOLUME_WORDS = 1000
 
-# The volumes must account for essentially the whole file. What is left over
-# is dropped as front and back matter, so this doubles as a bound on how much
-# text a split is allowed to discard. Real omnibuses measure 98.4-100%;
-# Moby Dick's spurious sections measure 45.2%.
+# The volumes must account for essentially the whole file. Real omnibuses
+# measure 98.4-100%; Moby Dick's spurious sections measure 45.2%.
 MIN_TEXT_COVERAGE = 0.85
 
 _ORDINAL = r"(?:\d{1,3}|[ivxlIVXL]{1,6}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)"
@@ -82,7 +99,7 @@ _VOLUME_LABEL = re.compile(rf"^\s*(?:book|volume|vol\.?|part)\s+{_ORDINAL}\b\s*[
 
 @dataclass(frozen=True)
 class Volume:
-    """One real book inside the file, as a span of loaded chapter indices."""
+    """One real book inside the file, as a span of chapter indices."""
 
     title: str
     label: str  # the table-of-contents heading, verbatim
@@ -90,9 +107,14 @@ class Volume:
     end: int  # last chapter index, inclusive
     words: int
 
+    def as_metadata(self) -> dict:
+        """The persisted form. `words` is dropped - it is evidence for the
+        detector's decision, not something a citation ever needs."""
+        return {"title": self.title, "label": self.label, "start": self.start, "end": self.end}
+
 
 @dataclass(frozen=True)
-class OmnibusPlan:
+class VolumePlan:
     volumes: list[Volume]
     chapter_count: int
     total_words: int
@@ -103,16 +125,16 @@ class OmnibusPlan:
         return self.covered_words / self.total_words if self.total_words else 0.0
 
     @property
-    def dropped_chapters(self) -> int:
-        """Chapters outside every volume: covers, a shared contents page, an
-        about-the-author, a preview of the next book. They are discarded, and
-        `MIN_TEXT_COVERAGE` is what keeps that from ever being much."""
+    def unlabelled_chapters(self) -> int:
+        """Chapters outside every volume: a cover, a shared contents page, an
+        about-the-author, a preview of the next book. They are kept, and cited
+        by the file's own title - only the volume label is missing. The split
+        this replaced *deleted* them."""
         inside = sum(volume.end - volume.start + 1 for volume in self.volumes)
         return self.chapter_count - inside
 
-    @property
-    def dropped_words(self) -> int:
-        return self.total_words - self.covered_words
+    def as_metadata(self) -> list[dict]:
+        return [volume.as_metadata() for volume in self.volumes]
 
 
 def detect_volumes(
@@ -120,7 +142,7 @@ def detect_volumes(
     chapters: list[Chapter],
     chapter_sources: list[str | None],
     book_title: str,
-) -> OmnibusPlan | None:
+) -> VolumePlan | None:
     """The books inside `path`, or None if it holds one book (the usual case).
 
     `chapter_sources[i]` is the spine document chapter `i` came from, which is
@@ -129,7 +151,7 @@ def detect_volumes(
     the mapping cannot be reconstructed from the epub alone.
 
     `book_title` is used only to name a volume the TOC labels by number alone
-    ("Volume 7"), which would otherwise become a book called "Volume 7".
+    ("Volume 7"), which would otherwise be cited as a book called "Volume 7".
     """
     if Path(path).suffix.lower() != ".epub" or not chapters:
         return None
@@ -181,18 +203,63 @@ def detect_volumes(
     if not total or covered / total < MIN_TEXT_COVERAGE:
         return None
 
-    return OmnibusPlan(
+    return VolumePlan(
         volumes=volumes, chapter_count=len(chapters), total_words=total, covered_words=covered
     )
 
 
-def volume_chapters(chapters: list[Chapter], volume: Volume) -> list[Chapter]:
-    """One volume's chapters, re-indexed from 0 - so each book counts its own
-    chapters, which is the entire point of splitting."""
-    return [
-        Chapter(index=i, title=chapter.title, text=chapter.text)
-        for i, chapter in enumerate(chapters[volume.start : volume.end + 1])
-    ]
+def volume_boundaries(plan: VolumePlan | None) -> frozenset[int]:
+    """Chapter indices a merged chapter must not run past, for
+    `consolidate_fragments`.
+
+    Merging small fragments must never weld the last page of one book onto
+    the first page of the next: the merged chapter would sit in two volumes
+    at once and be labelled with whichever one won. No book in the corpus is
+    both an omnibus and fragment-sized, so this is a rule the data does not
+    currently exercise - but a page-scanned bindup is an ordinary thing to
+    own, and the failure would be a silently mislabelled citation.
+
+    **Both edges, not just the start.** A volume's last chapter merging
+    forward into the about-the-author that follows it is the same defect, and
+    it is the one that actually bites: `remap` can only keep a group that
+    lies wholly inside a volume, so such a merge would drop the volume's
+    label entirely rather than misplace it.
+    """
+    if plan is None:
+        return frozenset()
+    return frozenset(volume.start for volume in plan.volumes) | frozenset(
+        volume.end + 1 for volume in plan.volumes
+    )
+
+
+def remap(plan: VolumePlan, groups: list[list[int]]) -> VolumePlan:
+    """The same volumes, in terms of consolidated chapters.
+
+    `groups[k]` is the list of original chapter indices merged into chapter
+    `k`. Because `volume_starts` was honoured, every group lies wholly inside
+    one volume or wholly outside all of them, so each volume maps to a
+    contiguous run of groups.
+    """
+    remapped = []
+    for volume in plan.volumes:
+        inside = [k for k, group in enumerate(groups) if group[0] >= volume.start and group[-1] <= volume.end]
+        if not inside:
+            continue
+        remapped.append(
+            Volume(
+                title=volume.title,
+                label=volume.label,
+                start=inside[0],
+                end=inside[-1],
+                words=volume.words,
+            )
+        )
+    return VolumePlan(
+        volumes=remapped,
+        chapter_count=len(groups),
+        total_words=plan.total_words,
+        covered_words=plan.covered_words,
+    )
 
 
 def _top_level_sections(toc) -> list[tuple[str, list[str]]]:

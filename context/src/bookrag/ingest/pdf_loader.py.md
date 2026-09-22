@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/pdf_loader.py
-last_synced: 2026-09-22T23:30:00Z
-source_hash: 22e60da96d089694e2028e6d99ee7628448a23b9
+last_synced: 2026-09-22T20:19:13Z
+source_hash: bcb2432ba1876bef0bbb178c4095448f32f2538a
 ---
 
 ## Purpose
@@ -18,7 +18,7 @@ downstream extraction is format-agnostic.
   — the same chapters, in the shape `epub_loader` returns, so `cli._ingest`
   can load either format through one call. The source is always `None`: a PDF
   has no per-chapter source document to name, and `None` is what tells
-  `ingest.omnibus` there is nothing here it can read.
+  `ingest.volumes` there is nothing here it can read.
 - `extract_metadata(path: str | Path) -> dict[str, str | None]` — best-effort
   `{"title", "author"}` from the PDF's document info dict; blank strings
   (pymupdf's default when unset) are normalized to `None`.
@@ -58,11 +58,13 @@ downstream extraction is format-agnostic.
 - No spoiler-safety-relevant metadata is extracted from PDFs beyond text
   (e.g. no page-image/figure handling) — plain text only, same as epub.
 - **A PDF omnibus cannot be detected, because of the level-1 preference
-  above.** `ingest.omnibus` splits a stitched-together epub by reading the
-  volume boundaries out of its nested table of contents; in a PDF whose
+  above.** `ingest.volumes` finds the books inside a stitched-together epub
+  by reading its nested table of contents; in a PDF whose
   outline nests the same way (level 1 = volume, level 2 = chapter) this
   loader flattens to level 1 first, so each *volume* arrives as one
   "chapter" and the nesting is gone before anything can read it. Fixing it
   means keeping the outline's depth and deciding chapter granularity
   afterwards — a change to how every PDF is chaptered, not just omnibuses,
-  which is why it was not bundled with the epub split.
+  which is why it was not bundled with the epub work. The consequence is
+  narrower than it was: a missed omnibus now costs a citation its volume
+  label, where it used to cost the whole split.

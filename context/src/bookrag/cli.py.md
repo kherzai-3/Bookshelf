@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-22T23:30:00Z
-source_hash: 2c4df0ab4b1d35e5708c2f38abeea85f090221ba
+last_synced: 2026-09-22T20:19:13Z
+source_hash: 8daf8e86bca334a4b48bf10515cbf8d9440351f8
 ---
 
 ## Purpose
@@ -18,11 +18,9 @@ actual logic (see that file's context doc for the real behavior).
   takes an explicit `argv` (rather than always reading `sys.argv`) so tests
   can call it directly without subprocessing.
 - CLI: `bookrag ingest <path> [--title] [--author] [--series NAME]
-  [--series-position N] [--content-type fiction|nonfiction] [--no-auto-link]
-  [--no-split]` —
+  [--series-position N] [--content-type fiction|nonfiction] [--no-auto-link]` —
   `--series-position` is required whenever `--series` is given (rejected
-  with exit code 1 otherwise, before anything is written). `--no-split`
-  keeps a detected omnibus as one book (see the omnibus section below).
+  with exit code 1 otherwise, before anything is written).
   `--content-type`
   defaults to `"fiction"`, is persisted to `metadata.json`, and later
   selects which extraction category/entity-type taxonomy and prompt pair
@@ -78,6 +76,9 @@ actual logic (see that file's context doc for the real behavior).
   routinely share a passage) and capped at `_SOURCES_SHOWN` = 6, because an
   unfiltered list is not a source list - it is the fact dump rank 03 exists
   to remove, printed again with locations attached.
+- `volume_summary_lines(plan) -> list[str]` — what a file turned out to
+  contain when it holds more than one separately published book; empty for
+  the ordinary case. See the omnibus section below.
 - `next_step_lines(book_id, chapter_count) -> list[str]` — the post-ingest
   guidance (the `extract` command, the `--log`/follow recipe, that Ctrl+C is
   safe, the `--provider fake` path). Returns lines so `_print_section` owns
@@ -324,24 +325,13 @@ actual logic (see that file's context doc for the real behavior).
   `content_type` into `format_context` (not just into `answer_question`),
   since it selects which categories render as occurrences vs standing
   description - see `query.py`'s context doc.
-- `_ingest_one` calls `ingest.consolidate.consolidate_fragments` before
+- `_ingest` calls `ingest.consolidate.consolidate_fragments` before
   `sanity_summary`/`classify_ingestion`/`save_book` all run - so every
   downstream consumer sees the (possibly consolidated) chapter list, never
   the raw one. `raw_chapter_count` is threaded through to
   `write_ingestion_report` (as `None` when nothing changed) purely so the
   consolidation note is visible on later review of the report file, not
   just in the terminal at ingest time.
-- **`should_consolidate` is asked once per *file*, by the caller, and only
-  applied per book.** Merging must be per volume - it must never weld the
-  end of one book onto the start of the next - but deciding per volume too
-  produced a visibly inconsistent library on the real five-book Magic Thief
-  omnibus: four volumes merged to a ~2,300-word median while the fifth,
-  whose raw fragments happen to sit just above the 600-word threshold, kept
-  62 chapters at a 826-word median. That is below the 1,500-3,000 range
-  extraction wants and differs from its own sequel for no visible reason.
-  The median is a more stable statistic over a whole file than over a fifth
-  of one. With the decision hoisted, all five volumes land at 21-22
-  chapters and a 2,337-3,702 median.
 
 ### Citing an answer's sources
 - **The tool prints the citations, the model never does.** A small local
@@ -358,37 +348,32 @@ actual logic (see that file's context doc for the real behavior).
   it - the gate treats citations as a render surface, which is the only way
   it reaches them.
 
-### Splitting an omnibus (`_ingest_omnibus`)
+### An omnibus (`volume_summary_lines`)
 - `_ingest` loads via `loader.load_chapters_with_sources` (both loaders
-  expose it), asks `ingest.omnibus.detect_volumes`, and hands off to
-  `_ingest_omnibus` when the file holds more than one book. `_ingest_one`
-  is the per-book sequence both paths share.
-- **Separate `book_id`s wired together with the existing series metadata**,
-  rather than a sub-book field on every chapter. Both make `--chapter 6`
-  mean chapter 6 of book 3, but only this one leaves the rest of the system
-  alone: `facts_as_of`, `series_reading_order`, extraction's cross-book
-  entity seeding and the spoiler-safety tests are already written against
-  `(book_id, chapter_index)` plus a series position, and a third coordinate
-  would have to be taught to each of them.
-- Series name is `--series` or the omnibus's own title; positions run from
-  `--series-position` (default 1), so a reader who already holds books 1-2
-  and ingests a 3-4 bindup gets 3 and 4.
+  expose it) and asks `ingest.volumes.detect_volumes`. A bindup is ingested
+  as **one book with a map of the books inside it**; `save_book` persists
+  the spans and `locate` renders them.
+- **There used to be a second ingest path that split the file into one
+  `book_id` per volume, and it is gone.** It produced the same citation
+  string this does, and cost: every chapter outside a volume deleted (on
+  the real Ranger's Apprentice bindup, an 8,500-character extract from book
+  3), a `--no-split` flag to escape it (against the project's
+  one-ingest-no-options rule), a shared source archive with a dangling
+  `bookrag remove`, and a per-volume `_ingest_one` loop with its own
+  next-steps and summary renderers. See `ingest/volumes.py`'s context doc.
+- Consolidation and detection have to coexist: merging is told the volume
+  seams (`volume_boundaries`) so a merged chapter never spans two books,
+  and the map is moved onto the merged numbering (`remap`). No book in the
+  corpus is both an omnibus and fragment-sized; `tests/test_volumes.py`
+  covers it with a fixture.
 - **Automatic, not a flag to opt into** - the same reasoning as
-  `auto_link_narrator`/`auto_link_title_variants`, and the reason
-  `--split-at` was not built. A reader's flow is download, ingest, extract,
-  chat; a capability they have to know to ask for never runs. The escape
-  hatch points the other way (`--no-split`), and the header says so.
-- Per-volume `next_step_lines` was rejected: fourteen lines repeated five
-  times buries the one thing a reader needs. `omnibus_next_step_lines`
-  prints one combined block listing each `book_id` in reading order, with
-  why the order matters.
-- `omnibus_summary_lines` reports the dropped chapters out loud because
-  that is a **deletion**. On the real Ranger's Apprentice bindup it includes
-  an 8,500-character extract from book 3 that was previously catalogued as
-  the ending of book 2.
-- Only the last volume runs `_incoming_cleanup_notes` (the staging file must
-  survive until every volume has been saved), and only the first passes
-  `copy_source=True`.
+  `auto_link_narrator`/`auto_link_title_variants`. A reader's flow is
+  download, ingest, extract, chat; a capability they have to know to ask
+  for never runs. The detector can only be wrong by being too eager (the
+  alternative is silence), so the recourse is `volume_summary_lines`
+  printing what it found rather than a flag that turns it off.
+- `_VOLUMES_LISTED = 8` caps both that block and `_show`'s: a real file in
+  the corpus holds 24 volumes, and listing all of them buries the count.
 
 ## Public Interface (continued)
 - `classify_ingestion(chapters) -> "chapter-bound" | "text-bound"` —
@@ -448,8 +433,9 @@ actual logic (see that file's context doc for the real behavior).
 ## Dependencies
 - Internal: `bookrag.ingest.epub_loader`, `bookrag.ingest.pdf_loader`,
   `bookrag.ingest.chapter.Chapter`, `bookrag.ingest.consolidate`
-  (`should_consolidate`, `consolidate_fragments`), `bookrag.ingest.omnibus`
-  (`OmnibusPlan`, `detect_volumes`, `volume_chapters`),
+  (`should_consolidate`, `consolidate_fragments`, `fragment_groups`),
+  `bookrag.ingest.volumes` (`VolumePlan`, `detect_volumes`,
+  `volume_boundaries`, `remap`),
   `bookrag.locate.cite_facts`, `bookrag.storage`
   (`save_book`, `load_chapters`, `load_metadata`, `library_root`,
   `incoming_root`), `bookrag.titles.guess_title_author`,

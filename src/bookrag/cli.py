@@ -15,9 +15,9 @@ from bookrag.eval import run_eval, summarize
 from bookrag.extract.pipeline import extract_book, resume_blocker, resume_start_index
 from bookrag.ingest import epub_loader, pdf_loader
 from bookrag.ingest.chapter import Chapter
-from bookrag.ingest.consolidate import consolidate_fragments, should_consolidate
-from bookrag.ingest.omnibus import OmnibusPlan, detect_volumes, volume_chapters
+from bookrag.ingest.consolidate import consolidate_fragments, fragment_groups, should_consolidate
 from bookrag.ingest.vocatives import NarratorAliases, auto_link_plan, detect_narrator_aliases
+from bookrag.ingest.volumes import VolumePlan, detect_volumes, remap, volume_boundaries
 from bookrag.names import person_link_groups
 from bookrag.library import (
     detect_duplicate_entities,
@@ -106,12 +106,6 @@ def main(argv: list[str] | None = None) -> int:
         "--no-auto-link",
         action="store_true",
         help="Report the narrator's other names without linking them (produces the unlinked baseline)",
-    )
-    ingest.add_argument(
-        "--no-split",
-        action="store_true",
-        help="Ingest an omnibus (several books stitched into one file) as a single book, "
-        "keeping the file's straight-through chapter numbering",
     )
 
     extract = subparsers.add_parser("extract", help="Extract character/setting/theme facts for a book")
@@ -283,63 +277,20 @@ def _ingest(args: argparse.Namespace) -> int:
     if not args.author and not metadata.get("author") and author:
         origin_notes.append(f"no author in file metadata - guessed '{author}' from filename")
 
-    plan = None if args.no_split else detect_volumes(args.path, chapters, chapter_sources, title)
-    if plan is not None:
-        return _ingest_omnibus(args, chapters, plan, title=title, author=author, origin_notes=origin_notes)
+    plan = detect_volumes(args.path, chapters, chapter_sources, title)
 
-    saved = _ingest_one(
-        args,
-        chapters,
-        title=title,
-        author=author,
-        series_name=args.series,
-        series_position=args.series_position,
-        parse_notes=origin_notes,
-        cleanup_source=True,
-        consolidate=should_consolidate(chapters),
-    )
-    if saved is None:
-        return 1
-    _print_section("Next steps", next_step_lines(saved[0], saved[1]))
-    return 0
-
-
-def _ingest_one(
-    args: argparse.Namespace,
-    chapters: list[Chapter],
-    *,
-    title: str,
-    author: str | None,
-    series_name: str | None,
-    series_position: int | None,
-    parse_notes: list[str],
-    cleanup_source: bool,
-    consolidate: bool,
-    omnibus: dict | None = None,
-    copy_source: bool = True,
-) -> tuple[str, int] | None:
-    """Consolidate, save and report one book. Returns (book_id, chapters).
-
-    Factored out of `_ingest` so an omnibus can run the whole per-book
-    sequence N times.
-
-    **`consolidate` is decided by the caller, once for the whole file, and
-    only applied here.** Merging must never run across a volume boundary and
-    weld the end of one book onto the start of the next - that part has to be
-    per volume. But asking `should_consolidate` per volume as well produced a
-    visibly inconsistent library on the real five-book Magic Thief omnibus:
-    four volumes merged to a ~2,300-word median and the fifth, whose raw
-    fragments happen to sit just above the 600-word threshold, kept 62
-    chapters at a 826-word median - below the 1,500-3,000 range extraction
-    wants, and different from its own sequel for no reason a reader could
-    see. The median is a more stable statistic over the whole file than over
-    a fifth of it.
-    """
-    parse_notes = list(parse_notes)
     raw_chapter_count = len(chapters)
-    if consolidate:
-        chapters = consolidate_fragments(chapters)
-        parse_notes.append(
+    if should_consolidate(chapters):
+        # Consolidation renumbers chapters, so a volume map made against the
+        # raw fragments has to move with them - and merging must not run
+        # across a volume boundary in the first place, or a chapter would
+        # belong to two books at once.
+        boundaries = volume_boundaries(plan)
+        groups = fragment_groups(chapters, boundaries=boundaries)
+        chapters = consolidate_fragments(chapters, boundaries=boundaries)
+        if plan is not None:
+            plan = remap(plan, groups)
+        origin_notes.append(
             f"consolidated {raw_chapter_count} raw fragments into {len(chapters)} chapters"
             " (they were too small to extract well independently)"
         )
@@ -350,23 +301,23 @@ def _ingest_one(
             chapters,
             title=title,
             author=author,
-            series_name=series_name,
-            series_position=series_position,
+            series_name=args.series,
+            series_position=args.series_position,
             content_type=args.content_type,
-            omnibus=omnibus,
-            copy_source=copy_source,
+            volumes=plan.as_metadata() if plan else None,
         )
     except Exception as exc:
         # save_book rolls back its own partial book_dir on failure - nothing
         # left behind here to clean up.
         print(f"Failed to save '{title}' to the library: {exc}")
-        return None
+        return 1
 
     print(f"Ingested '{title}' as '{book_id}' ({len(chapters)} chapters)")
-    if series_name:
-        print(f"  series: {series_name} #{series_position}")
+    if args.series:
+        print(f"  series: {args.series} #{args.series_position}")
 
-    _print_section("Parsing", parse_notes)
+    _print_section("Parsing", origin_notes)
+    _print_section("Volumes", volume_summary_lines(plan))
     _print_section("Sanity check", sanity_summary(chapters))
     found = detect_narrator_aliases(chapters)
     _print_section("Names for the narrator", narrator_alias_lines(found))
@@ -380,127 +331,42 @@ def _ingest_one(
         book_id, chapters, raw_chapter_count=raw_chapter_count if raw_chapter_count != len(chapters) else None
     )
     files = [f"wrote {report_path}"]
-    if not copy_source:
-        files.append("source file not copied again - one archive copy is kept, see 'Omnibus' below")
-    if cleanup_source:
-        files.extend(_incoming_cleanup_notes(args.path))
+    files.extend(_incoming_cleanup_notes(args.path))
     _print_section("Files", files)
-    return book_id, len(chapters)
-
-
-def _ingest_omnibus(
-    args: argparse.Namespace,
-    chapters: list[Chapter],
-    plan: OmnibusPlan,
-    *,
-    title: str,
-    author: str | None,
-    origin_notes: list[str],
-) -> int:
-    """Ingest each book inside a stitched-together file as its own book.
-
-    **Separate `book_id`s, wired together with the series metadata that
-    already exists** - rather than a sub-book field on every chapter. Both
-    make `--chapter 6` mean chapter 6 of book 3, but only this one leaves
-    every other part of the system unchanged: `facts_as_of`,
-    `series_reading_order`, extraction's cross-book entity seeding and the
-    spoiler-safety tests are all already written against (book_id,
-    chapter_index) and a series position. A sub-book field would need each of
-    them taught about a third coordinate.
-
-    The cost is that it is decided at ingest and undone by re-ingesting.
-    That is the right side to be wrong on: the split changes what a chapter
-    number *means*, so a library holding both interpretations at once would
-    be worse than either.
-    """
-    volumes = plan.volumes
-    series_name = args.series or title
-    first_position = args.series_position or 1
-    consolidate = should_consolidate(chapters)
-
-    print(f"'{title}' is {len(volumes)} books stitched into one file.")
-    print(f"  Its table of contents names each one, and {plan.coverage:.0%} of the text falls inside them.")
-    print("  Ingesting them separately, so that 'chapter 6' means chapter 6 of one of")
-    print("  these books - a chapter a reader can find in their own copy - rather than")
-    print("  a position in the whole file.")
-    print("  Wrong? Re-run with --no-split to keep it as one book.")
-    for note in origin_notes:
-        print(f"  {note}")
-
-    book_ids: list[tuple[str, int]] = []
-    source_holder: str | None = None
-    for offset, volume in enumerate(volumes):
-        print()
-        saved = _ingest_one(
-            args,
-            volume_chapters(chapters, volume),
-            title=volume.title,
-            author=author,
-            series_name=series_name,
-            series_position=first_position + offset,
-            parse_notes=[f"from the '{volume.label}' section of {args.path.name}"],
-            # Only the last volume may delete the staging file, and only one
-            # volume archives the source - the others would be identical bytes.
-            cleanup_source=volume is volumes[-1],
-            consolidate=consolidate,
-            omnibus={
-                "title": title,
-                "volume": offset + 1,
-                "of": len(volumes),
-                "source_book_id": source_holder,
-            },
-            copy_source=source_holder is None,
-        )
-        if saved is None:
-            return 1
-        source_holder = source_holder or saved[0]
-        book_ids.append(saved)
-
-    _print_section("Omnibus", omnibus_summary_lines(plan, series_name, source_holder or ""))
-    _print_section("Next steps", omnibus_next_step_lines(book_ids))
+    _print_section("Next steps", next_step_lines(book_id, len(chapters)))
     return 0
 
 
-def omnibus_summary_lines(plan: OmnibusPlan, series_name: str, source_holder: str) -> list[str]:
-    """What the split did to the file as a whole, said once at the end.
+_VOLUMES_LISTED = 8
 
-    The dropped-chapter count is the line that earns this section. Splitting
-    discards everything outside a volume - the cover, a shared contents page,
-    the about-the-author, and (a real case in Ranger's Apprentice) an 8,500-
-    character extract from book 3 that was previously extracted as if it were
-    the ending of book 2. That is a deletion, so it gets said out loud.
+
+def volume_summary_lines(plan: VolumePlan | None) -> list[str]:
+    """What the file turned out to contain, when it contains more than one
+    book. Empty for the ordinary case, which is most books.
+
+    Says it at ingest even though nothing about the ingest changed, because
+    this is the one moment a reader is looking at the tool's reading of their
+    file. If the detector is wrong - it can only be wrong by being *too
+    eager*, since the alternative is silence - this is where they would see
+    it, and the fix is to say so rather than to add a flag that turns it off.
     """
-    lines = [f"{len(plan.volumes)} books, grouped as series '{series_name}'"]
-    if plan.dropped_chapters:
+    if plan is None:
+        return []
+    lines = [
+        f"This file holds {len(plan.volumes)} separately published books "
+        f"({plan.coverage:.0%} of its text falls inside them).",
+        "Ingested as one book - chapter numbers are unchanged - but a citation",
+        "will name the volume and count chapters from its start, so it points at",
+        "something a reader can find:",
+    ]
+    lines.extend(f"  {volume.label} -> {volume.title}" for volume in plan.volumes[:_VOLUMES_LISTED])
+    if len(plan.volumes) > _VOLUMES_LISTED:
+        lines.append(f"  ... and {len(plan.volumes) - _VOLUMES_LISTED} more")
+    if plan.unlabelled_chapters:
         lines.append(
-            f"dropped {plan.dropped_chapters} chapters ({plan.dropped_words:,} words, "
-            f"{1 - plan.coverage:.0%} of the file) that sit outside every book - "
-            "covers, contents, about-the-author, previews of the next book"
+            f"{plan.unlabelled_chapters} chapters sit outside every volume (covers, a shared "
+            "contents page, an about-the-author) and are cited by the file's own title"
         )
-    lines.append(f"the source file is archived once, under '{source_holder}'")
-    return lines
-
-
-def omnibus_next_step_lines(book_ids: list[tuple[str, int]]) -> list[str]:
-    """One combined next-steps block instead of one per volume.
-
-    `next_step_lines` is fourteen lines long and mostly explains that
-    extraction takes hours. Repeated five times it buries the thing a reader
-    needs, which is the list of book_ids the file turned into and the order to
-    run them in.
-    """
-    lines = ["Extract each book, in reading order (each takes hours on a local model):"]
-    lines.extend(f"  bookrag extract {book_id} --log   # {count} chapters" for book_id, count in book_ids)
-    lines.extend(
-        [
-            "",
-            "Order matters: extraction seeds each book with the characters the",
-            "earlier books established, so running them out of order splits them.",
-            "",
-            "Or try the whole pipeline instantly, no model needed:",
-            f"  bookrag extract {book_ids[0][0]} --provider fake",
-        ]
-    )
     return lines
 
 
@@ -1017,16 +883,15 @@ def _show(args: argparse.Namespace) -> int:
     print(f"  chapters: {b.chapter_count}")
     if b.series:
         print(f"  series: {b.series['name']} #{b.series['position']}")
-    if b.omnibus:
-        # Provenance a reader needs to make sense of the index: five books
-        # naming one file as their source is otherwise unexplained.
-        print(
-            f"  from: book {b.omnibus.get('volume')} of {b.omnibus.get('of')} "
-            f"in '{b.omnibus.get('title')}' (one file, split at ingest)"
-        )
-        holder = b.omnibus.get("source_book_id")
-        if holder:
-            print(f"    the source file itself is archived under '{holder}'")
+    if b.volumes:
+        # The one place a reader can check the detector's reading of their
+        # file after the fact, and the only visible sign that citations will
+        # name a book the library index never lists.
+        print(f"  volumes: {len(b.volumes)} separately published books stitched into this file")
+        for volume in b.volumes[:_VOLUMES_LISTED]:
+            print(f"    chapters {volume['start']}-{volume['end']}: {volume['title']}")
+        if len(b.volumes) > _VOLUMES_LISTED:
+            print(f"    ... and {len(b.volumes) - _VOLUMES_LISTED} more")
     if b.fact_count is None:
         print(f"  extraction: not yet extracted (bookrag extract {b.book_id})")
     else:

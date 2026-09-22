@@ -32,8 +32,39 @@ def should_consolidate(chapters: list[Chapter]) -> bool:
     return median < CONSOLIDATION_MEDIAN_WORDS_THRESHOLD
 
 
+def fragment_groups(
+    chapters: list[Chapter],
+    target_words: int = CONSOLIDATION_TARGET_WORDS,
+    boundaries: frozenset[int] = frozenset(),
+) -> list[list[int]]:
+    """Which input fragments end up in which merged chapter, as indices.
+
+    Split out from `consolidate_fragments` so a caller holding spans over the
+    *input* indices can move them onto the output - `ingest.volumes.remap` is
+    the one caller, turning "book 3 is chapters 40-79" into the same statement
+    about merged chapters. Returning indices rather than chapters keeps that
+    honest: a `Chapter.index` is set by whoever built it and may or may not be
+    its position in this list.
+    """
+    groups: list[list[int]] = []
+    buffer: list[int] = []
+    for position, chapter in enumerate(chapters):
+        if buffer and position in boundaries:
+            groups.append(buffer)
+            buffer = []
+        buffer.append(position)
+        if sum(len(chapters[i].text.split()) for i in buffer) >= target_words:
+            groups.append(buffer)
+            buffer = []
+    if buffer:
+        groups.append(buffer)
+    return groups
+
+
 def consolidate_fragments(
-    chapters: list[Chapter], target_words: int = CONSOLIDATION_TARGET_WORDS
+    chapters: list[Chapter],
+    target_words: int = CONSOLIDATION_TARGET_WORDS,
+    boundaries: frozenset[int] = frozenset(),
 ) -> list[Chapter]:
     """Greedily merges consecutive fragments until reaching target_words,
     re-indexing from 0, purely by word count - a fragment's title is never
@@ -56,29 +87,23 @@ def consolidate_fragments(
     merge a trailing under-sized remainder backward into the previous
     chapter - extract.pipeline.MIN_NARRATIVE_WORDS and the extraction
     prompt's own non-narrative self-censoring already provide a safety net
-    for a genuinely tiny leftover."""
-    merged: list[Chapter] = []
-    buffer: list[Chapter] = []
+    for a genuinely tiny leftover.
 
-    def flush() -> None:
-        if not buffer:
-            return
-        title = next((c.title for c in buffer if c.title), None)
+    `boundaries` names input positions that must begin a new chapter whatever
+    the word count says. Only `ingest.volumes` passes any: merging the last
+    page of one book in a bindup onto the first page of the next produces a
+    chapter that belongs to two books at once."""
+    merged: list[Chapter] = []
+    for group in fragment_groups(chapters, target_words, boundaries):
+        buffer = [chapters[i] for i in group]
         merged.append(
             Chapter(
                 index=len(merged),
-                title=title,
+                title=next((c.title for c in buffer if c.title), None),
                 text="\n\n".join(c.text for c in buffer),
                 pages=_merged_pages(buffer),
             )
         )
-        buffer.clear()
-
-    for chapter in chapters:
-        buffer.append(chapter)
-        if sum(len(c.text.split()) for c in buffer) >= target_words:
-            flush()
-    flush()
     return merged
 
 

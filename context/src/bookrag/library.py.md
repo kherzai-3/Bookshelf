@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/library.py
-last_synced: 2026-09-22T21:40:00Z
-source_hash: 147c68172d711aa19de6e1bb456d2b5bbbf13aed
+last_synced: 2026-09-22T20:19:13Z
+source_hash: 437e7a316f2c7fdbf6cd5c51cfb2ffa175d09e56
 ---
 
 ## Purpose
@@ -19,11 +19,12 @@ module's functions.
 ## Public Interface
 - `BookSummary` (dataclass) — `book_id, title, author, series, orphaned,
   content_type, chapter_count, fact_count, chapters_extracted, entity_count,
-  omnibus`, plus a `partial` property (see Key Decisions). `omnibus` is
-  `metadata.json`'s `{title, volume, of, source_book_id}` block (see
-  `ingest/omnibus.py`) and is `None` for almost every book; it is carried
-  here only so `cli._show` can say which stitched-together file a book came
-  out of, and which sibling holds the archived source.
+  volumes`, plus a `partial` property (see Key Decisions). `volumes` is
+  `metadata.json`'s list of `{title, label, start, end}` spans (see
+  `ingest/volumes.py`) and is `None` for almost every book; it is carried
+  here only so `cli._show` can list the separately published books stitched
+  into one file, which is the one place a reader can check the detector's
+  reading of it after ingest has scrolled away.
 - `list_books(root=None) -> list[BookSummary]` — one summary per
   `index.json` entry.
 - `show_book(book_id, root=None) -> BookSummary` — raises `ValueError` if

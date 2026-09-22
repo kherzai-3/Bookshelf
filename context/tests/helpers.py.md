@@ -1,7 +1,7 @@
 ---
 source: tests/helpers.py
-last_synced: 2026-09-22T23:30:00Z
-source_hash: a82713461c10f1c8c4440d09af5a5773be224b7e
+last_synced: 2026-09-22T20:19:13Z
+source_hash: 2ce7bf9a09e6f23967ba68ea52b7768b20512ae4
 ---
 
 ## Purpose
@@ -61,7 +61,8 @@ have something real to assert against.
   is the filename.
 - `build_omnibus_epub(path, volume_labels=..., chapters_per_volume=3,
   front_matter=2, back_matter=1, title="An Omnibus",
-  appendix_in_last_volume=0)` — several books stitched into one file, with
+  appendix_in_last_volume=0, chapter_words=...)` — several books stitched
+  into one file, with
   one nested table-of-contents section per book and small front/back matter
   outside every section. Shaped from the real Ranger's Apprentice bindup and
   Magic Thief collection. `appendix_in_last_volume` nests a further group
@@ -69,7 +70,7 @@ have something real to assert against.
   Places"), which is what makes the depth-0-only restriction testable.
 - `build_anchored_sections_epub(path)` — **one** novel whose nested sections
   are anchors inside a single spine document: the Project Gutenberg Moby
-  Dick shape, and the false positive `ingest.omnibus` exists to refuse.
+  Dick shape, and the false positive `ingest.volumes` exists to refuse.
 - `build_thin_sections_epub(path, sectioned_chapters=2, loose_chapters=6)` —
   nested sections holding a minority of the text.
 
@@ -110,6 +111,11 @@ have something real to assert against.
   `build_omnibus_epub(chapters_per_volume=1, front_matter=0, back_matter=0)`
   isolates the size floor.
 - Every synthetic omnibus chapter clears
-  `CONSOLIDATION_MEDIAN_WORDS_THRESHOLD` on its own, so a split fixture's
+  `CONSOLIDATION_MEDIAN_WORDS_THRESHOLD` on its own, so the fixture's
   chapter count is the one the test asked for and consolidation never has to
-  be reasoned about alongside the split.
+  be reasoned about alongside volume detection. `chapter_words` overrides
+  that for the one test that wants the two to interact: a page-scanned
+  bindup, where merging has to respect the volume seams. Its value has to
+  sit under the consolidation threshold *and* multiply up past
+  `MIN_VOLUME_WORDS` across a volume, or one of the two mechanisms silently
+  does not fire.

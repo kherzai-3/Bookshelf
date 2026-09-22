@@ -1,7 +1,7 @@
 ---
 source: tests/test_locate.py
-last_synced: 2026-09-22T23:30:00Z
-source_hash: e2a505b3a09294c8ce5294fc269c442f5c2d2a46
+last_synced: 2026-09-22T20:19:13Z
+source_hash: dc3ded968bac691661c3a27b832936b70a45626d
 ---
 
 ## Purpose
@@ -9,8 +9,8 @@ Covers `bookrag.locate`: finding the passage a fact came from, and rendering
 a location a reader can act on.
 
 ## Public Interface
-21 tests in three groups — finding the passage, rendering the location, and
-reading the library.
+25 tests in four groups — finding the passage, rendering the location,
+reading the library, and the volume map.
 
 ## Key Decisions
 - **Two properties are guarded and only one is "does it find the passage".**
@@ -35,6 +35,13 @@ reading the library.
   the capitalised-stopword rule, not learning names from the chapter,
   removing the pair window, and letting a title outrank pages each fail
   exactly the tests that describe them.
+
+- **The volume tests assert the renumbering, not just the name.** A
+  citation reading "The Burning Bridge, chapter 48" would name the right
+  book and a chapter number that appears in no copy of it, which is the
+  failure mode a name-only assertion cannot see. One test does the
+  arithmetic directly (`volume_at`), one does it through a real
+  `save_book`/`cite` round trip.
 
 ## Dependencies
 - Internal: `bookrag.locate`, `bookrag.ingest.chapter.Chapter`,

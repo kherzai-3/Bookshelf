@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/consolidate.py
-last_synced: 2026-09-22T23:30:00Z
-source_hash: f1b073099ee73d5ccc85d18012fd9d95550c6e8a
+last_synced: 2026-09-22T20:19:13Z
+source_hash: 20b1e90e38d38a23527eb6b1171075515d5730ff
 ---
 
 ## Purpose
@@ -22,9 +22,12 @@ introduced on one page and elaborated on the next is two unrelated calls).
 - `CONSOLIDATION_TARGET_WORDS = 2000` — merge target size.
 - `should_consolidate(chapters: list[Chapter]) -> bool` — true when the
   *median* fragment word count is below the threshold.
-- `consolidate_fragments(chapters: list[Chapter], target_words: int = CONSOLIDATION_TARGET_WORDS) -> list[Chapter]`
+- `consolidate_fragments(chapters, target_words=CONSOLIDATION_TARGET_WORDS, boundaries=frozenset()) -> list[Chapter]`
   — greedily merges consecutive fragments until reaching `target_words`,
   re-indexing from 0.
+- `fragment_groups(chapters, target_words=..., boundaries=...) -> list[list[int]]`
+  — the same grouping decision, as input indices rather than merged
+  chapters.
 
 ## Key Decisions
 - **Triggers on fragment *size* (median word count), not on
@@ -60,6 +63,21 @@ introduced on one page and elaborated on the next is two unrelated calls).
   that - a fragment's *first* title (if any) is still preserved on
   whichever merged chapter it ends up in, just no longer treated as a
   boundary.
+- **`boundaries` is a hard flush, and only `ingest.volumes` passes any.**
+  A bindup's volume seams: merging the last page of one book onto the first
+  page of the next produces a chapter that belongs to two books at once, and
+  a citation would name whichever won. This is the one signal allowed to
+  override word count, and it is allowed because it is structural rather
+  than inferred from title text - the distinction the title-boundary bug
+  above turned on. No book in the corpus is both an omnibus and
+  fragment-sized, so no current data exercises it; a page-scanned bindup is
+  an ordinary thing to own.
+- **`fragment_groups` is split out and returns indices, not chapters.**
+  `ingest.volumes.remap` holds spans over the *input* chapters and has to
+  move them onto the output, which needs to know which inputs became which
+  merged chapter. Indices rather than `Chapter` objects because a
+  `Chapter.index` is set by whoever built it and is not guaranteed to be its
+  position in the list handed here.
 - **A trailing under-`target_words` remainder is not merged backward into
   the previous chapter.** `extract.pipeline.MIN_NARRATIVE_WORDS` and the
   extraction prompt's own non-narrative self-censoring already provide a

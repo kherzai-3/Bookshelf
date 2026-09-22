@@ -29,7 +29,7 @@ def load_chapters(path: str | Path) -> list[Chapter]:
 def load_chapters_with_sources(path: str | Path) -> list[tuple[str, Chapter]]:
     """Every chapter paired with the spine document it came from.
 
-    The pairing exists for `ingest.omnibus`, which has to turn a table-of-
+    The pairing exists for `ingest.volumes`, which has to turn a table-of-
     contents entry (an href into a spine document) into a chapter index.
     That mapping cannot be recovered afterwards: `_split_by_headings` turns
     one spine document into several chapters for some books and drops empty

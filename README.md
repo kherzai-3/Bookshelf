@@ -254,9 +254,9 @@ bookrag ingest "book2.epub" --series "The Saga" --series-position 2
 # "fiction" - not auto-detected, so this must be passed explicitly.
 bookrag ingest "atomic-habits.epub" --content-type nonfiction
 
-# an omnibus/bindup is split into one book per volume automatically (see
-# below); --no-split keeps it as one book with straight-through numbering.
-bookrag ingest "ranger-s-apprentice-1-2-bindup.epub" --no-split
+# an omnibus/bindup is ingested as one book, with the volumes inside it
+# detected and used to label citations (see below). Nothing to pass.
+bookrag ingest "ranger-s-apprentice-1-2-bindup.epub"
 ```
 
 **Quote the path.** Book filenames routinely contain spaces and apostrophes,
@@ -327,75 +327,69 @@ On success, if the source file lives under `data/incoming/` (or whatever
 copied into the library, so there's no reason to keep the staging copy. A
 source file ingested from anywhere else is never touched.
 
-#### Splitting an omnibus into real books, automatically
+#### Naming the books inside an omnibus, automatically
 
 A bindup, a "complete collection" or a fan-compiled series file holds several
-separately-published books end to end. Ingested whole, it becomes one book
+separately-published books end to end. Ingested naively, it becomes one book
 with five "Chapter 1"s, and every chapter number the tool reports afterwards
 is one the reader cannot find in their own copy.
 
-Ingest detects this from the file's own table of contents and writes **one
-book per volume**, grouped as a series:
+Ingest detects the volumes from the file's own table of contents and records
+where each one starts and ends. The file stays **one book** — chapter numbers
+are unchanged — and citations name the volume instead of the file:
 
 ```
-'The Magic Thief Complete Collection: Books 1-5' is 5 books stitched into one file.
-  Its table of contents names each one, and 100% of the text falls inside them.
-  ...
-  Wrong? Re-run with --no-split to keep it as one book.
+Ingested 'The Magic Thief Complete Collection: Books 1-5' as
+'the-magic-thief-complete-collection-books-1-5' (84 chapters)
 
-Ingested 'The Magic Thief' as 'the-magic-thief' (22 chapters)
-  series: The Magic Thief Complete Collection: Books 1-5 #1
-...
-Omnibus:
-  5 books, grouped as series 'The Magic Thief Complete Collection: Books 1-5'
-  dropped 10 chapters (303 words, 0% of the file) that sit outside every book
-  the source file is archived once, under 'the-magic-thief'
+Volumes:
+  This file holds 5 separately published books (99.9% of its text falls inside them).
+  Ingested as one book - chapter numbers are unchanged - but a citation
+  will name the volume and count chapters from its start, so it points at
+  something a reader can find:
+    The Magic Thief -> The Magic Thief
+    The Magic Thief: Lost -> The Magic Thief: Lost
+    ...
 ```
 
-Each volume gets its own `book_id` and its own chapter numbering from 0, so
-`--chapter 6` means chapter 6 of that book. The series metadata keeps them
-wired together, which is what makes extraction seed each book with the
-previous books' characters and keeps spoiler scoping working across the set —
-so **extract them in reading order**, which the printed next steps list for
-you. `--series`/`--series-position` still work: the position given becomes
-the first volume's, and the rest follow.
+So a fact from chapter 46 of the file is cited as *"The Burning Bridge,
+Chapter Fourteen"*, and one from chapter 1847 of a 24-volume webnovel as
+*"Reverend Insanity Volume 12, Chapter 1187"*. `bookrag show <book_id>` lists
+the volumes and their chapter ranges if you want to check what it decided.
 
-Chapters outside every volume (the shared cover, contents page,
-about-the-author, a preview of the next book) are **dropped**, and the count
-is reported. On the real Ranger's Apprentice bindup that includes an extract
-from book 3 which was previously catalogued as the ending of book 2.
-
-**It refuses far more often than it fires**, deliberately: splitting a book
-that is not an omnibus shatters one novel into several, silently. A candidate
-set of volumes must not overlap, must hold at least 85% of the file's text,
-and each must be at least 1,000 words. Measured over the eight books in the
-development library:
+**It refuses far more often than it fires**, deliberately: inventing volumes
+in a book that has none puts a wrong book title on a citation, silently. A
+candidate set must not overlap, must hold at least 85% of the file's text,
+and each volume must be at least 1,000 words. Measured over the eight books
+in the development library:
 
 | book | nested TOC sections | verdict |
 | --- | --- | --- |
-| Ranger's Apprentice 1 & 2 Bindup | 2 | split — 98.4% coverage |
-| The Magic Thief Complete Collection | 5 | split — 99.9% coverage |
-| Reverend Insanity (24 volumes) | 24 | split — 100% coverage |
-| Moby Dick (Project Gutenberg) | 5 | **left whole** — sections overlap, 45.2% coverage |
-| The Eye of the World, The Perfect Run, Atomic Habits | 0 | left whole |
+| Ranger's Apprentice 1 & 2 Bindup | 2 | 2 volumes — 98.4% coverage |
+| The Magic Thief Complete Collection | 5 | 5 volumes — 99.9% coverage |
+| Reverend Insanity (24 volumes) | 24 | 24 volumes — 100% coverage |
+| Moby Dick (Project Gutenberg) | 5 | **no volumes** — sections overlap, 45.2% coverage |
+| The Eye of the World, The Perfect Run, Atomic Habits | 0 | no volumes |
 
 Moby Dick is the case that sets the guards: its five nested sections
 ("ETYMOLOGY.", "CHAPTER 100. Leg and Arm.", "Epilogue", …) are typesetting
 artifacts pointing into a single document, not volumes.
 
+> **This used to split the file into one book per volume, and no longer
+> does.** The split produced the same citation string and charged a lot for
+> it: every chapter outside a volume was deleted, it needed a `--no-split`
+> flag to escape, and the source file was archived once and shared by a
+> back-reference between books. A citation is a *rendered* location — what
+> the database keys a chapter as never mattered.
+
 Limits worth knowing:
 - **epub only.** A PDF outline can nest too, but `pdf_loader` flattens it to
   level 1, so the nesting is gone before the detector sees it.
-- **Decided at ingest, undone by re-ingesting** (`--no-split`). The split
-  changes what a chapter number means, so a library holding both readings at
-  once would be worse than either. Books already in your library are
-  unaffected until you re-ingest them.
-- The **series name** is the omnibus's own title unless you pass `--series`.
-  That is often clunky ("Ranger's Apprentice 1 & 2 Bindup"); `--series` is
-  the fix.
-- The source file is archived **once**, under the first volume, rather than
-  copied into each — 24 identical copies of a 12 MB webnovel is 296 MB for
-  an archive nothing reads. `bookrag show` names which book holds it.
+- **Detected at ingest**, so books already in your library gain volume labels
+  only when you re-ingest them.
+- Nothing groups the volumes as a series. When a bindup was split into
+  separate books that mattered, because extraction seeds each book with the
+  previous books' characters; one book has no such seam to bridge.
 
 #### Linking a narrator's names, automatically
 
@@ -774,9 +768,11 @@ The label is the best thing your book actually offers, in this order:
    itself has no heading, which is how most books get one.
 3. **`chapter N`**, the bare index, when the book offers nothing else.
 
-For a split omnibus the volume is named, not the file it came from — "The
-Burning Bridge, Chapter Fourteen", never "Ranger's Apprentice 1 & 2 Bindup,
-chapter 48".
+Inside an omnibus the volume is named, not the file — "The Burning Bridge,
+Chapter Fourteen", never "Ranger's Apprentice 1 & 2 Bindup, chapter 48" — and
+an untitled chapter is counted from the volume's own start, not the file's.
+See [Naming the books inside an
+omnibus](#naming-the-books-inside-an-omnibus-automatically).
 
 **A quote is shown only when the match is confident.** Measured against 49
 real extracted statements, 40 got a quote and 39 of those were correct
@@ -972,11 +968,13 @@ only guards what it is pointed at.
   though chapter boundaries may still be roughly right.
 - No de-duplication across repeated ingests of the same book — re-ingesting
   the same file creates a second `book_id` (e.g. `the-hobbit-2`).
-- ~~A single file containing several books is ingested as one long book.~~
-  **Resolved for epubs whose table of contents names the volumes** — ingest
-  now writes one book per volume, grouped as a series (see [Splitting an
-  omnibus into real books](#splitting-an-omnibus-into-real-books-automatically)).
-  What remains: **a PDF omnibus is still ingested whole**, because
+- ~~A single file containing several books gives chapter numbers a reader
+  cannot find in their own copy.~~ **Resolved for epubs whose table of
+  contents names the volumes** — ingest records where each volume starts and
+  ends, and citations name the volume and count from its start (see [Naming
+  the books inside an
+  omnibus](#naming-the-books-inside-an-omnibus-automatically)).
+  What remains: **a PDF omnibus is not detected**, because
   `pdf_loader` flattens the outline to level 1 before anything can read the
   nesting; and an epub whose volumes are *not* marked in its table of
   contents (books concatenated by hand, or a TOC that lists every chapter
@@ -1366,23 +1364,28 @@ only guards what it is pointed at.
     a planning pass, starting with that experiment.
 - ~~A single file containing several books ("omnibus"/"bindup") is treated
   as one long book.~~ **Built**, for the epub case. Ingest reads the volume
-  boundaries out of the file's own nested table of contents and writes N
-  separate `book_id`s wired together with the existing series metadata —
-  the option this entry guessed was probably right, and was, because every
-  other part of the system already addresses a chapter as
-  `(book_id, chapter_index)` plus a series position and needed no change at
-  all. See [Splitting an omnibus into real
-  books](#splitting-an-omnibus-into-real-books-automatically) for the
+  boundaries out of the file's own nested table of contents and records
+  where each volume starts and ends; citations name the volume and count
+  chapters from its start. See [Naming the books inside an
+  omnibus](#naming-the-books-inside-an-omnibus-automatically) for the
   detection rules and the measurements behind them.
 
-  Two pieces of the original guess turned out wrong. A *repeated title
+  Three pieces of the original guess turned out wrong. A *repeated title
   pattern* or a *restarting chapter numbering* was not needed and would not
   have worked: Reverend Insanity's 24 volumes number their chapters
   1–2334 straight through, and Magic Thief's volume titles share a prefix
-  rather than repeating. And an explicit `--split-at` flag was not built, on
+  rather than repeating. An explicit `--split-at` flag was not built, on
   the same reasoning as the alias work — a reader's flow is download,
   ingest, extract, chat, and a flag they have to know to type is a feature
-  that never runs. The escape hatch points the other way: `--no-split`.
+  that never runs.
+
+  And **splitting the file was not needed at all** — which took building it
+  to find out. The first version wrote one `book_id` per volume. It produced
+  exactly the citation string the span map produces, and charged for it:
+  every chapter outside a volume was deleted, a `--no-split` flag existed to
+  escape it, and one source file was archived under one volume and
+  back-referenced by its siblings. The deliverable was always a *rendered*
+  location; what the database keys a chapter as never mattered.
 
   Still open: **PDF omnibuses**. `pdf_loader` flattens the outline to level 1
   entries, so a nested PDF arrives as one "chapter" per volume and the
@@ -1475,8 +1478,9 @@ only guards what it is pointed at.
   database keys a chapter as never mattered. That reframing is why the quote
   — not the chapter number, not the page — turned out to be the primary
   locator: it is the only part of a citation that survives a different
-  edition. It also means the omnibus split was never strictly a prerequisite,
-  though it does make the labels better.
+  edition. It also means the omnibus split was never a prerequisite — the
+  split has since been removed and replaced by a volume *label*, which
+  produces the same citation string and deletes nothing.
 
   Two things this entry did not anticipate, both found by measuring:
   - **Most books already knew their chapter names and ingest was discarding

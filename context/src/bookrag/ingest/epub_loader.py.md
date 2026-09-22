@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/epub_loader.py
-last_synced: 2026-09-22T23:30:00Z
-source_hash: bb92e0487439915b708c4f1227ba4477f92d9423
+last_synced: 2026-09-22T20:19:13Z
+source_hash: 669d73338c4a0373ca94cc042216d8b7464b7279
 ---
 
 ## Purpose
@@ -22,7 +22,7 @@ settings, themes) can be scoped per chapter for spoiler-safety.
   taken from the table of contents when the document itself has no heading.
 
 ## Key Decisions
-- **The spine provenance exists for `ingest.omnibus`, and it cannot be
+- **The spine provenance exists for `ingest.volumes`, and it cannot be
   recovered any other way.** That module turns a table-of-contents entry (an
   href into a spine document) into a chapter index, and `_split_by_headings`
   makes chapter index and spine position not line up: one spine document

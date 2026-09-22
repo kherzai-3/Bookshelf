@@ -226,8 +226,9 @@ def build_fragmented_epub(path: Path, fragment_count: int = 40, words_per_fragme
 
 
 # Each synthetic omnibus chapter clears CONSOLIDATION_MEDIAN_WORDS_THRESHOLD
-# on its own, so a split fixture's chapter count is the one the test asked
-# for and consolidation never has to be reasoned about alongside it.
+# on its own, so the fixture's chapter count is the one the test asked for and
+# consolidation never has to be reasoned about alongside it. A test that wants
+# the two to interact passes a smaller `chapter_words`.
 _OMNIBUS_CHAPTER_WORDS = CONSOLIDATION_MEDIAN_WORDS_THRESHOLD + 100
 
 
@@ -239,14 +240,15 @@ def build_omnibus_epub(
     back_matter: int = 1,
     title: str = "An Omnibus",
     appendix_in_last_volume: int = 0,
+    chapter_words: int = _OMNIBUS_CHAPTER_WORDS,
 ) -> None:
-    """Several books stitched into one file, the shape `ingest.omnibus` splits:
+    """Several books stitched into one file, the shape `ingest.volumes` maps:
     a nested table-of-contents section per book, with front and back matter
     sitting outside every section.
 
     Modelled on the real Ranger's Apprentice bindup and the five-book Magic
     Thief collection - both nest exactly this way, and both are what the
-    thresholds in `ingest.omnibus` were measured against. The front/back matter
+    thresholds in `ingest.volumes` were measured against. The front/back matter
     is deliberately tiny so the volumes still clear `MIN_TEXT_COVERAGE`; a
     fixture where they don't is `build_thin_sections_epub`.
 
@@ -279,7 +281,7 @@ def build_omnibus_epub(
             add(
                 f"v{volume}c{number}.xhtml",
                 f"Chapter {number}",
-                f"Volume {volume} chapter {number}. {_bulk_filler(_OMNIBUS_CHAPTER_WORDS)}",
+                f"Volume {volume} chapter {number}. {_bulk_filler(chapter_words)}",
             )
             for number in range(1, chapters_per_volume + 1)
         ]

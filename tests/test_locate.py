@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from bookrag.ingest.chapter import Chapter
-from bookrag.locate import Citation, cite, cite_facts, find_passage
+from bookrag.locate import Citation, cite, cite_facts, find_passage, volume_at
 from bookrag.query import Fact
 from bookrag.storage import save_book
 
@@ -165,6 +165,7 @@ def _citation(**kwargs) -> Citation:
     base = dict(
         book_title="A Book",
         volume=None,
+        volume_chapter=None,
         chapter_index=3,
         chapter_title=None,
         pages=None,
@@ -191,14 +192,28 @@ def test_a_book_with_neither_still_gets_a_location() -> None:
     assert _citation().where() == "A Book, chapter 3"
 
 
-def test_a_split_omnibus_volume_is_named_rather_than_the_file_it_came_from() -> None:
-    """The point of the omnibus split, carried through to the citation: "The
-    Burning Bridge, Chapter Fourteen" is usable, "Ranger's Apprentice 1 & 2
-    Bindup, chapter 48" is the thing the reader was trying to get away
-    from."""
-    citation = _citation(book_title="The Burning Bridge", volume="The Burning Bridge", chapter_title="Chapter Fourteen")
+def test_a_volume_is_named_rather_than_the_file_it_was_stitched_into() -> None:
+    """"The Burning Bridge, Chapter Fourteen" is usable; "Ranger's Apprentice
+    1 & 2 Bindup, chapter 48" is the thing the reader was trying to get away
+    from. The book is stored whole either way - this is the entire
+    user-visible payoff of detecting the volumes."""
+    citation = _citation(
+        book_title="Ranger's Apprentice 1 & 2 Bindup",
+        volume="The Burning Bridge",
+        volume_chapter=14,
+        chapter_title="Chapter Fourteen",
+    )
 
     assert citation.where() == "The Burning Bridge, Chapter Fourteen"
+
+
+def test_an_untitled_chapter_in_a_volume_counts_from_the_volume_start() -> None:
+    """The fallback rung, and the one that has to do arithmetic. A reader
+    holding book 2 opens it at chapter 1; "chapter 48" is the file's number
+    and appears in no copy of the book they own."""
+    citation = _citation(book_title="A Bindup", volume="The Burning Bridge", volume_chapter=14, chapter_index=48)
+
+    assert citation.where() == "The Burning Bridge, chapter 14"
 
 
 def test_position_is_shown_only_when_there_is_no_page_number() -> None:
@@ -302,3 +317,53 @@ def test_pages_survive_a_save_and_load_cycle(tmp_path: Path) -> None:
     record = json.loads((root / book_id / "chapters.jsonl").read_text(encoding="utf-8").splitlines()[0])
 
     assert record["pages"] == [3, 9]
+
+
+# --------------------------------------------------------------------------
+# the volume map
+# --------------------------------------------------------------------------
+
+
+VOLUMES = [
+    {"title": "The Ruins of Gorlan", "label": "Book 1", "start": 2, "end": 40},
+    {"title": "The Burning Bridge", "label": "Book 2", "start": 41, "end": 80},
+]
+
+
+def test_a_chapter_is_placed_in_its_volume_and_renumbered() -> None:
+    assert volume_at(VOLUMES, 41) == ("The Burning Bridge", 1)
+    assert volume_at(VOLUMES, 48) == ("The Burning Bridge", 8)
+    assert volume_at(VOLUMES, 2) == ("The Ruins of Gorlan", 1)
+
+
+def test_a_chapter_outside_every_volume_has_none() -> None:
+    """Front matter, a shared contents page, an about-the-author. The split
+    this replaced deleted these chapters; they are kept now, so a citation
+    has to have something to say about them - the file's own title."""
+    assert volume_at(VOLUMES, 0) is None
+    assert volume_at(VOLUMES, 99) is None
+    assert volume_at(None, 3) is None
+
+
+def test_a_bindup_cites_the_volume_end_to_end(tmp_path: Path) -> None:
+    """Through storage, which is where this has to work: the volume map is
+    written by ingest and read back by `cite` from `metadata.json`."""
+    source = tmp_path / "bindup.epub"
+    source.write_text("x", encoding="utf-8")
+    root = tmp_path / "library"
+    chapters = [Chapter(index=i, title=None, text="Filler.") for i in range(4)]
+    chapters[3] = Chapter(index=3, title=None, text=CHAPTER)
+    book_id = save_book(
+        source,
+        chapters,
+        title="Ranger's Apprentice 1 & 2 Bindup",
+        volumes=[{"title": "The Burning Bridge", "label": "Book 2", "start": 2, "end": 3}],
+        root=root,
+    )
+
+    citation = cite(book_id, 3, "Baron Arald was the Lord of Redmont Fief.", root=root)
+
+    assert citation is not None
+    assert citation.volume == "The Burning Bridge"
+    assert citation.where().startswith("The Burning Bridge, chapter 2")
+    assert "Bindup" not in citation.render()

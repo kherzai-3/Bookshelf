@@ -157,6 +157,7 @@ class Citation:
 
     book_title: str
     volume: str | None
+    volume_chapter: int | None
     chapter_index: int
     chapter_title: str | None
     pages: list[int] | None
@@ -174,6 +175,13 @@ class Citation:
         # that is the better label and the title is dropped.
         elif self.chapter_title:
             parts.append(self.chapter_title)
+        elif self.volume_chapter is not None:
+            # Counted from 1 within the volume, because that is how the
+            # reader's copy of *this* book counts - the file's own index
+            # ("chapter 1847") is the number they cannot find. Unlike the
+            # bare-index case below it deliberately does not line up with
+            # `chat --chapter`, which addresses the file.
+            parts.append(f"chapter {self.volume_chapter}")
         else:
             parts.append(f"chapter {self.chapter_index}")
         if self.position is not None and self.pages is None:
@@ -211,17 +219,39 @@ def cite(
     return _build(metadata, chapter, book_id, chapter_index, statement)
 
 
+def volume_at(volumes: list[dict] | None, chapter_index: int) -> tuple[str, int] | None:
+    """Which stitched-in book a chapter belongs to, and its number in it.
+
+    `volumes` is the span map `ingest.volumes` writes to `metadata.json`.
+    The number is 1-based within the volume: a reader holding *The Burning
+    Bridge* opens it at chapter 1, whatever position that chapter occupies in
+    the bindup file. Returns None for a chapter outside every volume (a
+    cover, a shared contents page, an about-the-author) and for the ordinary
+    book that is not an omnibus at all.
+    """
+    for volume in volumes or ():
+        start, end = volume.get("start"), volume.get("end")
+        if start is None or end is None or not start <= chapter_index <= end:
+            continue
+        title = str(volume.get("title") or "").strip()
+        if title:
+            return title, chapter_index - start + 1
+    return None
+
+
 def _build(metadata: dict, chapter: dict, book_id: str, chapter_index: int, statement: str) -> Citation:
     text = chapter.get("text", "")
     passage = find_passage(statement, text)
+    # A volume already *is* a book a reader owns, with its own title, so
+    # `where()` names it and never names the file it was stitched into -
+    # "The Burning Bridge, Chapter Fourteen" is the citation they can use;
+    # "Ranger's Apprentice 1 & 2 Bindup, chapter 46" is the thing they were
+    # trying to get away from.
+    volume = volume_at(metadata.get("volumes"), chapter_index)
     return Citation(
         book_title=metadata.get("title") or book_id,
-        # A split omnibus volume already *is* its own book, with its own
-        # title, so `where()` names it and never names the file it came out
-        # of - "The Burning Bridge, Chapter Fourteen" is the citation a reader
-        # can use; "Ranger's Apprentice 1 & 2 Bindup" is the thing they were
-        # trying to get away from.
-        volume=metadata.get("title") if metadata.get("omnibus") else None,
+        volume=volume[0] if volume else None,
+        volume_chapter=volume[1] if volume else None,
         chapter_index=chapter_index,
         chapter_title=chapter.get("title"),
         pages=chapter.get("pages"),

@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/locate.py
-last_synced: 2026-09-22T23:30:00Z
-source_hash: e4f0eb919c0f4cca5f4545c8e5e2e346a6eaf709
+last_synced: 2026-09-22T20:57:17Z
+source_hash: d8fe86b359115832f127c13395d79853c551cc27
 ---
 
 ## Purpose
@@ -25,6 +25,8 @@ evidence the book actually has.
 - `find_passage(statement, chapter_text) -> Passage | None`
 - `names_in(text) -> frozenset[str]` — stopwords this text uses as proper
   nouns.
+- `volume_at(volumes, chapter_index) -> tuple[str, int] | None` — which
+  stitched-in book a chapter belongs to, and its 1-based number within it.
 - `_MIN_PASSAGE_SCORE`, `_UNSEEN_IDF`, `_PAIR_PENALTY`, `_MAX_QUOTE_CHARS`.
 
 ## Key Decisions
@@ -33,8 +35,9 @@ evidence the book actually has.
   is told something they can act on. This is the correction that re-scoped
   the whole item — rank 04's omnibus split was ranked as a *precondition* for
   citations on the theory that per-book storage was required, and it was not.
-  A display-label map over the same volume spans would have produced the same
-  string.
+  A display-label map over the same volume spans produces the same string.
+  **That is now what the code does**: the split was removed and
+  `ingest.volumes` records spans, which `volume_at` reads back here.
 - **The quote is the primary locator; the structural label is context.**
   Every structural label is edition-dependent — a page belongs to one scan, a
   chapter number to one printing. A sentence belongs to the book, and a
@@ -127,7 +130,7 @@ cannot see.
 - In: a `book_id`, a `chapter_index`, and a fact's `statement`. `cite_facts`
   takes anything with `book_id`, `chapter_index` and `statement` — in
   practice `query.Fact`.
-- Reads `metadata.json` (`title`, `omnibus`) and one `chapters.jsonl` record
+- Reads `metadata.json` (`title`, `volumes`) and one `chapters.jsonl` record
   (`title`, `text`, `pages`).
 - Out: `Citation`, or `None` when the book or chapter cannot be read at all.
 
