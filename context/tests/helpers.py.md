@@ -1,7 +1,7 @@
 ---
 source: tests/helpers.py
-last_synced: 2026-09-22T21:20:00Z
-source_hash: 77e726293bb23c5cd1e95010212f186bc8fd051d
+last_synced: 2026-09-22T21:40:00Z
+source_hash: 485e9bfc381fcc94f89d12b556b10d314a702a84
 ---
 
 ## Purpose
@@ -51,6 +51,19 @@ have something real to assert against.
   all), mirroring a real page-scanned Internet-Archive epub (Atomic
   Habits' actual source: one physical page per spine file) - for tests
   that need `ingest.consolidate.should_consolidate` to actually trigger.
+- `build_omnibus_epub(path, volume_labels=..., chapters_per_volume=3,
+  front_matter=2, back_matter=1, title="An Omnibus",
+  appendix_in_last_volume=0)` — several books stitched into one file, with
+  one nested table-of-contents section per book and small front/back matter
+  outside every section. Shaped from the real Ranger's Apprentice bindup and
+  Magic Thief collection. `appendix_in_last_volume` nests a further group
+  *inside* the final volume (Magic Thief book 5's "A Guide to People and
+  Places"), which is what makes the depth-0-only restriction testable.
+- `build_anchored_sections_epub(path)` — **one** novel whose nested sections
+  are anchors inside a single spine document: the Project Gutenberg Moby
+  Dick shape, and the false positive `ingest.omnibus` exists to refuse.
+- `build_thin_sections_epub(path, sectioned_chapters=2, loose_chapters=6)` —
+  nested sections holding a minority of the text.
 
 ## Key Decisions
 - `NARRATIVE_PADDING` is appended, never prepended, to a test's real
@@ -79,3 +92,16 @@ have something real to assert against.
   has to clear 10, and the character has to be caught speaking at least three
   times — without that last part `names.reads_as_a_person` cannot tell him
   from a place, and the link silently does not happen.
+- **Three separate omnibus-refusal fixtures, not one.** Moby Dick trips both
+  the overlap guard and the coverage guard at once, so a single fixture
+  modelled on it could not show which rule was doing the work — and when the
+  coverage fixture was first written with one 700-word chapter per section,
+  it was actually being refused by `MIN_VOLUME_WORDS` and passed with the
+  coverage check deleted. `build_anchored_sections_epub` isolates overlap,
+  `build_thin_sections_epub` isolates coverage, and
+  `build_omnibus_epub(chapters_per_volume=1, front_matter=0, back_matter=0)`
+  isolates the size floor.
+- Every synthetic omnibus chapter clears
+  `CONSOLIDATION_MEDIAN_WORDS_THRESHOLD` on its own, so a split fixture's
+  chapter count is the one the test asked for and consolidation never has to
+  be reasoned about alongside the split.

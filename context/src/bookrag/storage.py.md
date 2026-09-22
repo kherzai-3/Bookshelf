@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/storage.py
-last_synced: 2026-09-16T19:53:59Z
-source_hash: 624a42ae3e448931816668114b4609a80b316ea5
+last_synced: 2026-09-22T21:40:00Z
+source_hash: 05806feb793fda090af8e0b7ff571d1b60deeb38
 ---
 
 ## Purpose
@@ -24,12 +24,14 @@ listing/grouping books without ever merging their chapter numbering.
   `-2`, `-3`, ... suffix appended until it doesn't collide with an existing
   directory under `root`.
 - `save_book(source_path, chapters, *, title, author=None, series_name=None,
-  series_position=None, content_type="fiction", root=None) -> str` —
+  series_position=None, content_type="fiction", omnibus=None,
+  copy_source=True, root=None) -> str` —
   copies the source file, writes `metadata.json` and `chapters.jsonl`,
   updates `index.json`, returns the new `book_id`. `content_type` (added
   for non-fiction support) is just persisted here - `save_book` itself
   doesn't interpret it, only stores it for `extract.pipeline`/`eval.py`/
-  `cli._chat` to pick up later via `load_metadata`.
+  `cli._chat` to pick up later via `load_metadata`. `omnibus` is persisted
+  the same way, and `copy_source=False` skips the source-file archive.
 - `load_chapters(book_id, root=None) -> list[Chapter]` — reads a book's
   `chapters.jsonl` back into `Chapter` objects (used by extraction/eval).
 - `load_metadata(book_id, root=None) -> dict` — reads a book's
@@ -77,6 +79,14 @@ listing/grouping books without ever merging their chapter numbering.
   partially-written `book_id` directory behind - either `save_book` fully
   succeeds or it's as if it was never called. See
   `test_save_book_leaves_no_partial_directory_on_failure`.
+- **`copy_source=False` exists so a split omnibus archives its source once,
+  not N times.** A 24-volume webnovel would otherwise leave 296MB of
+  byte-identical copies, and nothing reads `source.*` after ingest - it is
+  purely an archive. The volume that holds it is named in every sibling's
+  `omnibus.source_book_id`. Known consequence, accepted: `bookrag remove` on
+  that volume takes the archive with it, and the siblings keep their text
+  and facts but lose the original file. Nothing detects or warns about
+  this, because nothing depends on the file being there.
 
 ## Dependencies
 - Internal: `bookrag.ingest.chapter.Chapter`, `bookrag.env.env_str`
@@ -88,12 +98,21 @@ listing/grouping books without ever merging their chapter numbering.
 ## Data Contracts
 - `metadata.json`: `{book_id, title, author, series: {name, position} | null,
   content_type: "fiction" | "nonfiction", source_format, source_filename,
+  omnibus: {title, volume, of, source_book_id} | null,
   ingested_at, chapter_count}`. `content_type` selects which extraction
   category/entity-type taxonomy and prompt pair a book uses (see
   `providers/prompts.py`/`providers/parsing.py`) - a book saved before this
   field existed simply has no key; every reader defaults it to `"fiction"`.
+  `omnibus` records that this book was one volume of a stitched-together
+  file (see `ingest/omnibus.py`). It is **provenance, not behaviour** —
+  nothing downstream branches on it; it exists because five books in
+  `index.json` naming one `source_filename` is otherwise unexplained, and
+  because `source_book_id` names the one volume that actually holds the
+  archived file. `null` for the overwhelming majority of books.
 - `chapters.jsonl`: one `{index, title, text}` object per line, in the same
-  order and shape as the `Chapter` dataclass.
+  order and shape as the `Chapter` dataclass. The spine document a chapter
+  came from is deliberately **not** stored, though `epub_loader` can report
+  it - it is an internal epub path, meaningful only while the file is open.
 - `index.json`: `{"books": [{book_id, title, author, series}, ...]}` — one
   entry per book, replaced (not appended) on re-ingest of the same `book_id`.
 

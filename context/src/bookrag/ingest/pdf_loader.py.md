@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/pdf_loader.py
-last_synced: 2026-09-02T00:00:00Z
-source_hash: 683c48b250e765d79632025738a54b6ab0347d38
+last_synced: 2026-09-22T21:40:00Z
+source_hash: 563a5f6bee0c0945cb0bf28fb080b59faf565c27
 ---
 
 ## Purpose
@@ -14,6 +14,11 @@ downstream extraction is format-agnostic.
   outline/TOC (bookmarks), one `Chapter` per top-level entry with non-empty
   text; falls back to the whole document as a single chapter if the PDF has
   no TOC at all.
+- `load_chapters_with_sources(path: str | Path) -> list[tuple[None, Chapter]]`
+  — the same chapters, in the shape `epub_loader` returns, so `cli._ingest`
+  can load either format through one call. The source is always `None`: a PDF
+  has no per-chapter source document to name, and `None` is what tells
+  `ingest.omnibus` there is nothing here it can read.
 - `extract_metadata(path: str | Path) -> dict[str, str | None]` — best-effort
   `{"title", "author"}` from the PDF's document info dict; blank strings
   (pymupdf's default when unset) are normalized to `None`.
@@ -43,3 +48,12 @@ downstream extraction is format-agnostic.
 ## Open Questions / TODOs
 - No spoiler-safety-relevant metadata is extracted from PDFs beyond text
   (e.g. no page-image/figure handling) — plain text only, same as epub.
+- **A PDF omnibus cannot be detected, because of the level-1 preference
+  above.** `ingest.omnibus` splits a stitched-together epub by reading the
+  volume boundaries out of its nested table of contents; in a PDF whose
+  outline nests the same way (level 1 = volume, level 2 = chapter) this
+  loader flattens to level 1 first, so each *volume* arrives as one
+  "chapter" and the nesting is gone before anything can read it. Fixing it
+  means keeping the outline's depth and deciding chapter granularity
+  afterwards — a change to how every PDF is chaptered, not just omnibuses,
+  which is why it was not bundled with the epub split.

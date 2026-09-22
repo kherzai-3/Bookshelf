@@ -20,8 +20,23 @@ _DOCUMENT_MEDIA_TYPES = {"application/xhtml+xml", "text/html"}
 
 
 def load_chapters(path: str | Path) -> list[Chapter]:
+    return [chapter for _source, chapter in load_chapters_with_sources(path)]
+
+
+def load_chapters_with_sources(path: str | Path) -> list[tuple[str, Chapter]]:
+    """Every chapter paired with the spine document it came from.
+
+    The pairing exists for `ingest.omnibus`, which has to turn a table-of-
+    contents entry (an href into a spine document) into a chapter index.
+    That mapping cannot be recovered afterwards: `_split_by_headings` turns
+    one spine document into several chapters for some books and drops empty
+    ones for all of them, so chapter index and spine position do not line up.
+
+    Not persisted. The name is an internal epub path, useful while the file
+    is open and meaningless in `chapters.jsonl`.
+    """
     book = epub.read_epub(str(path))
-    chapters: list[Chapter] = []
+    chapters: list[tuple[str, Chapter]] = []
     for idref, _linear in book.spine:
         item = book.get_item_with_id(idref)
         if item is None or item.media_type not in _DOCUMENT_MEDIA_TYPES:
@@ -32,7 +47,7 @@ def load_chapters(path: str | Path) -> list[Chapter]:
         for title, text in _split_by_headings(tree):
             if not text:
                 continue
-            chapters.append(Chapter(index=len(chapters), title=title, text=text))
+            chapters.append((item.get_name(), Chapter(index=len(chapters), title=title, text=text)))
     return chapters
 
 

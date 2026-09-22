@@ -28,6 +28,14 @@ def load_chapters(path: str | Path) -> list[Chapter]:
     return chapters
 
 
+def load_chapters_with_sources(path: str | Path) -> list[tuple[None, Chapter]]:
+    """The same shape `epub_loader` returns, so `cli._ingest` can load either
+    format through one call. A PDF has no per-chapter source document to name,
+    and `None` is what tells `ingest.omnibus` there is nothing here it can
+    read - see its module docstring for why PDF omnibuses are a real gap."""
+    return [(None, chapter) for chapter in load_chapters(path)]
+
+
 def extract_metadata(path: str | Path) -> dict[str, str | None]:
     doc = pymupdf.open(str(path))
     meta = doc.metadata or {}

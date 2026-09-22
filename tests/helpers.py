@@ -225,6 +225,153 @@ def build_fragmented_epub(path: Path, fragment_count: int = 40, words_per_fragme
     epub.write_epub(str(path), book)
 
 
+# Each synthetic omnibus chapter clears CONSOLIDATION_MEDIAN_WORDS_THRESHOLD
+# on its own, so a split fixture's chapter count is the one the test asked
+# for and consolidation never has to be reasoned about alongside it.
+_OMNIBUS_CHAPTER_WORDS = CONSOLIDATION_MEDIAN_WORDS_THRESHOLD + 100
+
+
+def build_omnibus_epub(
+    path: Path,
+    volume_labels: tuple[str, ...] = ("Book 1: The First Book", "Book 2: The Second Book"),
+    chapters_per_volume: int = 3,
+    front_matter: int = 2,
+    back_matter: int = 1,
+    title: str = "An Omnibus",
+    appendix_in_last_volume: int = 0,
+) -> None:
+    """Several books stitched into one file, the shape `ingest.omnibus` splits:
+    a nested table-of-contents section per book, with front and back matter
+    sitting outside every section.
+
+    Modelled on the real Ranger's Apprentice bindup and the five-book Magic
+    Thief collection - both nest exactly this way, and both are what the
+    thresholds in `ingest.omnibus` were measured against. The front/back matter
+    is deliberately tiny so the volumes still clear `MIN_TEXT_COVERAGE`; a
+    fixture where they don't is `build_thin_sections_epub`.
+
+    `appendix_in_last_volume` nests a further group *inside* the final
+    volume - the shape of Magic Thief book 5's "A Guide to People and
+    Places", which a detector recursing into nested groups would report as
+    one more book than the file holds.
+    """
+    book = epub.EpubBook()
+    book.set_identifier("omnibus-id")
+    book.set_title(title)
+    book.set_language("en")
+    book.add_author("Omnibus Author")
+
+    spine_items = []
+    toc: list = []
+
+    def add(file_name: str, heading: str, text: str):
+        item = epub.EpubHtml(title=heading, file_name=file_name)
+        item.content = f"<html><body><h1>{heading}</h1><p>{text}</p></body></html>"
+        book.add_item(item)
+        spine_items.append(item)
+        return item
+
+    for i in range(front_matter):
+        toc.append(add(f"front{i}.xhtml", f"Front Matter {i}", "Copyright and contents."))
+
+    for volume, label in enumerate(volume_labels, start=1):
+        chapters = [
+            add(
+                f"v{volume}c{number}.xhtml",
+                f"Chapter {number}",
+                f"Volume {volume} chapter {number}. {_bulk_filler(_OMNIBUS_CHAPTER_WORDS)}",
+            )
+            for number in range(1, chapters_per_volume + 1)
+        ]
+        children: tuple = tuple(chapters)
+        if appendix_in_last_volume and volume == len(volume_labels):
+            extras = [
+                add(f"v{volume}a{i}.xhtml", f"Appendix {i}", f"Guide to people and places. {_bulk_filler(200)}")
+                for i in range(appendix_in_last_volume)
+            ]
+            children = (*children, (epub.Section("A Guide to People and Places", href=extras[0].file_name), tuple(extras)))
+        toc.append((epub.Section(label, href=chapters[0].file_name), children))
+
+    for i in range(back_matter):
+        toc.append(add(f"back{i}.xhtml", f"Back Matter {i}", "About the author."))
+
+    book.toc = tuple(toc)
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", *spine_items]
+    epub.write_epub(str(path), book)
+
+
+def build_anchored_sections_epub(path: Path) -> None:
+    """One novel whose table of contents nests sections that are anchors
+    *inside a single spine document* - the Project Gutenberg Moby Dick shape.
+
+    This is the false positive the detector exists to refuse. Its five nested
+    sections ("ETYMOLOGY.", "CHAPTER 100. Leg and Arm.", "Epilogue", ...) are
+    typesetting artifacts; treating them as volumes would shatter one novel
+    into five books silently. Because every section resolves into the same
+    document, their chapter spans overlap, which is the check that rejects it.
+    """
+    book = epub.EpubBook()
+    book.set_identifier("anchored-id")
+    book.set_title("One Long Novel")
+    book.set_language("en")
+    book.add_author("One Author")
+
+    body = "".join(
+        f"<h1>Chapter {number}</h1><p>{_bulk_filler(_OMNIBUS_CHAPTER_WORDS)}</p>" for number in range(1, 5)
+    )
+    whole = epub.EpubHtml(title="One Long Novel", file_name="novel.xhtml")
+    whole.content = f"<html><body>{body}</body></html>"
+    book.add_item(whole)
+
+    book.toc = (
+        (epub.Section("ETYMOLOGY.", href="novel.xhtml#etymology"), (whole,)),
+        (epub.Section("Epilogue", href="novel.xhtml#epilogue"), (whole,)),
+    )
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", whole]
+    epub.write_epub(str(path), book)
+
+
+def build_thin_sections_epub(path: Path, sectioned_chapters: int = 1, loose_chapters: int = 6) -> None:
+    """Nested sections that hold a minority of the book's text.
+
+    Separate from `build_anchored_sections_epub` on purpose: that fixture is
+    rejected by the overlap check, this one by `MIN_TEXT_COVERAGE`. Moby Dick
+    trips both at once, so a single fixture could not tell which rule was
+    doing the work.
+    """
+    book = epub.EpubBook()
+    book.set_identifier("thin-id")
+    book.set_title("Mostly Unsectioned")
+    book.set_language("en")
+    book.add_author("Thin Author")
+
+    spine_items = []
+    toc: list = []
+
+    def add(file_name: str, heading: str):
+        item = epub.EpubHtml(title=heading, file_name=file_name)
+        item.content = f"<html><body><h1>{heading}</h1><p>{_bulk_filler(_OMNIBUS_CHAPTER_WORDS)}</p></body></html>"
+        book.add_item(item)
+        spine_items.append(item)
+        return item
+
+    for section in range(2):
+        chapters = [add(f"s{section}c{i}.xhtml", f"Section {section} Chapter {i}") for i in range(sectioned_chapters)]
+        toc.append((epub.Section(f"Part {section + 1}: A Part", href=chapters[0].file_name), tuple(chapters)))
+    for i in range(loose_chapters):
+        toc.append(add(f"loose{i}.xhtml", f"Loose Chapter {i}"))
+
+    book.toc = tuple(toc)
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", *spine_items]
+    epub.write_epub(str(path), book)
+
+
 def build_sample_pdf(path: Path) -> None:
     doc = pymupdf.open()
     p1 = doc.new_page()

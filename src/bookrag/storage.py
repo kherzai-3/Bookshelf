@@ -56,8 +56,22 @@ def save_book(
     series_name: str | None = None,
     series_position: int | None = None,
     content_type: str = "fiction",
+    omnibus: dict | None = None,
+    copy_source: bool = True,
     root: Path | None = None,
 ) -> str:
+    """`omnibus` records that this book was one volume of a stitched-together
+    file (`{"title", "volume", "of", "source_book_id"}`) - see
+    `ingest.omnibus`. It is provenance, not behaviour: nothing downstream
+    branches on it, and a reader needs it to understand why five books in the
+    index name one file as their source.
+
+    `copy_source=False` skips archiving the source file, which is how a split
+    omnibus stores one copy instead of N identical ones - 296MB of duplicate
+    bytes for a 24-volume webnovel. Nothing reads `source.*` after ingest, so
+    the copy is an archive; `omnibus["source_book_id"]` names the volume that
+    holds it.
+    """
     root = root or library_root()
     root.mkdir(parents=True, exist_ok=True)
 
@@ -66,7 +80,8 @@ def save_book(
     book_dir.mkdir(parents=True)
 
     try:
-        shutil.copy2(source_path, book_dir / f"source{source_path.suffix.lower()}")
+        if copy_source:
+            shutil.copy2(source_path, book_dir / f"source{source_path.suffix.lower()}")
 
         metadata = {
             "book_id": book_id,
@@ -80,6 +95,7 @@ def save_book(
             "content_type": content_type,
             "source_format": source_path.suffix.lstrip(".").lower(),
             "source_filename": source_path.name,
+            "omnibus": omnibus,
             "ingested_at": datetime.now(timezone.utc).isoformat(),
             "chapter_count": len(chapters),
         }

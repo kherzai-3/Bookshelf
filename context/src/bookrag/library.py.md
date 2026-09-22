@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/library.py
-last_synced: 2026-09-22T21:20:00Z
-source_hash: 0295f4973ebaa03351022038e2c0a9c33be4fe12
+last_synced: 2026-09-22T21:40:00Z
+source_hash: 147c68172d711aa19de6e1bb456d2b5bbbf13aed
 ---
 
 ## Purpose
@@ -18,8 +18,12 @@ module's functions.
 
 ## Public Interface
 - `BookSummary` (dataclass) — `book_id, title, author, series, orphaned,
-  content_type, chapter_count, fact_count, chapters_extracted, entity_count`,
-  plus a `partial` property (see Key Decisions).
+  content_type, chapter_count, fact_count, chapters_extracted, entity_count,
+  omnibus`, plus a `partial` property (see Key Decisions). `omnibus` is
+  `metadata.json`'s `{title, volume, of, source_book_id}` block (see
+  `ingest/omnibus.py`) and is `None` for almost every book; it is carried
+  here only so `cli._show` can say which stitched-together file a book came
+  out of, and which sibling holds the archived source.
 - `list_books(root=None) -> list[BookSummary]` — one summary per
   `index.json` entry.
 - `show_book(book_id, root=None) -> BookSummary` — raises `ValueError` if

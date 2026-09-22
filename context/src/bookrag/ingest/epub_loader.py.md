@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/ingest/epub_loader.py
-last_synced: 2026-09-08T00:00:00Z
-source_hash: 0a5d269bbb9cb81d3a6da2bc7ee8a84e85c64938
+last_synced: 2026-09-22T21:40:00Z
+source_hash: 10d1192b509640ae36afd5294f924f0250bace64
 ---
 
 ## Purpose
@@ -12,11 +12,22 @@ settings, themes) can be scoped per chapter for spoiler-safety.
 ## Public Interface
 - `load_chapters(path: str | Path) -> list[Chapter]` — parses the epub's spine
   in order, strips HTML, and returns one `Chapter` per non-empty content
-  document (nav/TOC documents are skipped).
+  document (nav/TOC documents are skipped). A thin wrapper over the next one.
+- `load_chapters_with_sources(path: str | Path) -> list[tuple[str, Chapter]]`
+  — the same chapters, each paired with the name of the spine document it
+  came from.
 - `extract_metadata(path: str | Path) -> dict[str, str | None]` — best-effort
   `{"title", "author"}` from the epub's Dublin Core metadata.
 
 ## Key Decisions
+- **The spine provenance exists for `ingest.omnibus`, and it cannot be
+  recovered any other way.** That module turns a table-of-contents entry (an
+  href into a spine document) into a chapter index, and `_split_by_headings`
+  makes chapter index and spine position not line up: one spine document
+  becomes several chapters for some books, and empty ones are dropped for
+  all of them. The name is deliberately **not** persisted — it is an internal
+  epub path, useful while the file is open and meaningless in
+  `chapters.jsonl`.
 - Chapter order comes from `book.spine`, not `book.toc` or file name sorting —
   the spine is the epub's authoritative reading order and can differ from
   either.

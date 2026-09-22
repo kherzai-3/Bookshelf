@@ -47,6 +47,9 @@ class BookSummary:
     fact_count: int | None = None  # None means never extracted (no facts.jsonl)
     chapters_extracted: int | None = None  # how far the run reached: max(chapter_index) + 1
     entity_count: int = 0
+    # {"title", "volume", "of", "source_book_id"} when this book was one
+    # volume of a stitched-together file (see ingest.omnibus), else None.
+    omnibus: dict | None = None
 
     @property
     def partial(self) -> bool:
@@ -148,6 +151,7 @@ def _summarize(entry: dict, root: Path, entities: dict) -> BookSummary:
         fact_count=stats[0] if stats else None,
         chapters_extracted=stats[1] if stats else None,
         entity_count=entity_count,
+        omnibus=metadata.get("omnibus"),
     )
 
 

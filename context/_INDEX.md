@@ -10,6 +10,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/ingest/epub_loader.py](src/bookrag/ingest/epub_loader.py.md) — loads an `.epub` into per-chapter plain text, in reading order.
 - [src/bookrag/ingest/pdf_loader.py](src/bookrag/ingest/pdf_loader.py.md) — loads a `.pdf` into per-chapter plain text via its TOC/outline.
 - [src/bookrag/ingest/consolidate.py](src/bookrag/ingest/consolidate.py.md) — merges many small/incoherent chapter fragments into larger, coherent ones for extraction.
+- [src/bookrag/ingest/omnibus.py](src/bookrag/ingest/omnibus.py.md) — finds the separately-published books stitched into one epub, from its nested table of contents, and refuses the nesting that isn't a book.
 - [src/bookrag/ingest/vocatives.py](src/bookrag/ingest/vocatives.py.md) — reads a first-person narrator's other names ("Conn"/"boy"/"lad") out of who addresses whom, at ingest, with no model.
 - [src/bookrag/storage.py](src/bookrag/storage.py.md) — persists a book (source + chapters + metadata incl. `content_type`) to `data/library/<book_id>/`; series-aware index + reading-order helper.
 - [src/bookrag/query.py](src/bookrag/query.py.md) — `facts_as_of`: the spoiler-safety filter primitive; `format_context` renders facts for a provider.
@@ -33,6 +34,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [tests/helpers.py](tests/helpers.py.md) — shared synthetic epub/pdf builders.
 - [tests/test_epub_loader.py](tests/test_epub_loader.py.md) — covers `epub_loader` (chapters + metadata) with a synthetic in-test epub.
 - [tests/test_consolidate.py](tests/test_consolidate.py.md) — covers `ingest.consolidate`'s trigger decision and merge logic.
+- [tests/test_omnibus.py](tests/test_omnibus.py.md) — covers the omnibus split: one book per volume with its own chapter numbering, and (weighted more heavily) the four guards that refuse to split a book that isn't one.
 - [tests/test_pdf_loader.py](tests/test_pdf_loader.py.md) — covers `pdf_loader` (chapters + metadata), TOC and no-TOC fallback paths.
 - [tests/test_storage.py](tests/test_storage.py.md) — covers `storage.py`, including the series/chapter-2-collision guarantee.
 - [tests/test_storage_series_reading_order.py](tests/test_storage_series_reading_order.py.md) — covers `series_reading_order`.
