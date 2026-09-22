@@ -897,8 +897,8 @@ only guards what it is pointed at.
   itself, since showing "Fang Yuan, also known as Qi Sea Ancestor" to a reader
   at chapter 100 gives away a chapter-1853 reveal.
 
-  **The first three causes have a measured fix design; the assumed-identity
-  half does not yet.** The approach that does *not* work is classifying the
+  **The first three causes are fixed; the assumed-identity half is not.**
+  The approach that does *not* work is classifying the
   prefix - deciding whether "Lord" is a rank, "Gu Yue" a clan, "But" neither.
   Three classifiers were built against the full text and all three failed; the
   best of them read invented name-parts ("Northern", "Blood", "Star") as ranks
@@ -911,26 +911,55 @@ only guards what it is pointed at.
   dissolves the inverted ambiguity guard rather than repairing it - each longer
   form is tested against the bare name independently, so four decorated forms
   now produce four links instead of none. **Measured at 240 proposed links
-  across the 8-book library, 231 correct (96.3%), hand-checked.** Two guards on
+  across the 8-book library, 231 correct (96.3%), hand-checked** - and 237 /
+  230 / **97.0%** as shipped, for the reason below. Two guards on
   the remainder are both required, and neither is sufficient alone: without
   "the remainder is not an ordinary English word" it strips surnames and
   category nouns ("Dong Fang" to "Fang"); without "the bare remainder
   outnumbers its own use inside longer names" it strips capitalised pronouns
-  ("Qin Bai He" to "He"). **All 9 errors share one shape** - a qualified
+  ("Qin Bai He" to "He"). **The errors all share one shape** - a qualified
   variety of a category the book names ("Blue Elixir" to "Elixir", "Four
-  Flavours Liquor" to "Liquor"), 7 of the 9 in a single book. The obvious third
-  guard was built and rejected on cost: requiring the prefix to decorate
-  several different identities removes 5 of those errors and loses about 53
-  correct links doing it. So this ships propose-only, with the failure shape
-  documented rather than guarded against. **It is also not an
+  Flavours Liquor" to "Liquor"), and all of them are in a single book. The
+  obvious third guard was built and rejected on cost: requiring the prefix to
+  decorate several different identities removes 5 of those errors and loses
+  about 53 correct links doing it. So this is propose-only, with the failure
+  shape documented rather than guarded against. **It is also not an
   eastern-naming fix**, which was not the expectation - run unchanged over the
   other books it finds "Magister Nevery" and "Underlord Crowe" in *The Magic
   Thief*, "Captain Ahab", "The Aes Sedai" and "The Wargals", all titles a
   closed list cannot hold precisely because the book invented them.
-  **Designed and measured, not built** - and its position in the build order is
-  itself an open question, since it addresses the 0.67% of mentions that carry
-  a title or clan prefix rather than the assumed identities that carry the
-  rest. See Future ideas.
+
+  **Shipped** as a fourth rule inside `doctor --merge-name-variants`, so
+  there is no new command to learn. Building it changed the measured design
+  twice, both times measured rather than argued:
+
+  - **"Ordinary English word" is now judged per book.** As scored it also
+    asked whether the word appeared in 6 of the library's 8 books, which
+    cannot ship - a three-book library could never satisfy it, so the rule
+    would quietly fall back to one guard. Dropping that term loses 3 links,
+    2 of which were errors, which is why the shipped figure is higher than
+    the scored one.
+  - **Characters only.** The scoring ran over raw text and had no entity
+    types in it. Every remaining error is a thing rather than a person, and
+    every correct non-character link but one is a "The X" to "X" strip that
+    the duplicate-entity check already reports, so the restriction removes
+    the whole error class and gives up almost nothing.
+
+  Two caveats worth knowing. The "The Wargals" and "The Aes Sedai" cases
+  above are real, but they were **already** found by `--merge-duplicates`,
+  which normalises a leading "the" and a trailing "s" - the genuinely new
+  reach is a character with *several* decorated forms, which the ambiguity
+  guard used to refuse outright. And the rule requires the bare name to be
+  five times commoner than the decorated one, which on inspection is
+  stricter than it needs to be: relaxing it to three would also catch
+  "Captain Kerrn" and "The Baron", at the cost of re-checking the proposals
+  by hand.
+
+  **What this does not touch** is the assumed identities, which are where
+  the volume is: it addresses the 0.67% of mentions carrying a title or clan
+  prefix, not "Hei Lou Lan" or "Qi Sea Ancestor", which share no words with
+  "Fang Yuan". Aliases still carry no chapter scope either, so "Wolf King"
+  names its original owner and its later taker alike. See Future ideas.
 - **Small local models are less reliable at strict JSON than Claude -
   mitigated with real, grammar-level structural guarantees, not just a
   request.** `llama3.2:3b`'s first real test produced a JSON array with a
