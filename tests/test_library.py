@@ -506,6 +506,311 @@ def test_detect_name_variants_stays_silent_when_the_book_never_links_the_names(t
     assert detect_name_variants(root=root) == []
 
 
+def _book_mentioning(tmp_path: Path, root: Path, title: str, mentions: dict[str, int], extra: str = "") -> str:
+    """A book that mentions each name exactly as often as asked, each as a
+    *maximal* run of capitalised words - which is the unit the residue rule
+    compares, so "Fang Yuan" counts only its bare sightings and "Lord Fang
+    Yuan" is counted separately rather than folded into it. Every word around
+    a name is lowercase on purpose: a capitalised one would join the run and
+    change the very frequency the fixture exists to set."""
+    sentences = []
+    for name, times in mentions.items():
+        sentences.extend([f"and then {name} spoke to the others."] * times)
+    text = " ".join(sentences) + " " + extra + " " + NARRATIVE_PADDING
+    source = tmp_path / f"{title}.epub"
+    source.write_text("x", encoding="utf-8")
+    return save_book(source, [Chapter(0, "One", text)], title=title, root=root)
+
+
+def test_detect_name_variants_treats_more_titles_as_more_evidence(tmp_path: Path) -> None:
+    """02c(ii) dissolves rather than gets fixed, and this is the test that
+    says so. `_fuller_name_pairs`' ambiguity veto refuses a short name that
+    sits inside more than one longer one, because that is the shape of two
+    people sharing a given name - so the more titles a character accrued, the
+    more certainly the old rule yielded nothing. Each decorated form is tested
+    against the bare name independently, so four decorated forms produce four
+    links and arrive as one decision.
+
+    **This is also the shape that isolates the residue rule**, and every test
+    below is built the same way for that reason. With a *single* decorated
+    form, `_fuller_name_pairs` links it already on containment alone - so a
+    two-entity fixture would pass with this rule deleted. Two decorated forms
+    trip the ambiguity veto, and only the residue rule survives it. Of the
+    four prefixes here, "Lord" is the only one `_TITLES` contains; "Elder",
+    "Venerable" and the clan name "Gu Yue" reach nothing but this rule, and
+    "Gu Yue" could not be in a wordlist at all - it is a family name the book
+    invented, which also names the Gu Yue Clan and the Gu Yue Village."""
+    root = tmp_path / "library"
+    book_id = _book_mentioning(
+        tmp_path,
+        root,
+        "Cultivation Book",
+        {
+            "Fang Yuan": 400,
+            "Lord Fang Yuan": 30,
+            "Elder Fang Yuan": 20,
+            "Gu Yue Fang Yuan": 20,
+            "Venerable Fang Yuan": 12,
+        },
+    )
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("character-a", "Lord Fang Yuan", "character"),
+            ("character-b", "Elder Fang Yuan", "character"),
+            ("character-c", "Gu Yue Fang Yuan", "character"),
+            ("character-d", "Venerable Fang Yuan", "character"),
+            ("character-e", "Fang Yuan", "character"),
+        ],
+    )
+
+    assert _variant_names(detect_name_variants(root=root)) == [
+        {"Lord Fang Yuan", "Elder Fang Yuan", "Gu Yue Fang Yuan", "Venerable Fang Yuan", "Fang Yuan"}
+    ]
+
+
+def test_detect_name_variants_keeps_two_decorated_characters_apart(tmp_path: Path) -> None:
+    """The rule generalises past the protagonist without fusing the cast. Two
+    men of the same clan, each with his own decorated forms, must come back as
+    two clusters - the residue is what separates them, since every one of
+    these four names begins with the same two tokens."""
+    root = tmp_path / "library"
+    book_id = _book_mentioning(
+        tmp_path,
+        root,
+        "Cultivation Book",
+        {
+            "Fang Yuan": 300,
+            "Gu Yue Fang Yuan": 20,
+            "Elder Fang Yuan": 20,
+            "Fang Zheng": 200,
+            "Gu Yue Fang Zheng": 25,
+            "Elder Fang Zheng": 15,
+        },
+    )
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("character-a", "Gu Yue Fang Yuan", "character"),
+            ("character-b", "Elder Fang Yuan", "character"),
+            ("character-c", "Fang Yuan", "character"),
+            ("character-d", "Gu Yue Fang Zheng", "character"),
+            ("character-e", "Elder Fang Zheng", "character"),
+            ("character-f", "Fang Zheng", "character"),
+        ],
+    )
+
+    assert _variant_names(detect_name_variants(root=root)) == [
+        {"Gu Yue Fang Yuan", "Elder Fang Yuan", "Fang Yuan"},
+        {"Gu Yue Fang Zheng", "Elder Fang Zheng", "Fang Zheng"},
+    ]
+
+
+def test_detect_name_variants_links_a_sentence_initial_word_to_the_bare_name(tmp_path: Path) -> None:
+    """The 181-prefix-forms trap, and why it stops being a trap. The most
+    frequent capitalised words in front of "Fang Yuan" are not titles at all -
+    "But" 741, "If" 332, "When" 191 - and any rule that learned titles from
+    what precedes a name would drown in them. Folding "But Fang Yuan" into the
+    protagonist is simply the right answer, so the prefix's identity never has
+    to be decided."""
+    root = tmp_path / "library"
+    book_id = _book_mentioning(
+        tmp_path, root, "Cultivation Book", {"Fang Yuan": 300, "But Fang Yuan": 40, "If Fang Yuan": 25}
+    )
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("character-a", "But Fang Yuan", "character"),
+            ("character-b", "If Fang Yuan", "character"),
+            ("character-c", "Fang Yuan", "character"),
+        ],
+    )
+
+    assert _variant_names(detect_name_variants(root=root)) == [{"But Fang Yuan", "If Fang Yuan", "Fang Yuan"}]
+
+
+def test_detect_name_variants_refuses_a_family_name_shared_across_characters(tmp_path: Path) -> None:
+    """Guard B on its own terms. "Gu" clears every frequency threshold - it is
+    far commoner than "Moonlight Gu" - but it is a family name, so it almost
+    never stands by itself: it occurs inside longer names more often than
+    alone. Guard A cannot see this, because the book never writes "gu" in
+    lowercase; deleting guard B is what this test catches."""
+    root = tmp_path / "library"
+    book_id = _book_mentioning(
+        tmp_path,
+        root,
+        "Cultivation Book",
+        {"Gu": 1000, "Moonlight Gu": 150, "Strength Gu": 500, "Wisdom Gu": 500},
+    )
+    _seed_named_entities(
+        root,
+        book_id,
+        [("character-a", "Moonlight Gu", "character"), ("character-b", "Gu", "character")],
+    )
+
+    assert detect_name_variants(root=root) == []
+
+
+def test_detect_name_variants_refuses_a_capitalised_everyday_word(tmp_path: Path) -> None:
+    """Guard A on its own terms, and the failure class it shares with the
+    grounding check: a capitalised everyday word read as a name. "You" passes
+    guard B easily - it stands alone far more often than it sits inside a
+    longer name - so only the book's own lowercase usage separates "Chi Qu
+    You" from a real link."""
+    root = tmp_path / "library"
+    book_id = _book_mentioning(
+        tmp_path,
+        root,
+        "Cultivation Book",
+        {"You": 200, "Chi Qu You": 30, "Qin Bai You": 20},
+        extra=" ".join(["he asked whether you had eaten yet."] * 30),
+    )
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("character-a", "Chi Qu You", "character"),
+            ("character-b", "Qin Bai You", "character"),
+            ("character-c", "You", "character"),
+        ],
+    )
+
+    assert detect_name_variants(root=root) == []
+
+
+def test_detect_name_variants_needs_the_bare_name_to_be_established(tmp_path: Path) -> None:
+    """The bare name has to be the book's usual way of referring to someone,
+    not merely present. Without the floor, any two entities that happen to
+    share a suffix would link on a handful of sightings - which is all the
+    evidence `_fuller_name_pairs` ever had, and why this rule asks the text
+    rather than the spelling."""
+    root = tmp_path / "library"
+    book_id = _book_mentioning(
+        tmp_path, root, "Thief Book", {"Nevery": 90, "Magister Nevery": 10, "Underlord Nevery": 12}
+    )
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("character-a", "Magister Nevery", "character"),
+            ("character-b", "Underlord Nevery", "character"),
+            ("character-c", "Nevery", "character"),
+        ],
+    )
+
+    assert detect_name_variants(root=root) == []
+
+
+def test_detect_name_variants_needs_the_bare_name_to_dominate(tmp_path: Path) -> None:
+    """The weakest real case in the corpus, and what the 5x ratio is for.
+    Reverend Insanity writes "Qing Shu" 143 times and "Gu Yue Qing Shu" 129 -
+    the bare form is more common, but barely, and "the residue is the
+    better-attested name" is the entire premise of the rule. A book that uses
+    both forms about equally is not decorating a name; it is using two.
+
+    The threshold is the one the corpus was scored at, and it is deliberately
+    not retuned here: relaxing it to 3x adds 13 links across the 8 books, of
+    which several look right on inspection ("Captain Kerrn" -> "Kerrn", "The
+    Baron" -> "Baron"). None of those 13 were in the hand-scored set, so
+    moving it would put the measured precision out of date."""
+    root = tmp_path / "library"
+    book_id = _book_mentioning(
+        tmp_path,
+        root,
+        "Cultivation Book",
+        {"Qing Shu": 143, "Gu Yue Qing Shu": 129, "Elder Qing Shu": 120},
+    )
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("character-a", "Gu Yue Qing Shu", "character"),
+            ("character-b", "Elder Qing Shu", "character"),
+            ("character-c", "Qing Shu", "character"),
+        ],
+    )
+
+    assert detect_name_variants(root=root) == []
+
+
+def test_detect_name_variants_ignores_a_one_off_decorated_form(tmp_path: Path) -> None:
+    """A real hapax, and the reason it is worth a guard: "Demon King Fang
+    Yuan" was cited twice as a worked example of the title problem, and it
+    occurs exactly *once* in 2,360 chapters. A form seen once is a typo, an
+    extraction artefact or a one-time flourish, and linking on it means
+    linking on noise. The cluster around it is still correct - the hapax is
+    left out of it, not allowed to suppress it."""
+    root = tmp_path / "library"
+    book_id = _book_mentioning(
+        tmp_path,
+        root,
+        "Cultivation Book",
+        {"Fang Yuan": 300, "Elder Fang Yuan": 20, "Venerable Fang Yuan": 15, "Demon King Fang Yuan": 1},
+    )
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("character-a", "Demon King Fang Yuan", "character"),
+            ("character-b", "Elder Fang Yuan", "character"),
+            ("character-c", "Venerable Fang Yuan", "character"),
+            ("character-d", "Fang Yuan", "character"),
+        ],
+    )
+
+    assert _variant_names(detect_name_variants(root=root)) == [
+        {"Elder Fang Yuan", "Venerable Fang Yuan", "Fang Yuan"}
+    ]
+
+
+def test_detect_name_variants_splits_a_name_that_is_two_people_joined(tmp_path: Path) -> None:
+    """The conjunction guard, scoped to where the compound shape actually is.
+    "Tug And Blaze" is two horses, and stripping it to "Blaze" would pick one
+    of them as the survivor. A *leading* conjunction is a different thing
+    entirely - "And Ryan" is a sentence opening - and vetoing those too costs
+    4 correct links across the corpus while protecting nothing, so the guard
+    looks only past the first token."""
+    root = tmp_path / "library"
+    book_id = _book_mentioning(
+        tmp_path, root, "Fantasy Book", {"Blaze": 300, "Tug And Blaze": 20, "Ryan": 300, "And Ryan": 20}
+    )
+    _seed_named_entities(
+        root,
+        book_id,
+        [
+            ("character-a", "Tug And Blaze", "character"),
+            ("character-b", "Blaze", "character"),
+            ("character-c", "And Ryan", "character"),
+            ("character-d", "Ryan", "character"),
+        ],
+    )
+
+    assert _variant_names(detect_name_variants(root=root)) == [{"And Ryan", "Ryan"}]
+
+
+def test_detect_name_variants_leaves_a_qualified_category_noun_alone(tmp_path: Path) -> None:
+    """The measured failure shape, and the guard that removes it. Every one of
+    the 7 errors left after scoring is a qualified variety of a category noun
+    - "Blue Elixir" -> "Elixir", "Red Genome" -> "Genome", "Mount Augustus" ->
+    "Augustus" - and every one is a thing rather than a person. Requiring both
+    entities to be characters removes the whole class; the correct
+    non-character links it gives up are determiner strips like "The Wargals"
+    -> "Wargals", which `match_key` already unifies, so
+    `detect_duplicate_entities` reports those either way."""
+    root = tmp_path / "library"
+    book_id = _book_mentioning(tmp_path, root, "Time Loop Book", {"Elixir": 300, "Blue Elixir": 25})
+    _seed_named_entities(
+        root,
+        book_id,
+        [("item-a", "Blue Elixir", "item"), ("item-b", "Elixir", "item")],
+    )
+
+    assert detect_name_variants(root=root) == []
+
+
 def test_merging_a_name_variant_makes_either_name_find_all_the_facts(tmp_path: Path) -> None:
     """The point of the whole feature, end to end. Before: a question about
     "Arald" retrieves only the facts filed under that exact spelling. After:

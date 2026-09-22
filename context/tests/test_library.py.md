@@ -1,7 +1,7 @@
 ---
 source: tests/test_library.py
-last_synced: 2026-09-15T16:39:28Z
-source_hash: 3b775a7b9a6a52a9051667267aa1a1c92083b83d
+last_synced: 2026-09-22T17:40:00Z
+source_hash: 7a8087f706d19d9fb659ec4049ba49b294b193be
 ---
 
 ## Purpose
@@ -60,6 +60,46 @@ Also covers two areas added since:
   `select_relevant_facts` finds both entities' facts under either name.
   `test_doctor_reports_name_variants_without_touching_them` pins that `--fix`
   never merges.
+
+- **The residue rule** (`_residue_variant_pairs`, build-order 02c) — a
+  decorated form of a name the book uses far more often on its own. Every
+  fixture is built by `_book_mentioning`, which writes prose containing each
+  name an exact number of times as a *maximal* capitalised run, because
+  frequency in the book's own text is the rule's only evidence.
+
+  **Every one of these tests uses two decorated forms, and that is not
+  decoration.** With a single one, `_fuller_name_pairs` links it already on
+  containment alone, so a two-entity fixture passes with the residue rule
+  deleted - which is how these were first written and what a sabotage run
+  caught. Two decorated forms trip that rule's ambiguity veto, and only the
+  residue rule survives it. That is also the honest statement of what this
+  rule adds at entity level: the multi-form case, plus frequency evidence in
+  place of pure spelling.
+
+  Linking: `..._treats_more_titles_as_more_evidence` (02c(ii) dissolving -
+  four decorated forms of Fang Yuan as one cluster, where the old veto gave
+  nothing; only `Lord` is in `_TITLES`, and the clan name `Gu Yue` could not
+  be in a wordlist at all), `..._keeps_two_decorated_characters_apart` (two
+  men of the same clan stay two clusters),
+  `..._links_a_sentence_initial_word_to_the_bare_name` ("But Fang Yuan" -
+  the 181-prefix-forms trap, where folding it in is the right answer).
+
+  Refusing, one test per guard, each verified by deleting that guard alone:
+  `..._refuses_a_family_name_shared_across_characters` (guard B - "Gu" sits
+  inside longer names more often than it stands alone, and guard A cannot see
+  it because the book never writes "gu" in lowercase),
+  `..._refuses_a_capitalised_everyday_word` (guard A - "Chi Qu You", the
+  capitalised-everyday-word failure it shares with the grounding check),
+  `..._needs_the_bare_name_to_be_established` (the 100-sighting floor),
+  `..._needs_the_bare_name_to_dominate` (the 5x ratio, pinned with the
+  weakest real case in the corpus: "Qing Shu" 143 against "Gu Yue Qing Shu"
+  129), `..._ignores_a_one_off_decorated_form` ("Demon King Fang Yuan", which
+  occurs once in 2,360 chapters - and the surrounding cluster is still
+  formed, so the hapax is excluded rather than allowed to suppress it),
+  `..._splits_a_name_that_is_two_people_joined` (the conjunction guard looks
+  only past the first token: "Tug And Blaze" is refused, "And Ryan" links),
+  `..._leaves_a_qualified_category_noun_alone` (the characters-only
+  restriction, which removes the entire measured error class).
 
 - **Linking names** (`link_names`) —
   `test_link_names_before_extraction_stops_the_split_forming` is the important

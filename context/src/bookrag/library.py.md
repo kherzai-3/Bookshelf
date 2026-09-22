@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/library.py
-last_synced: 2026-09-16T19:53:59Z
-source_hash: 397b596680c3790a02edd5c42eea824427db2afd
+last_synced: 2026-09-22T17:40:00Z
+source_hash: 85fb5b59d10347ecbed6788e93ce1efcad303e55
 ---
 
 ## Purpose
@@ -264,10 +264,11 @@ detection only; applying a cluster goes through the existing merge.
 `detect_duplicate_entities` structurally cannot find these: it groups by
 `match_key`, and "Baron Arald" / "Arald" do not share one.
 
-**Three rules, each scoped to one book and one entity type. All three were
-chosen by measuring candidate precision on the real 493-entity library, not
-by reasoning about what ought to work** - the survey lives at
-`_title_variant_pairs` / `_fuller_name_pairs` / `_prefix_shaped_pairs`:
+**Four rules, each scoped to one book, three of them also to one entity type.
+All four were chosen by measuring candidate precision on real data rather
+than by reasoning about what ought to work** - the survey lives at
+`_title_variant_pairs` / `_fuller_name_pairs` / `_prefix_shaped_pairs` /
+`_residue_variant_pairs`:
 
 1. **`_title_variant_pairs` — a rank in front of a name.** "Baron Arald" ≡
    "Arald". 10 candidates on real data, **10/10 correct**. Needs almost no
@@ -291,6 +292,8 @@ by reasoning about what ought to work** - the survey lives at
    the longer name, the shorter name must not reduce to a bare rank, and the
    shorter name must sit inside **exactly one** longer name.
 3. **`_stated_variant_pairs` — the book says so.** "Connwaer, called Conn".
+4. **`_residue_variant_pairs` — a decorated form of a better-attested name.**
+   "Elder Fang Yuan" ≡ "Fang Yuan". See "The residue rule" below.
 
 **The prefix shape is not evidence.** `_prefix_shaped_pairs` alone proposed 6
 pairs on the real library and **every one was wrong** (`Machine`/`Machinery`,
@@ -355,6 +358,125 @@ name, which is O(text) rather than O(pairs²) and would catch epithets. It was
 dropped because "Will, known as the Ranger's apprentice" yields the pair
 (Will, Ranger) from a sentence that asserts nothing of the kind; the string
 relationship is what currently makes the text evidence trustworthy.
+
+## The residue rule (`_residue_variant_pairs`)
+
+Build-order item **02c(i)+(ii)+(vi)**: a character fragmented across a title,
+a clan prefix and a bare name. Reported case - *Reverend Insanity*'s
+protagonist is `Fang Yuan`, `Gu Yue Fang Yuan`, `Lord`/`Elder Fang Yuan` and
+about thirty surface forms in total, of which the three rules above reached
+**one**, and only because `lord` happens to sit in `_TITLES`.
+
+**Do not classify the prefix; test what is left behind.** Three classifiers
+were built and all three failed - the best read invented name-parts
+(`Northern`, `Yellow`, `Blood`, `Star`) as titles and put the real ranks
+`Elder` and `Senior` in the reject bucket. Ordinary-English-ness cannot
+separate a rank from an invented name-part, because a book's invented
+vocabulary is English-shaped. So strip a leading token only when the
+remainder is a better-attested name in the same book:
+
+```
+link "P R" -> R iff
+  freq(R) >= 100  and  freq(R) >= 5 x freq(P R)
+  freq(P R) >= 10                  # the decorated form is real, not a hapax
+  R stands on its own              # guards A and B, both required
+```
+
+Frequencies are **maximal runs of capitalised words** in that book's own
+prose, so `Fang Yuan` counts only its bare sightings and `Lord Fang Yuan` is
+counted separately rather than folded into it.
+
+**Guards A and B are both required, and that was measured.** A residue of two
+or more tokens is already name-shaped and needs neither. For a single token:
+(A) the book must not use the word in lowercase 25+ times, and (B) the bare
+form must outnumber the token's use inside longer names. On Reverend Insanity
+A alone gives 355 links and strips surnames and category nouns (`Moonlight Gu`
+→ `Gu`, `Liu Wen Wu` → `Wu`); B alone gives 221 and strips capitalised
+pronouns (`Chi Qu You` → `You`, `Qin Bai He` → `He`). Together: 203 links, 2
+wrong.
+
+**Scored by hand over all 8 books: 240 links, 231 correct, 96.3%**, guards
+fixed before scoring rather than after.
+
+### Three things that fall out of testing the residue
+
+- **No wordlist, and not eastern-specific.** Over the other seven books it
+  proposes 37 links and stays silent on both nonfiction titles, finding
+  `Magister Nevery`, `Underlord Crowe`, `Captain Ahab`, `The Aes Sedai` -
+  titles no closed list can hold *because the book invented them*.
+  `Magister` is the same word `ingest/vocatives.py` false-positived on.
+- **The ambiguity veto dissolves.** `_fuller_name_pairs` refuses a short name
+  that sits inside more than one longer one; each decorated form is tested
+  against the bare name independently, so four decorated forms give four
+  links. More titles means more evidence, which inverts 02c(ii).
+- **Sentence-initial words stop being a trap.** 181 distinct capitalised forms
+  precede `Fang Yuan` and the commonest are `But` (741), `If` (332), `When`
+  (191). All link back to `Fang Yuan`, which is correct for them - the
+  prefix's identity never has to be decided.
+
+### Two changes made while porting it, both measured
+
+- **The cross-book half of guard A was dropped, and precision went up.** As
+  scored, a residue counted as an ordinary English word when it was lowercase
+  25+ times in the book *and* appeared in 6 of the library's 8 books. That
+  cannot ship: a three-book library can never satisfy it, so the rule would
+  silently degrade to guard B alone. Dropping it loses 3 links, of which 2
+  were scored errors - **237 links, 230 correct, 97.0%**.
+- **Characters only, which the scoring could not have told us.** The
+  hand-scoring ran over raw text and had no entity types in it. Sorting the
+  surviving links by type afterwards, all 7 remaining errors are things rather
+  than people (`Blue Elixir` → `Elixir`, `Red Genome` → `Genome`, `Mount
+  Augustus` → `Augustus`), and every correct non-character link but one is a
+  determiner strip (`The Wargals` → `Wargals`, `The Ogier` → `Ogier`) that
+  `match_key` already unifies, so `detect_duplicate_entities` reports it
+  either way. The restriction removes the whole observed error class at a cost
+  of approximately nothing - a very different trade from the rejected
+  productivity guard below.
+
+**The rejected guard, recorded so it is not revived.** Requiring the prefix to
+be *productive* - to decorate several different identities - removes 5 of the
+9 errors and costs 58 links (240→182 at productivity ≥2), taking precision
+from 96.3% to 97.8% by losing roughly 53 correct links. Same posture as the
+prefix heuristic under rank 02.
+
+**The 5x ratio is left where the corpus was scored.** Relaxing it to 3.0 adds
+13 links across the 8 books and several look right on inspection (`Captain
+Kerrn` → `Kerrn`, `The Baron` → `Baron`). None of the 13 were hand-scored, so
+moving it would put the precision figure out of date rather than improve it.
+
+**What it does not reach**, so the phase-order question on 02c is unchanged:
+every link is a decorated form of a name already present. It reaches none of
+the assumed identities (`Hei Lou Lan`, `Wu Shuai`, `Qi Sea Ancestor`), which
+share no tokens with `Fang Yuan` - that is 02c(iii) and (iv)'s work. This
+addresses the **0.67%** of the protagonist's mentions that carry a title or
+clan prefix, offline, with no schema change and no re-extraction.
+
+**What it adds over `_fuller_name_pairs` at entity level**, which is narrower
+than the raw-text link count suggests and worth not re-deriving: a *single*
+decorated form is already linked by containment. The new reach is (1) the
+multi-decorated-form case the ambiguity veto refuses, and (2) frequency
+evidence in place of pure spelling. Every test for this rule therefore uses
+two decorated forms - a two-entity fixture passes with the rule deleted.
+
+**Measured end to end on real prose**, with an entity set synthesised from
+forms verified present in `chapters.jsonl` (the library has no extracted
+entities for this book). Before: `Fang Yuan` = `Lord Fang Yuan`, one pair,
+and `Fang Zheng` nothing at all. After: `Fang Yuan` clusters with `Lord`,
+`Elder` and `Gu Yue Fang Yuan`, and `Fang Zheng` gets his own three-form
+cluster **without** being fused into Fang Yuan's despite sharing the `Gu Yue`
+prefix. `Demon King Fang Yuan`, which occurs once in 2,360 chapters, is
+correctly left out.
+
+**Cost.** Chapters are read only when some entity's name is a proper suffix of
+another's in the same book, so the common case costs nothing; a real
+`bookrag doctor` run on the current library still takes 0.8s. The largest book
+in the corpus (2,360 chapters) scans in under two seconds when it does fire.
+
+**Propose-only, like its three siblings** - reported by `bookrag doctor` and
+applied by `--merge-name-variants`, never by `--fix`. The known failure shape
+ships documented rather than guarded against, and the transfer hazard 02c
+records is untouched: `Wolf King` names Chang Shan Yin before chapter 432 and
+Fang Yuan after, and nothing here is chapter-scoped. That is 02c(iii).
 
 ## `link_names` / `unlink_names`
 - `link_names(book_id, names, root, epithets, reason) -> LinkResult` — declares
