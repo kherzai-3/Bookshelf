@@ -1236,6 +1236,41 @@ only guards what it is pointed at.
   case proves it *too* eager for some question shapes, at which point the
   breadth would want to be a setting rather than a fixed instruction. Not a
   defect today, and nothing to fix unless a real over-reach shows up.
+- **Autofit: detect available VRAM and size `$OLLAMA_NUM_CTX` (and recommend
+  KV-cache settings) automatically**, instead of a user working through the
+  "Is a full offload even possible on this machine?" section by hand (see
+  above for the current manual levers and the weights+cache formula). Raised
+  from a real support case: a user at a partial GPU/CPU split on
+  `qwen2.5:7b-instruct` reached for further quantization first, which is
+  exactly the lever that section flags as costing output quality for no
+  guaranteed win, when the KV cache was the actual fixable part. Not scoped
+  yet - needs a planning pass on:
+  - Cross-platform free-VRAM detection (`nvidia-smi`/`rocm-smi` parsing, no
+    universal API) that degrades to a no-op on CPU-only or unsupported GPUs -
+    this project's own dev machine is one.
+  - Whether it only ever picks `num_ctx` (already bookrag's knob) or also
+    prints/recommends server-side settings (`OLLAMA_KV_CACHE_TYPE`,
+    `OLLAMA_NUM_GPU`) it has no authority to set itself - see `base.py`'s
+    "bookrag never chooses GPU or CPU - Ollama does" principle, which this
+    would need to respect rather than quietly cross.
+  - **Whether `bookrag chat` should become continuous (conversation history
+    carried across questions) or stay independent (today's behaviour - the
+    `input()` loop in `cli.py`'s `_chat` recomputes `select_relevant_facts`/
+    `format_context` from scratch per question, with no memory of earlier
+    turns).** This has to be decided before autofit's targets are, not after:
+    a continuous conversation accumulates prior turns into the prompt and
+    needs headroom for that growth, while independent per-question calls only
+    ever need to fit one question's retrieved facts - a smaller, flatter
+    budget that may make a larger context window unnecessary in the first
+    place.
+  - **A concrete signal for "facts are being cut off," rather than a
+    book-length heuristic.** `select_relevant_facts` (see `query.py`) already
+    narrows what's sent per-question, which likely covers most of this in
+    practice - but that guards relevance, not confirmation that everything it
+    selected actually fit within `num_ctx`. Worth checking whether that
+    guarantee already exists before treating this as solved, since autofit
+    needs the cutoff signal, not the narrowing, to know when a chosen
+    `num_ctx` is too small.
 
 ## For future development sessions (Claude or human)
 
