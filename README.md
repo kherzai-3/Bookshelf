@@ -862,10 +862,20 @@ only guards what it is pointed at.
   "Lord/Elder/Demon King Fang Yuan", and nine assumed identities. Measured
   against the real ingested text: the shipped rules link **3 of ~30** surface
   forms, and only because "lord" happens to sit in the honorifics list.
-  Three separate causes, all confirmed:
+  Four separate causes, all confirmed:
   - the honorifics list is Western-only, so "Elder Fang Yuan" (94 mentions
     across 35 chapters) strips to nothing, and only a *leading* title is
-    stripped, so "Demon King Fang Yuan" keeps its rank;
+    stripped, so a two-word rank like "Wolf King Chang Shan Yin" (67 mentions)
+    keeps it. An earlier draft of this list cited "Demon King Fang Yuan" here;
+    that form occurs **once** in 2,360 chapters, so the reasoning stands but
+    the example was a hapax - "Lord" (166) and "Elder" (94) are the forms with
+    real volume;
+  - **a clan prefix is not a title, and treating the two as one problem is
+    itself a cause.** A rank is drawn from a closed vocabulary; "Gu Yue" is a
+    family name the book invented, so no honorifics list can ever contain it.
+    It precedes 41 distinct personal names and the book also names "Gu Yue
+    Clan" and "Gu Yue Village", which is what makes it recognisable without a
+    list;
   - the ambiguity guard **inverts**. Refusing a name that sits inside more
     than one longer name is right for two characters sharing a given name,
     but "Fang Yuan" sits inside four longer forms of *itself*, so the richer
@@ -885,8 +895,42 @@ only guards what it is pointed at.
   Yuan, not Wu Shuai"). And **aliases carry no chapter scope at all**. Facts
   do, so no merged entity can leak a later fact; what leaks is the alias list
   itself, since showing "Fang Yuan, also known as Qi Sea Ancestor" to a reader
-  at chapter 100 gives away a chapter-1853 reveal. Planned, not built - see
-  Future ideas.
+  at chapter 100 gives away a chapter-1853 reveal.
+
+  **The first three causes have a measured fix design; the assumed-identity
+  half does not yet.** The approach that does *not* work is classifying the
+  prefix - deciding whether "Lord" is a rank, "Gu Yue" a clan, "But" neither.
+  Three classifiers were built against the full text and all three failed; the
+  best of them read invented name-parts ("Northern", "Blood", "Star") as ranks
+  and read the real ranks "Elder" and "Senior" as neither, because a book's
+  invented vocabulary is English-shaped. What works is testing what is *left
+  behind*: strip leading tokens from a candidate name only when the remainder
+  is itself a better-attested name in the same book. That one rule strips a
+  Western honorific, an eastern clan prefix and a book-invented title alike,
+  and it needs no wordlist, no new schema field and no re-extraction. It also
+  dissolves the inverted ambiguity guard rather than repairing it - each longer
+  form is tested against the bare name independently, so four decorated forms
+  now produce four links instead of none. **Measured at 240 proposed links
+  across the 8-book library, 231 correct (96.3%), hand-checked.** Two guards on
+  the remainder are both required, and neither is sufficient alone: without
+  "the remainder is not an ordinary English word" it strips surnames and
+  category nouns ("Dong Fang" to "Fang"); without "the bare remainder
+  outnumbers its own use inside longer names" it strips capitalised pronouns
+  ("Qin Bai He" to "He"). **All 9 errors share one shape** - a qualified
+  variety of a category the book names ("Blue Elixir" to "Elixir", "Four
+  Flavours Liquor" to "Liquor"), 7 of the 9 in a single book. The obvious third
+  guard was built and rejected on cost: requiring the prefix to decorate
+  several different identities removes 5 of those errors and loses about 53
+  correct links doing it. So this ships propose-only, with the failure shape
+  documented rather than guarded against. **It is also not an
+  eastern-naming fix**, which was not the expectation - run unchanged over the
+  other books it finds "Magister Nevery" and "Underlord Crowe" in *The Magic
+  Thief*, "Captain Ahab", "The Aes Sedai" and "The Wargals", all titles a
+  closed list cannot hold precisely because the book invented them.
+  **Designed and measured, not built** - and its position in the build order is
+  itself an open question, since it addresses the 0.67% of mentions that carry
+  a title or clan prefix rather than the assumed identities that carry the
+  rest. See Future ideas.
 - **Small local models are less reliable at strict JSON than Claude -
   mitigated with real, grammar-level structural guarantees, not just a
   request.** `llama3.2:3b`'s first real test produced a JSON array with a
@@ -1151,13 +1195,24 @@ only guards what it is pointed at.
   **What's still open is the same problem in third-person books**, where
   there is no narrator to be addressed and a character can accumulate titles
   and assumed identities instead - measured on a real book as 3 of ~30 forms
-  linked. See the matching entry under Known limitations for the three
-  confirmed causes, and for the two constraints that make it harder than
-  loosening the rules: a name can transfer between characters, and an alias
-  carries no chapter scope, so an unscoped link is itself a spoiler.
-  The planned shape: fix the title morphology first (it needs no
+  linked. See the matching entry under Known limitations for the four
+  confirmed causes, for the remainder rule that now addresses the first three,
+  and for the two constraints that make it harder than loosening the rules: a
+  name can transfer between characters, and an alias carries no chapter scope,
+  so an unscoped link is itself a spoiler.
+  The planned shape: fix the name morphology first (it needs no
   re-extraction), then give an alias a `from_chapter`, then widen the
-  stated-link rule behind a negation guard. **Identity stays in the alias
+  stated-link rule behind a negation guard. **The morphology half now has a
+  measured mechanism** - the remainder rule described under Known limitations,
+  which covers Western honorifics, eastern clan prefixes and book-invented
+  titles with one test and no wordlist. **Its phase position is an open
+  question rather than a settled one**, because the same measurement undercuts
+  the reason it was scheduled first: 99.33% of the reported character's 56,456
+  mentions are the bare name, every title and clan form together accounts for
+  376, and the assumed identities carry roughly 10,270. Morphology is cheap and
+  worth doing, but being cheap is not a reason to do it first when the
+  chapter-scoped alias is what makes the high-volume half both correct and safe
+  to render. **Identity stays in the alias
   record rather than being derived from the planned timeline construct** -
   resolving who a character *is* has to precede attributing events to them,
   or the timeline inherits the fragmentation. The alias record is shaped as
