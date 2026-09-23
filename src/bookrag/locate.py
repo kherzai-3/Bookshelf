@@ -113,19 +113,41 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?\"'”’])\s+|\n{2,}")
 # reader to a passage that does not support what they were told, which reads
 # as the tool being wrong about the book rather than about the location.
 #
-# **Measured on real extractor output**, not reasoned about: 49 statements
-# from two Ranger's Apprentice chapters, extracted by the real default model
-# and hand-scored. At 0.40, 40 of 49 got a quote and 39 of those 40 were
-# correct - 97.5% precision at 82% coverage. The nine abstentions still get a
+# **Measured on real extractor output**, not reasoned about: 181 statements
+# from eleven chapters of six books, produced by the real default model and
+# hand-scored one at a time. At 0.40, 130 got a quote - 72% coverage - and
+# 118 of those were right, so 91% precision. The 51 abstentions still get a
 # structural citation, which is the designed degradation.
 #
-# **The threshold is insensitive where it matters**: 0.30 and 0.40 both match
-# 40 of 49, so the exact value is not load-bearing. 0.50 would drop to 37,
-# removing the single wrong match (which scored 0.49) at the cost of two
-# correct ones. That trade is within noise at this sample size and on one
-# book - and one of the two chapters was unusually quotation-heavy dialogue,
-# which flatters the scores. Worth revisiting against a wider fact library
-# before moving; it is a scoring job, not a code change.
+# **The threshold is worth very little in either direction.** Over the whole
+# plausible range it buys almost no precision and costs a lot of coverage:
+#
+#       0.30   85% coverage   88% precision
+#       0.40   72%            91%            <- here
+#       0.50   64%            92%
+#       0.70   44%            94%
+#
+# Raising it is a bad trade outright. Lowering it to 0.32 is a real trade
+# rather than a free win - 20 more quotes at 80% marginal precision - and it
+# is declined on the rule at the top of this comment: a wrong quote costs
+# more than a missing one. Below ~0.30 marginal precision falls to 45%.
+#
+# **An earlier, narrower measurement said the opposite, and it was wrong.**
+# On 49 statements from two chapters of one book, 0.30 and 0.40 matched the
+# identical set, so the value looked inert; across six books 0.32 matches 20
+# more statements than 0.40 does. That sample also reported 97.5% precision,
+# which the wider one does not support - the *same book* scores 81% on two
+# different chapters.
+#
+# **What decides whether a chapter gets quotes is not this constant.** It is
+# the share of the model's own words that appear nowhere in the chapter,
+# which `_UNSEEN_IDF` charges at full weight in the denominator below. Across
+# the eleven chapters that share tracks the median score at r = -0.81: where
+# 5-10% of the words are unseen the median score is 0.57-0.86, and in the one
+# chapter at 33% - an Eye of the World chapter whose statements are all
+# interior-state summaries - the median is 0.25 and not one statement clears
+# 0.40. A single global threshold cannot serve both kinds of chapter. That is
+# the thing to fix if coverage ever matters more than it does today.
 _MIN_PASSAGE_SCORE = 0.40
 
 # A quote long enough to be unique and short enough to read. Real sentences

@@ -774,11 +774,45 @@ an untitled chapter is counted from the volume's own start, not the file's.
 See [Naming the books inside an
 omnibus](#naming-the-books-inside-an-omnibus-automatically).
 
-**A quote is shown only when the match is confident.** Measured against 49
-real extracted statements, 40 got a quote and 39 of those were correct
-(97.5%); the other 9 get a location with no quote. That is deliberate — a
-citation pointing at the wrong sentence tells you the book says something it
-does not, and you would have no way to tell it apart from a correct one.
+**A quote is shown only when the match is confident.** A citation pointing at
+the wrong sentence tells you the book says something it does not, and you
+would have no way to tell it apart from a correct one — so when the match is
+weak you get the location and no quote.
+
+Measured by hand-scoring **181 statements** from eleven chapters of six
+books, produced by the default model (`qwen2.5:7b-instruct`):
+
+| book | statements | quoted | correct |
+| --- | --- | --- | --- |
+| Moby Dick | 19 | 19 | 18 — 95% |
+| Atomic Habits | 37 | 27 | 26 — 96% |
+| The Perfect Run | 42 | 33 | 31 — 94% |
+| The Magic Thief | 27 | 14 | 13 — 93% |
+| Ranger's Apprentice | 42 | 37 | 30 — 81% |
+| The Eye of the World | 14 | 0 | — |
+| **all six** | **181** | **130 (72%)** | **118 — 91%** |
+
+**Coverage varies enormously and precision barely does.** Whether a chapter
+gets quotes at all turns out to depend on how much of the model's *own*
+vocabulary appears nowhere in the chapter: across the eleven chapters that
+share predicts the match score at r = −0.81. The Eye of the World chapter is
+the extreme — a third of the model's words are absent from the chapter,
+because it summarises interior states ("Rand was feeling paranoid and on
+edge") that no sentence in the book states, and not one of its 14 statements
+clears the bar. Abstaining there is the right answer, but it means coverage
+is a property of the chapter, not a dial.
+
+**The confidence threshold is worth very little**, which the same
+measurement settled. Moving it from 0.30 to 0.70 changes precision by six
+points and coverage by forty-one. It stays at 0.40 because a wrong quote
+costs more than a missing one, not because 0.40 is tuned.
+
+**The errors that remain are not the kind a threshold catches.** The three
+worst-scoring mistakes score 1.00, 0.98 and 0.98 — and in all three the
+*statement* is wrong while the matcher correctly found the sentence the
+model misread. The rest are near misses, where one rare word carries the
+match: four statements like "Gilan inspected the garrison house" all landed
+on "He inspected the tip of his finger."
 
 Citations never read any chapter but the one a fact came from, and never
 show anything derived from the whole book (no "chapter 12 of 75", no
@@ -991,11 +1025,24 @@ only guards what it is pointed at.
   chapter at 40 facts (`parsing.py`'s `maxItems`), which exists to make the
   runaway-generation failure structurally impossible - a real incident
   generated 8,490+ output tokens before Ollama's own server gave up. On a
-  real 75-chapter run two chapters hit that cap exactly, meaning genuine
-  content was cut. Raising it trades the guard against completeness over a
-  multi-hour run, so it is a deliberate open decision rather than a knob to
-  nudge. Per-chapter fact volume also grows with the known-entities list, so
-  the cap binds most in a book's later chapters.
+  real 75-chapter run two chapters hit that cap exactly. Raising it trades the
+  guard against completeness over a multi-hour run, so it is a deliberate
+  open decision rather than a knob to nudge. Per-chapter fact volume also
+  grows with the known-entities list, so the cap binds most in a book's
+  later chapters.
+
+  **Hitting the cap turns out to be a symptom, not just a ceiling.** Across
+  eleven sampled chapters exactly one reached 40 facts, and 25 of those 40
+  were verbatim repeats of a statement already in the list — 62%, against
+  0–6% in every chapter that stopped on its own. What the model does when it
+  runs out of things to say is restate its last observation with one detail
+  changed ("Nevery was a wizard who had a workroom with a high table…", "…
+  with dirty teacups…", "… with a high stool"), until the schema stops it.
+  So a capped chapter yields perhaps a third of what its fact count suggests.
+  Exact `(entity, statement)` repeats are dropped before anything is stored,
+  so the library stays clean; the loss is in yield, and the cap is a usable
+  signal that a chapter is worth re-running rather than evidence that it was
+  too rich to fit.
 - **Facts extracted before a field existed simply lack it**, and nothing
   backfills them. A book extracted before story-time tracking has no `when`
   on any fact, so its backstory is indistinguishable from its present-tense
@@ -1469,7 +1516,7 @@ only guards what it is pointed at.
 - ~~Citations back to where a fact came from.~~ **Built** — see
   [Where an answer came from](#where-an-answer-came-from). The fuzzy route
   was the right call: no schema change, no re-extraction, and measured at
-  97.5% precision on real extractor output.
+  **91% precision over 181 hand-scored statements across six books**.
 
   **The framing in this entry was wrong in a way worth keeping.** It treated
   the problem as "locate the source text", with the stitched omnibus as a
@@ -1492,9 +1539,21 @@ only guards what it is pointed at.
     PDF outline and from `page_N.html` spine filenames. So no book in the
     corpus falls back to a bare chapter index.
 
-  Still open: the confidence threshold is calibrated on 49 statements from
-  one book, and a wider extracted library would settle it properly. A book
-  that is unpaged *and* whose passage does not match stops at the chapter.
+  **The threshold question is closed, and the answer is that it was the
+  wrong question.** The first measurement covered one book (49 statements,
+  97.5%) and left 0.40-vs-0.50 open. Five more books say the threshold moves
+  precision six points across a range that costs forty-one points of
+  coverage — and that the one-book figure was optimistic, since the *same
+  book* scores 81% on two different chapters. What replaced the question:
+  **coverage is a per-chapter property**, set by how much of the model's own
+  vocabulary is absent from the chapter (r = −0.81), so no single global
+  threshold serves a plainly-written chapter and a summarised one alike.
+  Adapting the scoring to that is the real open item.
+
+  Still open: a book that is unpaged *and* whose passage does not match
+  stops at the chapter. And the error class worth naming is the near miss —
+  one rare word carries the match, so "Gilan inspected the garrison house"
+  lands on "He inspected the tip of his finger."
 - **Answers that read as answers, not as a list of facts.** Reported from
   real use: `chat` sometimes returns what is effectively the fact dump it was
   given rather than a reply to the question. This is partly a prompt problem

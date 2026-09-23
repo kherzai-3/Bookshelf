@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/locate.py
-last_synced: 2026-09-22T20:57:17Z
-source_hash: d8fe86b359115832f127c13395d79853c551cc27
+last_synced: 2026-09-23T13:41:38Z
+source_hash: f68793e20d92a7cf508d17536d2b9dcfd2315dd5
 ---
 
 ## Purpose
@@ -50,9 +50,10 @@ evidence the book actually has.
   so a title-only citation would look informative and be useless.
 - **A wrong quote is worse than no quote**, so the matcher abstains. A
   citation that points at a passage not supporting what the reader was told
-  reads as the tool being wrong about the *book*. Nine of 49 real statements
+  reads as the tool being wrong about the *book*. 51 of 181 real statements
   get no quote and only a structural location; that is the designed
-  degradation, not a failure.
+  degradation, not a failure — and in one sampled chapter it is *all* 14 of
+  them (see Measurement).
 - **Scoring is weighted recall of the statement's words, not similarity.**
   The statement is short and the source sentence may be long; penalising a
   sentence for words the statement omitted would prefer terse sentences over
@@ -87,21 +88,59 @@ evidence the book actually has.
   code — the function cannot return a chapter other than the one asked for.
 
 ## Measurement
-49 statements from two Ranger's Apprentice chapters, produced by the real
-default model (`qwen2.5:7b-instruct`) and hand-scored:
+181 statements from **eleven chapters of six books**, produced by the real
+default model (`qwen2.5:7b-instruct`) and hand-scored one at a time against
+the whole matched sentence (the shipped 220-character quote cap hides the
+half of a long sentence that carries the match, and judging on the rendered
+quote alone reverses two verdicts):
 
-| threshold | matched | notes |
-| --- | --- | --- |
-| 0.30 | 40/49 | identical set to 0.40 |
-| **0.40** | **40/49** | **39 of 40 correct — 97.5% precision, 82% coverage** |
-| 0.50 | 37/49 | removes the one wrong match (0.49), costs two correct |
-| 0.60 | 31/49 | |
+| threshold | quoted | coverage | correct | precision |
+| --- | --- | --- | --- | --- |
+| 0.30 | 153 | 85% | 135 | 88% |
+| 0.32 | 150 | 83% | 134 | 89% |
+| **0.40** | **130** | **72%** | **118** | **91%** |
+| 0.50 | 115 | 64% | 106 | 92% |
+| 0.60 | 100 | 55% | 93 | 93% |
+| 0.70 | 80 | 44% | 75 | 94% |
 
-The threshold is **not load-bearing between 0.30 and 0.40**. The 0.40/0.50
-choice is within noise at this sample size, on one book, with one of the two
-chapters unusually quotation-heavy dialogue (which flatters the scores).
-Revisiting it against a wider fact library is a scoring job, not a code
-change.
+**The threshold is worth very little in either direction** — six points of
+precision across a range that costs 41 points of coverage. Raising it is a
+bad trade outright. Lowering it to 0.32 is a real trade rather than a free
+one (20 more quotes at 80% marginal precision) and is declined because a
+wrong quote costs more than a missing one; below ~0.30 marginal precision
+falls to 45%. **0.40 stays, and the useful result is that it barely
+matters.**
+
+### What the earlier one-book measurement got wrong
+The 49-statement Ranger's Apprentice sample reported **97.5% precision at
+82% coverage** and concluded the threshold was inert between 0.30 and 0.40.
+Both conclusions were artefacts of one book:
+- precision on six books is **91%**, and the same book scores **81%** on two
+  different chapters;
+- 0.32 matches 20 more statements than 0.40, so the value is not inert.
+
+The sweep that produced the "inert" reading only moved the threshold
+*upward*, so it could not see the correct quotes sitting just below 0.40.
+
+### Precision is capped by errors no threshold can reach
+The three highest-scoring wrong matches score **1.00, 0.98 and 0.98**, and in
+all three the *statement* is false while the matcher correctly found the
+sentence the model misread ("Will was a Battleschool apprentice" — the
+sentence says Horace). The rest are near misses at 0.48–0.81, where a rare
+word dominates: four statements of the form "Gilan inspected the garrison
+house" all matched "He inspected the tip of his finger", because weighted
+recall deliberately does not penalise a short sentence.
+
+### Coverage is set per chapter, not by the threshold
+What decides whether a chapter gets quotes is the share of the model's words
+that appear **nowhere in the chapter**, which `_UNSEEN_IDF` charges at full
+weight in the denominator. Across the eleven chapters that share tracks the
+median score at **r = −0.81**: at 5–10% unseen the median is 0.57–0.86; in
+the one chapter at 33% — an Eye of the World chapter whose statements are
+all interior-state summaries — the median is 0.25 and **not one of its 14
+statements clears 0.40**. Per-book coverage at 0.40 ranges 0%–100%. A single
+global threshold cannot serve both kinds of chapter; that, not the constant,
+is what to fix if coverage ever matters more.
 
 ## Spoiler safety
 A new render surface, and `tests/test_spoiler_safety.py` says a surface its
@@ -135,8 +174,11 @@ cannot see.
 - Out: `Citation`, or `None` when the book or chapter cannot be read at all.
 
 ## Open Questions / TODOs
-- The threshold is calibrated on one book and 49 statements. A reader's
-  extracted library would settle the 0.40-vs-0.50 question properly.
+- The 0.40-vs-0.50 question is **closed by rejecting it** — see Measurement.
+  What replaced it: coverage is a per-chapter property driven by how much of
+  its own vocabulary the model uses, and a global threshold cannot adapt to
+  it. Scaling `_UNSEEN_IDF` by how paraphrased a statement is, or scoring
+  against a chapter-normalised baseline, is the open direction.
 - No within-chapter locator exists for a book that is both unpaged and whose
   passage does not match — those citations stop at the chapter.
 - `position` is a character offset ratio, so a chapter with a long front
