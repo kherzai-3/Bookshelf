@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/extract/pipeline.py
-last_synced: 2026-09-16T19:53:59Z
-source_hash: c28223f86548b351242b3b018b90cc28057b7ee3
+last_synced: 2026-09-23T00:00:00Z
+source_hash: 9251348251207fdb6face8b4ad0c5c0c9667cd23
 ---
 
 ## Purpose
@@ -13,7 +13,8 @@ entity-resolved, chapter-scoped).
 ## Public Interface
 - `ExtractionResult(book_id, chapter_count, fact_count, new_entity_count,
   parse_failure_count, ungrounded_entity_count, skipped_chapter_count,
-  duplicate_fact_count=0, resumed_from_chapter=None, already_complete=False)`
+  duplicate_fact_count=0, resumed_from_chapter=None, already_complete=False,
+  context_window=None)`
   — `resumed_from_chapter`/`already_complete` are for resumable extraction
   (see Key Decisions): `resumed_from_chapter` is the chapter index this
   call started at (`None` for a from-scratch run), `already_complete`
@@ -21,7 +22,14 @@ entity-resolved, chapter-scoped).
   `duplicate_fact_count` is how many raw facts this call dropped for being
   an exact repeat of an earlier fact in the same chapter (see Key
   Decisions) - `cli.py` surfaces it like the other counts here when
-  nonzero.
+  nonzero. `context_window` is the window this run actually used after
+  narrowing it from the book's own chapters, or `None` for a provider with no
+  such setting (Anthropic, the fakes) - callers must read `None` as "nothing
+  to report", never as a default.
+- `context_window_for(chapters, *, ceiling, floor=MIN_CONTEXT_WINDOW,
+  tokens_per_word=_TOKENS_PER_WORD) -> int` — the smallest sensible extraction
+  context window for this book.
+- `MIN_CONTEXT_WINDOW = 4096` — the floor.
 - `extract_book(book_id, provider, root=None, on_chapter_done=None,
   restart=False) -> ExtractionResult` — appends to (or, for a from-scratch
   run, overwrites) `data/library/<book_id>/facts.jsonl` and updates
@@ -418,3 +426,76 @@ created and cannot distinguish a seeded one, so seeding earlier is undone -
 confirmed before this existed, where a restart turned a linked Conn/Connwaer
 back into two entities. `seed_alias_group` is idempotent, so a normal resumed
 run re-applies the same groups and changes nothing.
+
+## Sizing the context window from the book
+
+`extract_book` holds every chapter before it makes a single provider call, so
+the largest prompt the run will ever send is knowable up front rather than
+guessed at. `context_window_for` computes it - longest chapter's word count x
+`_TOKENS_PER_WORD` + `_PROMPT_OVERHEAD_TOKENS` - rounds **up to a power of
+two**, and clamps to `[floor, ceiling]`. `narrow_context_window` then applies
+it to the provider, and only ever downwards.
+
+Worth doing because `num_ctx` sizes the KV cache, which is the main lever on
+whether a model fits in VRAM at all (~0.9GB between 4096 and 16384 for a 7B).
+Measured on the real library: Ranger's Apprentice (longest chapter 3,865
+words) drops from 16384 to **8192**, halving that cache; The Eye of the World
+(longest 10,509 words, 43 chapters over 8,192 tokens) correctly stays at
+**16384**. A flat 8192 for everyone would have broken the second book, which is
+why this is computed per book rather than being a smaller constant.
+
+- **`_TOKENS_PER_WORD = 1.25` is an estimate, deliberately not a real
+  tokenizer.** Measured against Ollama's own `prompt_eval_count` on real
+  chapters (1,737 tokens for 1,434 words). A real tokenizer would mean a new
+  dependency, a model-specific vocabulary and a genuine correctness burden, to
+  size a number that is then rounded up to a power of two and padded anyway -
+  the rounding absorbs far more error than the estimate introduces.
+- **`_PROMPT_OVERHEAD_TOKENS = 2600` is generous on purpose.** It covers the
+  ~1,440-token system prompt plus the known-entities preamble, which grows
+  through a book (measured: 269 characters at chapter 4, 780 by chapter 8, and
+  still climbing). Under-sizing truncates a real chapter and silently loses
+  facts; over-sizing costs only cache.
+- **Rounded to a power of two** so two similar books don't end up with two
+  gratuitously different cache sizes.
+- **Only ever narrows** (enforced in `narrow_context_window`, not here), so a
+  user who deliberately set a small `$OLLAMA_EXTRACT_NUM_CTX` never has it
+  raised by a book that would like more room.
+- Computed in **two places on purpose**: `cli.extract_start_notes` previews it
+  so the user is told before a multi-hour run rather than after, and
+  `extract_book` applies it as the real source of truth. Same shape as
+  `resume_start_index`/`resume_blocker`, and safe because narrowing is
+  idempotent.
+
+## Splitting an oversized chapter across several calls
+
+A chapter over `consolidate.SPLIT_THRESHOLD_WORDS` (3,500) is handed to the
+provider in pieces - one `extract_facts` call each - instead of whole. Usually
+this loop runs exactly once; measured on the corpus, it splits 1 of 75 chapters
+in Ranger's Apprentice and 48 of 108 in The Eye of the World, and does nothing
+at all to six of the eight books.
+
+**Every fact from every piece is recorded against `chapter.index`.** That single
+property is what makes the change safe: `query.facts_as_of`'s spoiler
+filtering, `locate.cite`'s citations, `locate.volume_at`'s spans,
+`extraction_progress.json`'s resume granularity and `chat --chapter N` all key
+on `chapter_index`, and none of them can tell that a chapter was split. No book
+needs re-ingesting. Splitting at ingest instead would change what a chapter *is*
+and break all of them - see `ingest/consolidate.py`'s context doc.
+
+Two details that are easy to get wrong:
+
+- **`_entity_is_grounded` checks the WHOLE chapter's text, never the piece the
+  fact came from.** A character named in piece 1 and described in piece 3 is
+  grounded in the chapter; narrowing the check to the piece would reject them
+  as hallucinated purely because of where a boundary happened to fall.
+- **`parse_failure_count` counts failed *pieces*, not failed chapters.** A
+  chapter whose pieces partly succeed still contributes its good facts, which
+  is strictly better than losing the whole chapter to one bad response - but
+  it does mean the count can exceed the chapter count on a split book.
+- **The schema's `maxItems: 40` becomes a per-piece budget**, so a split chapter
+  can return far more facts than an unsplit one. That is the intended relief for
+  chapters that were being truncated, and simultaneously the thing to watch: the
+  existing per-chapter exact-match dedup sits outside the provider call so it
+  spans pieces for free, but it catches only verbatim repeats, not a
+  near-duplicate rephrasing across a boundary. `eval.near_duplicate_pairs`
+  exists to measure that.

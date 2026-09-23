@@ -445,6 +445,30 @@ def test_ingest_groups_its_output_under_headings(
     assert out.index("consolidated 40 raw fragments into") > out.index("Parsing:")
 
 
+def test_ingest_points_at_eval_before_committing_to_a_long_extract(
+    tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`bookrag eval` existed for a long time and was invisible in practice.
+
+    This is the one place a user is told what to do next, and it sent them
+    straight into a multi-hour `extract` without mentioning that the model
+    choice behind it is checkable in minutes - and that changing it afterwards
+    means re-extracting the book from chapter 0. Same lesson as the
+    doctor-only detectors: a capability reachable only from the README is one
+    nobody uses.
+    """
+    epub_path = tmp_path / "fragmented.epub"
+    build_fragmented_epub(epub_path)
+    main(["ingest", str(epub_path)])
+
+    out = capsys.readouterr().out
+    assert "bookrag eval " in out
+    assert "--models" in out
+    # Offered as a cheaper thing to do *first*, so it has to precede the
+    # backgrounding advice for the long run.
+    assert out.index("bookrag eval ") > out.index("Next steps:")
+
+
 def test_extract_separates_its_result_from_the_progress_lines(
     tmp_path: Path, _library_root: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

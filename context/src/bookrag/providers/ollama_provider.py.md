@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/ollama_provider.py
-last_synced: 2026-09-13T20:30:00Z
-source_hash: 4e0fed878973887d769fe3ec47c7fcec69ff9125
+last_synced: 2026-09-23T00:00:00Z
+source_hash: 6bab7f838f917c0b74571a88b6ee86efb20ebd8e
 ---
 
 ## Purpose
@@ -26,6 +26,22 @@ locally-running `llama3.2:3b` and `qwen2.5:7b-instruct` models.
   900`. The env-var path is what makes switching models (or context window
   size) on a different machine a one-line `.env` change rather than a code
   edit - see README's "LLM provider setup".
+- `extract_num_ctx` — extraction's own window, a **public mutable attribute**
+  rather than a constructor-only value, resolved as `extract_num_ctx or
+  $OLLAMA_EXTRACT_NUM_CTX or DEFAULT_EXTRACT_NUM_CTX` (16384). Mutable because
+  `extract.pipeline.extract_book` narrows it per book once it has the chapters
+  in hand, which is the only point at which the right value is knowable - see
+  `providers.base.narrow_context_window`, which only ever narrows.
+- `last_usage() -> CallUsage | None` — what the most recent call cost. `None`
+  before any call. See `providers/base.py`'s context doc for why this carries
+  seconds as well as tokens.
+- `missing_model() -> str | None` — the extraction model's name if Ollama does
+  not have it pulled; `None` if it is present **or if that couldn't be
+  determined at all**. The conflation is deliberate: an unreachable Ollama is
+  already reported far better by the first real call's error, and a preflight
+  that blocked a run over its own inability to check would be worse than not
+  checking. `cli.missing_model_note` turns a hit into the message a user sees
+  before a multi-hour run starts, rather than at its first chapter.
 - `OllamaProvider.extract_facts(chapter_text, known_entities, content_type="fiction",
   known_entity_types=None) -> list[ExtractedFact]` — raises `RuntimeError` (not `ExtractionParseError`)
   if Ollama itself isn't reachable, doesn't respond within `timeout`, or a
@@ -120,6 +136,27 @@ locally-running `llama3.2:3b` and `qwen2.5:7b-instruct` models.
   context size roughly independent of book length - `num_ctx` is a safety
   net for whatever still reaches the model after that filtering (e.g. a
   broad question naming no specific entity, which still gets everything).
+- **`num_ctx` was then split in two, because that entire paragraph is about
+  *chat* and extraction had simply inherited its answer.** Extraction's prompt
+  is one chapter plus a fixed preamble, nothing that grows with the book.
+  Measured across all eight books in the corpus, the largest extraction prompt
+  anywhere is 15,736 tokens (The Eye of the World's longest chapter) and a
+  typical book's median is ~4,000-5,000 - so 16384 was roughly 3x what most
+  books need, on a setting that sizes the KV cache and is therefore the main
+  lever on whether a model fits in VRAM at all (~0.9GB between 4096 and 16384
+  for a 7B). `DEFAULT_EXTRACT_NUM_CTX`/`$OLLAMA_EXTRACT_NUM_CTX` is now the
+  extraction ceiling, and `extract_book` narrows *below* it per book: Ranger's
+  Apprentice runs at 8192, The Eye of the World stays at 16384. Exactly the
+  same "one knob was serving two unrelated workloads" split as
+  `DEFAULT_MODEL`/`DEFAULT_ANSWER_MODEL` above.
+- **Records `CallUsage` after every successful call**, including
+  `prompt_eval_duration` as `prompt_seconds`. This matters more than it looks:
+  Ollama reuses a cached KV prefix across calls that share one and still
+  reports the full `prompt_eval_count`, so the token count and the real cost
+  disagree wildly - measured here, an identical 1,439-token system prompt took
+  34.23s cold and 0.12s on the next call. Usage is recorded only on success; a
+  failed call has no cost to report, and leaving the previous call's numbers
+  in place is less misleading than inventing zeroes for a call that never ran.
 - Sends `"temperature": DEFAULT_EXTRACTION_TEMPERATURE` (0.2) for
   `extract_facts` only - lower than Ollama's own default (~0.8), since
   extraction is a structured task that benefits from more deterministic

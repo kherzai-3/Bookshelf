@@ -16,7 +16,13 @@ from bookrag.extract.resolve import (
     save_entities,
     seed_alias_group,
 )
-from bookrag.providers.base import ExtractionParseError, Provider, extraction_identity
+from bookrag.ingest.consolidate import split_for_extraction
+from bookrag.providers.base import (
+    ExtractionParseError,
+    Provider,
+    extraction_identity,
+    narrow_context_window,
+)
 from bookrag.storage import (
     library_root,
     load_chapters,
@@ -79,6 +85,59 @@ _PROPER_NOUN_ENTITY_TYPES = {"character", "setting"}
 # ("The Ruins of Gorlan") without making it a common-noun description.
 _NAME_CONNECTORS = {"of", "the", "a", "an", "and", "de", "du", "di", "la", "le", "van", "von"}
 
+# Tokens per word of English prose, measured against Ollama's own
+# prompt_eval_count on real chapters of a real book: two chapters of 970 and
+# 2,404 words produced 2,745 and 4,482 prompt tokens, so 1,737 tokens for 1,434
+# words. Deliberately an estimate rather than a real tokenizer - bringing one in
+# would mean a new dependency, a model-specific vocabulary, and a hard
+# correctness burden, to size a window that is then rounded up to a power of two
+# and padded anyway. The rounding absorbs far more error than this introduces.
+_TOKENS_PER_WORD = 1.25
+
+# What every call carries besides the chapter: the extraction system prompt and
+# the chat template around it, measured at ~1,440 tokens, plus room for the
+# known-entities preamble, which grows through a book (measured: 269 characters
+# at chapter 4, 780 by chapter 8, and it keeps going). Generous on purpose -
+# under-sizing the window truncates a real chapter, while over-sizing costs
+# only KV cache.
+_PROMPT_OVERHEAD_TOKENS = 2600
+
+# Never size a book's window below this, however short its chapters are. The
+# system prompt alone is ~1,440 tokens, so anything much smaller leaves no room
+# for a chapter at all, and no real machine is short of the difference.
+MIN_CONTEXT_WINDOW = 4096
+
+
+def context_window_for(
+    chapters: list,
+    *,
+    ceiling: int,
+    floor: int = MIN_CONTEXT_WINDOW,
+    tokens_per_word: float = _TOKENS_PER_WORD,
+) -> int:
+    """The smallest sensible context window for extracting this book.
+
+    `extract_book` holds every chapter before it makes a single call, so the
+    longest prompt it will ever send is knowable up front rather than guessed
+    at. Sizing from that is worth doing because num_ctx sizes the KV cache, and
+    the KV cache is the main lever on whether a model fits in VRAM - measured
+    at ~0.9GB between 4096 and 16384 for a 7B (see ollama_provider's
+    model_placement docstring).
+
+    Rounded up to a power of two so a small difference between two books does
+    not produce two gratuitously different cache sizes, and clamped to
+    [floor, ceiling] so this can only ever *narrow* the user's configured
+    window, never widen it past what they asked for. Measured over this
+    project's corpus: most books land at 8192, The Eye of the World - whose
+    chapters run to ~5,900 words - stays at 16384.
+    """
+    longest = max((len(chapter.text.split()) for chapter in chapters), default=0)
+    needed = int(longest * tokens_per_word) + _PROMPT_OVERHEAD_TOKENS
+    window = floor
+    while window < needed and window < ceiling:
+        window *= 2
+    return min(window, ceiling)
+
 
 @dataclass
 class ExtractionResult:
@@ -96,6 +155,11 @@ class ExtractionResult:
     # run already finished every chapter (see extraction_progress.json below).
     resumed_from_chapter: int | None = None
     already_complete: bool = False
+    # The context window this run actually used, once narrowed from the book's
+    # own chapters (see context_window_for). None for a provider with no such
+    # setting - Anthropic, the test fakes - which is why cli.py must treat it
+    # as "nothing to report" rather than as a default.
+    context_window: int | None = None
 
 
 def resume_start_index(
@@ -220,6 +284,16 @@ def extract_book(
         raise blocker
     current_identity = extraction_identity(provider)
 
+    # Narrowed from the chapters themselves, now that they are all in hand.
+    # Only ever downwards (see narrow_context_window), and only for a provider
+    # that has such a setting at all - None for Anthropic and the test fakes.
+    ceiling = getattr(provider, "extract_num_ctx", None)
+    context_window = (
+        narrow_context_window(provider, context_window_for(chapters, ceiling=ceiling))
+        if isinstance(ceiling, int)
+        else None
+    )
+
     entities = load_entities(root)
     # A restart truncates facts.jsonl (file_mode "w" below), so every entity
     # the discarded run resolved has to go with it - otherwise it survives
@@ -282,18 +356,31 @@ def extract_book(
                     skipped_chapter_count += 1
                     raw_facts = []
                 else:
-                    # A malformed response for one chapter (real, observed: a
-                    # tiny dedication-page "chapter" confusing a small local
-                    # model) shouldn't abort a whole multi-hour book run - skip
-                    # it and keep going. A different failure (e.g. the provider
-                    # being unreachable) is NOT caught here and does abort, since
-                    # retrying every remaining chapter against a dead provider is
-                    # pointless.
-                    try:
-                        raw_facts = provider.extract_facts(chapter.text, known_names, content_type, known_types)
-                    except ExtractionParseError:
-                        parse_failure_count += 1
-                        raw_facts = []
+                    raw_facts = []
+                    # Usually exactly one piece - split_for_extraction returns
+                    # the chapter unchanged unless it is genuinely oversized,
+                    # so this loop runs once for six of the eight books in this
+                    # project's corpus. Every fact from every piece is recorded
+                    # against `chapter.index` below, so splitting is invisible
+                    # to storage, citations and spoiler filtering alike.
+                    for piece in split_for_extraction(chapter.text):
+                        # A malformed response for one chapter (real, observed: a
+                        # tiny dedication-page "chapter" confusing a small local
+                        # model) shouldn't abort a whole multi-hour book run - skip
+                        # it and keep going. A different failure (e.g. the provider
+                        # being unreachable) is NOT caught here and does abort, since
+                        # retrying every remaining chapter against a dead provider is
+                        # pointless.
+                        try:
+                            raw_facts += provider.extract_facts(
+                                piece, known_names, content_type, known_types
+                            )
+                        except ExtractionParseError:
+                            # Counted per failed piece. A chapter whose pieces
+                            # partly succeed still contributes its good facts,
+                            # which is strictly better than the whole chapter
+                            # being lost to one bad response.
+                            parse_failure_count += 1
 
                 # A small local model asked to fill a generous maxItems
                 # budget sometimes pads it by repeating a fact it already
@@ -327,6 +414,13 @@ def extract_book(
                     # entirely different book series. This only gates NEW
                     # entities - a fact about an already-known one is fine
                     # even if this chapter only refers to them by pronoun.
+                    #
+                    # Checked against the WHOLE chapter, never the piece the
+                    # fact came from. An oversized chapter is split for the
+                    # model's benefit only: a character named in piece 1 and
+                    # described in piece 3 is grounded in the chapter, and
+                    # narrowing this to the piece would reject them as
+                    # hallucinated purely because of where a boundary fell.
                     if is_new and not _entity_is_grounded(raw.entity_name, raw.entity_type, chapter.text):
                         ungrounded_entity_count += 1
                         continue
@@ -433,6 +527,7 @@ def extract_book(
         skipped_chapter_count=skipped_chapter_count,
         duplicate_fact_count=duplicate_fact_count,
         resumed_from_chapter=resumed_from_chapter,
+        context_window=context_window,
     )
 
 

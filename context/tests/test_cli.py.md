@@ -1,7 +1,7 @@
 ---
 source: tests/test_cli.py
-last_synced: 2026-09-22T21:20:00Z
-source_hash: 016ba0d50d514f605319b8be97e842be9d8903eb
+last_synced: 2026-09-23T00:00:00Z
+source_hash: e04f747cb96d32fb7530ea0414a0e23bf5cfdeec
 ---
 
 ## Purpose
@@ -195,3 +195,17 @@ Also covers, added since the above:
 - The `_library_root` autouse fixture points `BOOKRAG_LIBRARY_ROOT` at a
   `tmp_path` for every test in this module, so nothing here ever touches the
   real `data/library/`.
+
+## `bookrag eval` in the post-ingest next steps (added 2026-09-23)
+
+`test_ingest_points_at_eval_before_committing_to_a_long_extract` pins that
+ingest offers `bookrag eval --models` as the cheap thing to do *first*.
+
+The command predates this by a long way and was invisible in practice - a real
+user of this project did not know it existed. The post-ingest output is the one
+place anyone is told what to do next, and it pointed straight at a multi-hour
+`extract` without mentioning that the model choice behind it is checkable in
+two minutes, or that changing it afterwards means re-extracting from chapter 0
+(`ExtractionResumeMismatch` refuses to mix two models' facts). Same lesson as
+the doctor-only detectors: a capability reachable only from the README is one
+nobody uses.

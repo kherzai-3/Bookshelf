@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/cli.py
-last_synced: 2026-09-22T20:19:13Z
-source_hash: 8daf8e86bca334a4b48bf10515cbf8d9440351f8
+last_synced: 2026-09-23T00:00:00Z
+source_hash: 839188a75dd1ed7fddf6e773fe23f0ddcaabc3df
 ---
 
 ## Purpose
@@ -122,12 +122,16 @@ actual logic (see that file's context doc for the real behavior).
   working out why it stopped. An unusable path is reported and exits 1 rather
   than raising.
 - CLI: `bookrag eval <book-id> --chapters 0,1,2 [--providers ollama,fake]
-  [--model NAME]` — comma-separated chapter indices and provider names;
-  malformed `--chapters` is rejected with exit code 1 before running
-  anything. `--model` applies the same override to every provider listed
-  (doesn't support comparing two different models of the *same* provider
-  in one run - `providers` is keyed by provider name, so e.g. `ollama,ollama`
-  would collapse to one entry).
+  [--model NAME] [--models A,B]` — comma-separated chapter indices and
+  provider names; malformed `--chapters` is rejected with exit code 1 before
+  running anything. `--model` applies one override to every provider listed;
+  **`--models` is the cross-product**, and is how you compare two models of
+  the *same* provider - the thing the old dict-keyed-by-provider-name shape
+  could not express, because `ollama,ollama` collapsed to one entry.
+  `_eval_label` names each row `provider:model`, or just `provider` when no
+  model was named, so a plain `--providers ollama,fake` reads exactly as it
+  did before. Passes the book's `content_type` through to `summarize`, which
+  needs it to read the right taxonomy's `maxItems` ceiling.
 - CLI: `bookrag chat <book-id> --chapter N [--provider NAME] [--model NAME]
   [--question TEXT]` — `--chapter` (0-indexed, required) is the reader's
   current position; facts past it are never shown to the provider (goes
@@ -554,3 +558,32 @@ happens.
   hand, apply the same automatic rule to an already-ingested book, or undo. The
   report marks each candidate `(name)` or `(epithet)`, which is the distinction
   that decides where it may be used.
+
+## `extract`: checking the model is pulled before starting
+
+`missing_model_note(provider)` runs before anything else in `_run_extract`,
+turning `OllamaProvider.missing_model()` into the message a user sees. It
+returns `[]` - and the run proceeds - whenever the provider has no such probe
+(Anthropic, the fakes) or the probe can't answer, matching the
+`extraction_identity`/`model_placement` posture exactly: a preflight must never
+itself be what blocks a run.
+
+It exists because a typo'd or unpulled `--model` is the likeliest way to start
+a run that cannot possibly work, and without this you find out at the *first
+chapter* - several minutes into something you expected to leave going for
+hours. One HTTP call to `/api/tags` rules it out. This matters more now that
+`--models` makes trying an unfamiliar model an obvious thing to do.
+
+## `extract`: telling the user the context window before the run
+
+`extract_start_notes` now also reports the context window this book will run
+at, via `_narrow_for_book`. That both *computes and applies* the narrowing, so
+it is a side-effecting call inside a function that otherwise only formats text
+- deliberate, and safe because `narrow_context_window` only ever narrows and is
+therefore idempotent with `extract_book`'s own call. It is the same
+"preview in the CLI, decide in the pipeline" split as
+`resume_start_index`/`resume_blocker` above, for the same reason: the user
+should be told before the run starts, not after it.
+
+`chapters` is an optional argument so the many existing callers and tests that
+pass only a count keep working; no chapters means no window line.

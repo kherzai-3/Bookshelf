@@ -149,33 +149,55 @@ Three providers, chosen via `--provider`/`--providers` or `$BOOKRAG_PROVIDER`:
   `OllamaProvider.DEFAULT_ANSWER_MODEL` - same value as extraction's
   default today, but free to diverge later without any code changes.
 
-  Bigger isn't automatically slower: every token requires a full pass
-  through *all* the model's weights, so naively a bigger model does
-  proportionally more arithmetic per token - but a real, controlled
-  comparison on this project's own data found `qwen2.5:7b-instruct` was
-  *not* slower than `llama3.2:3b` on the same real chapter (63s vs 78s) - a
-  more selective model can generate fewer, more targeted output tokens and
-  come out ahead despite doing more work per token. A GPU also
-  parallelizes that per-token work, so a larger model costs much less
-  wall-clock time there than the raw parameter ratio suggests.
+  **Don't pick a model on speed — measure it.** A real, controlled
+  comparison on this project's own data, six chapters of one book, same
+  prompt and schema, CPU-only:
 
-  - **`qwen2.5:7b-instruct` (the default)** - the same real, controlled
-    test found it both more reliable (`llama3.2:3b` showed genuine
-    run-to-run variance - one run on a chapter produced zero facts about a
-    character whose appearance is revealed in that exact chapter, a second
-    identical run captured it well) and not slower. Still measured in the
-    tens-of-seconds-per-chapter range, i.e. multiple hours for a full
-    novel-length book, whether or not a GPU is available. `bookrag
-    extract` is [resumable](#extracting-facts) specifically because of
-    this - a long run doesn't need to happen in one sitting.
+  | | `qwen2.5:7b-instruct` | `llama3.2:3b` |
+  |---|---|---|
+  | wall-clock per chapter | 205s | **168s** |
+  | facts | 94 | 195 |
+  | **distinct entities** | **25** | **16** |
+  | **near-duplicate statement pairs** | **4** | **53** |
+  | chapters at the 40-fact ceiling | 0 of 6 | **3 of 6** |
+  | groundedness | 0.884 | 0.851 |
+  | citation coverage | 77% | 75% |
+
+  The smaller model *is* faster, and it wins on the two numbers you would
+  naively look at — more facts, less time. It is still the worse choice:
+  those facts cover 36% fewer entities, thirteen times as many are
+  near-duplicates of each other, and it hit the output ceiling in half the
+  chapters. On one chapter it returned 40 facts about a *single* character,
+  missing three others the same 970 words introduce. That is padding, not
+  richer extraction.
+
+  - **`qwen2.5:7b-instruct` (the default)** - more selective and more
+    accurate on the same text, and the same comparison found `llama3.2:3b`
+    also asserting things the chapter does not say. Expect a few minutes per
+    chapter, i.e. multiple hours for a full novel, whether or not a GPU is
+    available. `bookrag extract` is [resumable](#extracting-facts)
+    specifically because of this.
   - **On more constrained hardware**, fall back to a smaller model (e.g.
-    `llama3.2:3b`) via `--model llama3.2:3b` / `$OLLAMA_MODEL` - faster per
-    chapter on a machine that can't spare the RAM/VRAM for a 7B model, at
-    the cost of the completeness/consistency found above. Confirm any
-    model choice empirically before committing to a full-book run:
-    `bookrag eval <book-id> --chapters N --model <candidate>` is fast (one
-    chapter, not the whole book) and read-only, never touching
-    `facts.jsonl`/`entities.json`.
+    `llama3.2:3b`) via `--model llama3.2:3b` / `$OLLAMA_MODEL` - it runs in
+    less RAM/VRAM, at the cost measured above. Confirm any model choice
+    empirically before committing to a full-book run: `bookrag eval` is
+    fast (a chapter or two, not the whole book) and read-only, never
+    touching `facts.jsonl`/`entities.json`. **`--models` compares candidates
+    head to head in one command**, which `--model` cannot do — it applies a
+    single model to every provider listed:
+
+    ```bash
+    bookrag eval <book-id> --chapters 6,7 --models qwen2.5:7b-instruct,llama3.2:3b
+    ```
+
+    It reports exactly the table above: distinct entities, citation
+    coverage, near-duplicate pairs, how often the fact ceiling was hit,
+    groundedness, and real cost in both seconds and tokens.
+
+    Switching models for a book you have already extracted means
+    re-extracting it from chapter 0 — `bookrag extract` refuses to append
+    one model's facts to another's, and `--restart` is the only way past
+    that. Measure first.
   - **Chat's answering model can be tuned independently of extraction's** -
     a single question is one cheap one-shot call regardless of model size
     (~1-2s measured either way), so there's little downside to keeping it
@@ -609,15 +631,33 @@ Check with `nvidia-smi` / `rocm-smi`, or Task Manager → Performance → GPU �
 *Dedicated GPU memory* (see the warning below about which numbers there are
 trustworthy). If you're partially or entirely on CPU, the levers are:
 
-- **Lower `$OLLAMA_NUM_CTX`.** This is the only knob on bookrag's side that
-  moves the needle, because it sizes the KV cache. Measured on a 7B model:
-  **5.94 GB at `num_ctx=16384`** (the default) versus **5.06 GB at 4096** — so
-  nearly a gigabyte of VRAM. If the model *almost* fits, this is the first
-  thing to try. It is a real tradeoff, not a free win: 16384 exists because a
-  full book's assembled context was measured at 26,000–30,000 tokens and
-  silently overflowed an 8192 window, so the model never saw most of what it
-  was asked about. `select_relevant_facts` now caps that, which makes a lower
-  value safer than it used to be — but test it rather than assuming.
+- **Extraction already does this for you.** `bookrag extract` sizes its
+  context window from the book's own longest chapter and prints what it
+  chose:
+
+  ```
+  Extracting 'ranger-s-apprentice-1-2-bindup' - 75 chapter(s) via ollama:qwen2.5:7b-instruct
+    context window sized to 8192 tokens from this book's longest chapter
+  ```
+
+  Measured across this project's corpus, most books land at 8192 rather than
+  16384 — about 0.9 GB of KV cache saved with nothing given up, because their
+  chapters never needed the larger window. Books with genuinely long chapters
+  (*The Eye of the World* has 43 over 8,192 tokens, its longest at 15,736)
+  correctly keep 16384, which is why this is computed per book instead of
+  just being a smaller default. `$OLLAMA_EXTRACT_NUM_CTX` sets a **ceiling**
+  if you want to force something smaller still; extraction only ever goes
+  below it.
+
+- **Lower `$OLLAMA_NUM_CTX`.** This sizes the KV cache for `bookrag chat`
+  (extraction has its own setting, above). Measured on a 7B model: **5.94 GB
+  at `num_ctx=16384`** (the default) versus **5.06 GB at 4096** — so nearly a
+  gigabyte of VRAM. It is a real tradeoff, not a free win: 16384 exists
+  because a full book's assembled context was measured at 26,000–30,000
+  tokens and silently overflowed an 8192 window, so the model never saw most
+  of what it was asked about. `select_relevant_facts` now caps that, which
+  makes a lower value safer than it used to be — but test it rather than
+  assuming.
 - **Force the layer count with `$OLLAMA_NUM_GPU`.** Ollama works out how many
   of the model's 28 layers fit and keeps headroom back; when that estimate is
   conservative and a full offload nearly fits, setting the layer count
@@ -630,9 +670,14 @@ trustworthy). If you're partially or entirely on CPU, the levers are:
 - **Free VRAM elsewhere.** Browsers and Electron apps hold hundreds of MB;
   another model left loaded in Ollama holds gigabytes (`ollama ps` shows
   everything resident).
+- **Quantize the KV cache** — `OLLAMA_FLASH_ATTENTION=1` plus
+  `OLLAMA_KV_CACHE_TYPE=q8_0`, on the **server**. Measured at **5.9 → 5.5 GB**
+  with no detectable quality cost, but **2× slower prefill on CPU**; on a GPU
+  that penalty likely does not transfer. See the budget section below.
 - **Use a smaller or more heavily quantized model** — `--model llama3.2:3b`, or
-  a `q4` build of the same 7B. This is the *last* resort, not the first: it is
-  the only lever here that costs output quality.
+  a `q3` build of the same 7B. This is the *last* resort, not the first, and
+  the measurements below show why: it is the only lever that costs output
+  quality, and on this machine the `q3` build was **slower as well as worse**.
 - **Close other GPU consumers**, and check the driver: Ollama needs CUDA
   (NVIDIA) or a ROCm-supported AMD card. Most integrated GPUs are unsupported —
   the machine this project is developed on has an AMD Radeon 840M and reports
@@ -654,9 +699,54 @@ total, matching the measured figure above), 8192 costs 0.47 GB, and 4096 costs
 0.23 GB. A 6 GB card is borderline at 16384 and comfortable at 8192; 8 GB fits
 with room to spare.
 
-Note the model is **already quantized to Q4_K_M** — "quantize it further" is not
-the easy win it sounds like, since Q3 and below start visibly degrading output.
-The cache is the part worth shrinking. Recent Ollama versions can quantize the
+Note the model is **already quantized to Q4_K_M** — and "quantize it further" is
+not the easy win it sounds like. Measured here, `qwen2.5:7b-instruct-q3_K_M`
+against the Q4_K_M default on the same two real chapters, CPU-only:
+
+| | Q4_K_M | q3_K_M |
+|---|---|---|
+| resident at `num_ctx=16384` | 5.9 GB | **5.1 GB** |
+| seconds per chapter | **245s** | **329s (+34%)** |
+| prompt eval | 143s | **321s (2.2×)** |
+| citation coverage | **71%** | 64% |
+| groundedness | **0.92** | 0.87 |
+| distinct entities | 15 | 14 |
+
+So Q3 is **slower as well as slightly worse** — Q3_K dequantisation costs more
+arithmetic per weight than Q4_K_M, which is the most-optimised path, and on CPU
+that outweighs having fewer bytes to read. It buys 0.8 GB for 7 points of
+citation coverage. On a GPU the speed result may invert if the card is
+bandwidth-bound; the quality result will not. **The cache is the part worth
+shrinking.**
+
+###### Quantizing the KV cache — measured, and it is not free on CPU
+
+`OLLAMA_FLASH_ATTENTION=1` plus `OLLAMA_KV_CACHE_TYPE=q8_0` (set on the Ollama
+**server**, then restart it) stores the cache at 8 bits instead of 16. Measured
+here on the same two chapters, against an f16 baseline:
+
+| | f16 KV | q8_0 KV |
+|---|---|---|
+| resident at `num_ctx=16384` | 5.9 GB | **5.5 GB** |
+| **prompt eval** (~7,860 tokens both) | 143s | **283s — 2.0×** |
+| seconds per chapter | 245s | 337s (+37%) |
+| citation coverage | 71% | 88% |
+| groundedness | 0.92 | 0.94 |
+| distinct entities | 15 | 15 |
+
+**Quality showed no degradation** — notably `distinct entities` was identical,
+which is the metric most at risk, since `resolve_entity` matches names exactly
+and a single corrupted proper noun mints a duplicate character. Do not read the
+coverage jump as an improvement though: at n=2 chapters and temperature 0.2 the
+run-to-run spread is wider than that difference.
+
+**But it cost 2× on prefill**, measured by Ollama's own timer rather than
+wall-clock, so contention cannot explain it: a quantized cache must be
+dequantized on every attention operation, and on CPU that arithmetic outweighs
+the bandwidth saved. **On a GPU this penalty likely does not transfer** — a card
+is bandwidth-bound and has efficient quantized-KV kernels — and if it is what
+takes you from a partial offload to a full one, that is worth far more than any
+prefill cost. Measure it on your own card rather than assuming either way. Recent Ollama versions can quantize the
 KV cache itself (`OLLAMA_FLASH_ATTENTION=1` plus `OLLAMA_KV_CACHE_TYPE=q8_0`,
 set on the **server**, not in bookrag's `.env`), roughly halving those cache
 figures without touching the weights at all. Check your Ollama version supports

@@ -6,13 +6,15 @@ import pytest
 from bookrag.extract.pipeline import (
     MIN_NARRATIVE_WORDS,
     ExtractionResumeMismatch,
+    context_window_for,
     extract_book,
     recorded_extraction_identity,
     resume_start_index,
 )
 from bookrag.extract.resolve import load_entities
+from bookrag.ingest import consolidate
 from bookrag.ingest.chapter import Chapter
-from bookrag.providers.base import ExtractedFact, ExtractionParseError
+from bookrag.providers.base import ExtractedFact, ExtractionParseError, narrow_context_window
 from bookrag.providers.fake_provider import FakeProvider
 from bookrag.storage import save_book, save_declared_aliases
 from tests.helpers import NARRATIVE_PADDING
@@ -1078,3 +1080,164 @@ def test_a_declared_alias_group_survives_a_restart(tmp_path: Path) -> None:
     assert entity["canonical_name"] == "Conn"
     assert entity["aliases"] == ["Connwaer"]
     assert entity["epithets"] == ["boy"]
+
+
+class _WindowedProvider:
+    """Test double with an Ollama-shaped `extract_num_ctx`, recording the
+    window it was left at. Stands in for OllamaProvider without needing one."""
+
+    def __init__(self, ceiling: int = 16384) -> None:
+        self.extract_num_ctx = ceiling
+
+    def extract_facts(self, chapter_text, known_entities, content_type="fiction", known_entity_types=None):
+        return []
+
+
+def test_context_window_is_sized_down_for_a_book_of_short_chapters() -> None:
+    chapters = [Chapter(i, None, "word " * 500) for i in range(5)]
+
+    assert context_window_for(chapters, ceiling=16384) == 4096
+
+
+def test_context_window_grows_with_the_books_longest_chapter() -> None:
+    """Sized from the longest chapter, not the median - one oversized chapter
+    still has to fit, and a window that truncates it silently loses facts."""
+    short = [Chapter(i, None, "word " * 500) for i in range(5)]
+    with_one_long = short + [Chapter(5, None, "word " * 5900)]
+
+    assert context_window_for(short, ceiling=16384) == 4096
+    assert context_window_for(with_one_long, ceiling=16384) == 16384
+
+
+def test_context_window_never_exceeds_the_ceiling() -> None:
+    """A book too big for the configured window is clamped, not accommodated -
+    this may only narrow what the user asked for, never widen it."""
+    huge = [Chapter(0, None, "word " * 100_000)]
+
+    assert context_window_for(huge, ceiling=8192) == 8192
+
+
+def test_context_window_respects_a_user_who_already_chose_a_small_one() -> None:
+    """narrow_context_window only narrows: a deliberately small
+    $OLLAMA_EXTRACT_NUM_CTX must not be raised by a book that would like more."""
+    provider = _WindowedProvider(ceiling=4096)
+    chapters = [Chapter(0, None, "word " * 5900)]
+
+    window = narrow_context_window(provider, context_window_for(chapters, ceiling=4096))
+
+    assert window == 4096
+    assert provider.extract_num_ctx == 4096
+
+
+def test_extract_book_narrows_the_window_and_reports_it(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    chapters = [Chapter(i, None, "word " * 400) for i in range(3)]
+    book_id = save_book(source, chapters, title="Short Chapters", root=root)
+    provider = _WindowedProvider()
+
+    result = extract_book(book_id, provider, root=root)
+
+    assert result.context_window == 4096
+    assert provider.extract_num_ctx == 4096
+
+
+def test_extract_book_reports_no_window_for_a_provider_without_one(tmp_path: Path) -> None:
+    """Anthropic and the test fakes have no num_ctx to size - the result must
+    say "nothing to report" rather than invent a default."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    book_id = save_book(source, [Chapter(0, None, NARRATIVE_PADDING)], title="Test", root=root)
+
+    result = extract_book(book_id, FakeProvider(), root=root)
+
+    assert result.context_window is None
+
+
+class _PerCallProvider:
+    """Records the text of every call and returns one fact naming a entity
+    unique to that call - so a test can see how many pieces a chapter was
+    split into, and what each contained."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def extract_facts(self, chapter_text, known_entities, content_type="fiction", known_entity_types=None):
+        self.calls.append(chapter_text)
+        return [ExtractedFact("Aurelio", "character", "development", "Aurelio appeared.")]
+
+
+def test_an_oversized_chapter_is_not_split_by_default(tmp_path: Path) -> None:
+    """Splitting is off - see `consolidate.SPLIT_OVERSIZED_CHAPTERS` for the
+    six-chapter measurement in which no decision rule survived. Pinned rather
+    than left implicit, because turning it on silently changes 48 of one real
+    book's 108 chapters."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    long_text = "\n".join("Aurelio walked on. " * 20 for _ in range(60))
+    book_id = save_book(source, [Chapter(0, None, long_text)], title="Long", root=root)
+    provider = _PerCallProvider()
+
+    extract_book(book_id, provider, root=root)
+
+    assert len(provider.calls) == 1
+
+
+def test_an_oversized_chapter_is_extracted_in_pieces_when_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(consolidate, "SPLIT_OVERSIZED_CHAPTERS", True)
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    long_text = "\n".join("Aurelio walked on. " * 20 for _ in range(60))
+    book_id = save_book(source, [Chapter(0, None, long_text)], title="Long", root=root)
+    provider = _PerCallProvider()
+
+    extract_book(book_id, provider, root=root)
+
+    assert len(provider.calls) > 1, "a 6000-word chapter should have been split"
+
+
+def test_every_fact_from_a_split_chapter_keeps_the_chapters_own_index(tmp_path: Path) -> None:
+    """The property the whole design rests on. Splitting is for the model
+    only: `chapter_index` still addresses the chapter, so facts_as_of's
+    spoiler filtering, locate.cite's citations and `chat --chapter N` are all
+    untouched by it."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    short = Chapter(0, None, NARRATIVE_PADDING)
+    long_text = "\n".join("Aurelio walked on. " * 20 for _ in range(60))
+    book_id = save_book(source, [short, Chapter(1, None, long_text)], title="Long", root=root)
+
+    extract_book(book_id, _PerCallProvider(), root=root)
+
+    written = [
+        json.loads(line)
+        for line in (root / book_id / "facts.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert written, "expected facts to be written"
+    assert {record["chapter_index"] for record in written} <= {0, 1}
+
+
+def test_a_new_entity_is_grounded_against_the_whole_chapter_not_one_piece(tmp_path: Path) -> None:
+    """A character named in the first piece and described in the last must not
+    be rejected as hallucinated purely because of where a boundary fell."""
+    root = tmp_path / "library"
+    source = tmp_path / "book.epub"
+    source.write_text("x", encoding="utf-8")
+    # "Aurelio" appears only at the very start; the rest of the chapter is
+    # filler, so most pieces will not contain the name at all.
+    long_text = "Aurelio arrived at the gate.\n" + "\n".join(
+        "The road went on and on past the fields. " * 20 for _ in range(60)
+    )
+    book_id = save_book(source, [Chapter(0, None, long_text)], title="Long", root=root)
+
+    result = extract_book(book_id, _PerCallProvider(), root=root)
+
+    assert result.ungrounded_entity_count == 0
+    assert result.fact_count > 0

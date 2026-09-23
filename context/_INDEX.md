@@ -9,12 +9,12 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/ingest/chapter.py](src/bookrag/ingest/chapter.py.md) — shared `Chapter` data model used by every loader.
 - [src/bookrag/ingest/epub_loader.py](src/bookrag/ingest/epub_loader.py.md) — loads an `.epub` into per-chapter plain text, in reading order.
 - [src/bookrag/ingest/pdf_loader.py](src/bookrag/ingest/pdf_loader.py.md) — loads a `.pdf` into per-chapter plain text via its TOC/outline.
-- [src/bookrag/ingest/consolidate.py](src/bookrag/ingest/consolidate.py.md) — merges many small/incoherent chapter fragments into larger, coherent ones for extraction.
+- [src/bookrag/ingest/consolidate.py](src/bookrag/ingest/consolidate.py.md) — sizes text into units a model can handle: merges small fragments up at ingest, and splits an oversized chapter down at extract time.
 - [src/bookrag/ingest/volumes.py](src/bookrag/ingest/volumes.py.md) — finds the separately-published books stitched into one epub, from its nested table of contents, and records them as a span map for citations (it no longer splits the file).
 - [src/bookrag/ingest/vocatives.py](src/bookrag/ingest/vocatives.py.md) — reads a first-person narrator's other names ("Conn"/"boy"/"lad") out of who addresses whom, at ingest, with no model.
 - [src/bookrag/storage.py](src/bookrag/storage.py.md) — persists a book (source + chapters + metadata incl. `content_type`) to `data/library/<book_id>/`; series-aware index + reading-order helper.
 - [src/bookrag/query.py](src/bookrag/query.py.md) — `facts_as_of`: the spoiler-safety filter primitive; `format_context` renders facts for a provider.
-- [src/bookrag/eval.py](src/bookrag/eval.py.md) — read-only provider comparison: side-by-side report + groundedness score.
+- [src/bookrag/eval.py](src/bookrag/eval.py.md) — read-only comparison of several providers *and models*: entity coverage, citation coverage, near-duplicates, the fact ceiling, and real cost.
 - [src/bookrag/cli.py](src/bookrag/cli.py.md) — `bookrag ingest|extract|eval|chat|list|show|remove|aliases|doctor` CLI entry point.
 - [src/bookrag/names.py](src/bookrag/names.py.md) — the residue rule: which decorated forms of a name (`Lord Fang Yuan`, `Magister Nevery`) are the same character, read from the book's own prose, plus the text-only personhood test the ingest path needs because it has no entity types.
 - [src/bookrag/library.py](src/bookrag/library.py.md) — library-wide list/show/remove/aliases/doctor: extraction-status summaries, index/entities.json cleanup, the duplicate/cross-book/name-variant detectors, and `link_names` (declare several names one character, before or after extraction).
@@ -22,7 +22,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/titles.py](src/bookrag/titles.py.md) — last-resort title/author guess from a filename.
 - [src/bookrag/env.py](src/bookrag/env.py.md) — reads settings from the environment/`.env`; a blank value counts as unset, not as an empty-string override.
 - [src/bookrag/providers/__init__.py](src/bookrag/providers/__init__.py.md) — `providers` subpackage marker.
-- [src/bookrag/providers/base.py](src/bookrag/providers/base.py.md) — `ExtractedFact`, `Provider` Protocol (`extract_facts` + `answer_question`), `ExtractionParseError`.
+- [src/bookrag/providers/base.py](src/bookrag/providers/base.py.md) — `ExtractedFact`, `Provider` Protocol (`extract_facts` + `answer_question`), `ExtractionParseError`, and the optional capabilities (identity, placement, `CallUsage`, context-window narrowing).
 - [src/bookrag/providers/fake_provider.py](src/bookrag/providers/fake_provider.py.md) — deterministic no-network provider, for tests.
 - [src/bookrag/providers/anthropic_provider.py](src/bookrag/providers/anthropic_provider.py.md) — Claude-backed provider (untested - no API credential available).
 - [src/bookrag/providers/ollama_provider.py](src/bookrag/providers/ollama_provider.py.md) — local, no-API-key provider via Ollama; the practical default.
@@ -34,7 +34,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [src/bookrag/extract/pipeline.py](src/bookrag/extract/pipeline.py.md) — `extract_book`: runs a provider over every chapter, writes `facts.jsonl`.
 - [tests/helpers.py](tests/helpers.py.md) — shared synthetic epub/pdf builders.
 - [tests/test_epub_loader.py](tests/test_epub_loader.py.md) — covers `epub_loader` (chapters + metadata) with a synthetic in-test epub.
-- [tests/test_consolidate.py](tests/test_consolidate.py.md) — covers `ingest.consolidate`'s trigger decision and merge logic.
+- [tests/test_consolidate.py](tests/test_consolidate.py.md) — covers `ingest.consolidate`'s trigger decision, merge logic, and the extraction-time splitter.
 - [tests/test_volumes.py](tests/test_volumes.py.md) — covers the volume map: the books inside a bindup, surviving consolidation, and (weighted more heavily) the four guards that refuse to find volumes in a book that has none.
 - [tests/test_pdf_loader.py](tests/test_pdf_loader.py.md) — covers `pdf_loader` (chapters + metadata), TOC and no-TOC fallback paths.
 - [tests/test_storage.py](tests/test_storage.py.md) — covers `storage.py`, including the series/chapter-2-collision guarantee.
@@ -54,7 +54,7 @@ context doc under `context/` is added, removed, or its purpose changes materiall
 - [tests/test_spoiler_safety.py](tests/test_spoiler_safety.py.md) — the ship gate: end-to-end proof that a chapter-N render contains nothing from, and derives nothing from, past chapter N.
 - [tests/test_vocatives.py](tests/test_vocatives.py.md) — covers narrator-alias detection: speaker split, per-chapter narration mode, quote styles, and the noise filters.
 - [tests/test_alias_linking.py](tests/test_alias_linking.py.md) — pins the alias/epithet split: epithets reach `resolve_entity` and never `select_relevant_facts`, plus `auto_link_plan`'s rules.
-- [tests/test_eval.py](tests/test_eval.py.md) — covers `groundedness_score`, `run_eval`'s read-only guarantee, and `summarize`.
+- [tests/test_eval.py](tests/test_eval.py.md) — covers `groundedness_score`, `run_eval`'s read-only guarantee and multi-model shape, and the quality columns `summarize` reports.
 - [tests/test_ingestion_report.py](tests/test_ingestion_report.py.md) — covers `classify_ingestion`/`write_ingestion_report`.
 - [tests/test_parsing.py](tests/test_parsing.py.md) — covers `providers.parsing.parse_facts`.
 - [tests/test_prompts.py](tests/test_prompts.py.md) — guards the shipped prompt text against embedding real books' content, which a model copies into its output.

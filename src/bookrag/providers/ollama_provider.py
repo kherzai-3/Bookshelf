@@ -5,11 +5,12 @@ adding an HTTP client dependency, since it's just one JSON POST."""
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 
 from bookrag.env import env_int, env_optional_int, env_str
-from bookrag.providers.base import ExtractedFact, ModelPlacement
+from bookrag.providers.base import CallUsage, ExtractedFact, ModelPlacement
 from bookrag.providers.parsing import extraction_response_schema, parse_facts
 from bookrag.providers.prompts import (
     ANSWER_SYSTEM_PROMPTS,
@@ -51,6 +52,21 @@ DEFAULT_BASE_URL = "http://localhost:11434"
 # whatever still reaches the model after that filtering (e.g. a broad
 # question naming no specific entity, which still gets everything).
 DEFAULT_NUM_CTX = 16384
+# A separate knob from DEFAULT_NUM_CTX, for the same reason DEFAULT_MODEL and
+# DEFAULT_ANSWER_MODEL are separate: one value was serving two unrelated
+# workloads. Everything in the comment above is about *chat* - an assembled
+# fact context that grows with the book. Extraction's prompt is a single
+# chapter plus a fixed preamble, and it is far smaller. Measured across all
+# eight books in this project's corpus, the largest extraction prompt anywhere
+# is 14,696 tokens (The Eye of the World) and the median book's is ~4,500, so
+# 16384 was roughly 3x what extraction actually needed on most books - and the
+# window sizes the KV cache, which is the main lever on whether a model fits
+# in VRAM at all.
+#
+# This is only the ceiling. extract_book narrows it per book from the
+# chapters it already holds (see extract.pipeline.context_window_for), so a
+# book whose longest chapter needs 6,651 tokens runs at 8192 rather than this.
+DEFAULT_EXTRACT_NUM_CTX = 16384
 # Raised from an initial 300s - the extraction prompt rewrite (dropping the
 # unenforceable "only new/changed" instruction, adding per-category
 # definitions and a worked example) produces far more facts per chapter than
@@ -81,6 +97,7 @@ class OllamaProvider:
         num_ctx: int | None = None,
         num_gpu: int | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        extract_num_ctx: int | None = None,
     ) -> None:
         self._model = model or env_str("OLLAMA_MODEL", DEFAULT_MODEL)
         # A single `model` override (constructor arg or `--model`) applies to
@@ -92,6 +109,17 @@ class OllamaProvider:
         self._answer_model = model or env_str("OLLAMA_ANSWER_MODEL", DEFAULT_ANSWER_MODEL)
         self._base_url = (base_url or env_str("OLLAMA_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
         self._num_ctx = num_ctx or env_int("OLLAMA_NUM_CTX", DEFAULT_NUM_CTX)
+        # Extraction's own window. `extract_num_ctx` is how extract_book hands
+        # down the per-book size it computed; $OLLAMA_EXTRACT_NUM_CTX is the
+        # user's override of the ceiling. Kept as a plain attribute rather than
+        # a constructor-only value so extract_book can narrow it after the
+        # provider is built, which is when the chapters are finally known.
+        self.extract_num_ctx = extract_num_ctx or env_int(
+            "OLLAMA_EXTRACT_NUM_CTX", DEFAULT_EXTRACT_NUM_CTX
+        )
+        # The most recent call's real cost. See base.CallUsage for why the
+        # token count and the seconds are both needed and why they disagree.
+        self._last_usage: CallUsage | None = None
         # No default on purpose. Ollama decides how many of the model's layers
         # fit on the GPU using the actual free VRAM at load time, which this
         # process cannot see; overriding that by default would replace a
@@ -121,8 +149,13 @@ class OllamaProvider:
             # project's local Ollama to hold even adversarially).
             response_format=extraction_response_schema(content_type),
             temperature=DEFAULT_EXTRACTION_TEMPERATURE,
+            num_ctx=self.extract_num_ctx,
         )
         return parse_facts(content, content_type)
+
+    def last_usage(self) -> CallUsage | None:
+        """What the most recent call cost. None before any call has been made."""
+        return self._last_usage
 
     def model_placement(self) -> ModelPlacement | None:
         """Where Ollama currently has this model loaded: GPU, CPU, or split.
@@ -153,6 +186,35 @@ class OllamaProvider:
             return ModelPlacement(model=name, size_bytes=size, vram_bytes=vram)
         return None
 
+    def missing_model(self) -> str | None:
+        """This provider's extraction model, if Ollama does not have it pulled.
+
+        None means "fine, or unknowable" - the model is present, or /api/tags
+        could not be read at all. Deliberately conflated: an unreachable Ollama
+        is already reported far better by the first real call's error message,
+        and a diagnostic that blocks a run on its own inability to check would
+        be worse than not checking.
+
+        Matches on the exact tag AND on the bare name, because `ollama pull
+        qwen2.5:7b-instruct` and a request for `qwen2.5:7b-instruct:latest`
+        refer to the same thing.
+        """
+        try:
+            with urllib.request.urlopen(f"{self._base_url}/api/tags", timeout=5) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except Exception:  # noqa: BLE001 - see docstring
+            return None
+        pulled = set()
+        for entry in body.get("models") or []:
+            name = entry.get("name") or entry.get("model") or ""
+            if name:
+                pulled.add(name)
+                pulled.add(name.split(":")[0])
+        wanted = self._model
+        if wanted in pulled or wanted.removesuffix(":latest") in pulled:
+            return None
+        return wanted
+
     def extraction_identity(self) -> str:
         # self._model, not self._answer_model - this labels who wrote a
         # book's facts, and only extract_facts ever does that.
@@ -178,6 +240,7 @@ class OllamaProvider:
         model: str | None = None,
         response_format: dict | None = None,
         temperature: float | None = None,
+        num_ctx: int | None = None,
     ) -> str:
         options = {
             # Ollama's default context window (4096 tokens) can be exceeded
@@ -185,7 +248,7 @@ class OllamaProvider:
             # roughly 5000+ tokens once the system prompt and known-entities
             # list are added) - raised explicitly rather than relying on the
             # default and hoping every chapter stays under it.
-            "num_ctx": self._num_ctx,
+            "num_ctx": num_ctx or self._num_ctx,
         }
         # Omitted entirely unless explicitly set, so Ollama's own layer-fitting
         # decision stays authoritative in the normal case.
@@ -212,6 +275,7 @@ class OllamaProvider:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        started = time.monotonic()
         try:
             with urllib.request.urlopen(request, timeout=self._timeout) as response:
                 body = json.loads(response.read().decode("utf-8"))
@@ -228,4 +292,16 @@ class OllamaProvider:
                 f"(install: https://ollama.com, then `ollama pull {self._model}`) - {exc}"
             ) from exc
 
+        # Recorded after a successful call only - a failed one has no cost to
+        # report, and leaving the previous call's numbers in place would be
+        # less misleading than inventing zeroes for a call that never ran.
+        # `prompt_eval_duration` is nanoseconds and is absent on older Ollama
+        # versions, hence the guarded conversion.
+        prompt_ns = body.get("prompt_eval_duration")
+        self._last_usage = CallUsage(
+            prompt_tokens=body.get("prompt_eval_count"),
+            output_tokens=body.get("eval_count"),
+            prompt_seconds=prompt_ns / 1e9 if isinstance(prompt_ns, (int, float)) else None,
+            total_seconds=time.monotonic() - started,
+        )
         return body.get("message", {}).get("content", "")

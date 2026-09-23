@@ -1,7 +1,7 @@
 ---
 source: tests/test_extraction_pipeline.py
-last_synced: 2026-09-16T20:32:36Z
-source_hash: f8d1e36f7e30cf86d36d1aa1fd5e8325078f6064
+last_synced: 2026-09-23T00:00:00Z
+source_hash: b7343ffeecde277ce3081737dcf84da9d16f5e8f
 ---
 
 ## Purpose
@@ -116,3 +116,47 @@ chapter 1 sees the type `resolve_entity` actually recorded for an entity
 introduced in chapter 0 - the mechanism behind the fix for a confirmed
 entity-type-drift duplication bug (see `extract/pipeline.py`'s and
 `extract/resolve.py`'s context docs).
+
+## Context window sizing and chapter splitting (added 2026-09-23)
+
+`_WindowedProvider` is a stand-in with an Ollama-shaped `extract_num_ctx`;
+`_PerCallProvider` records the text of every call, so a test can see how many
+pieces a chapter became.
+
+- `test_context_window_is_sized_down_for_a_book_of_short_chapters` /
+  `test_context_window_grows_with_the_books_longest_chapter` — sized from the
+  **longest** chapter, not the median. One oversized chapter still has to fit,
+  and a window that truncates it loses facts silently.
+- `test_context_window_never_exceeds_the_ceiling` — this may only narrow what
+  the user configured, never widen it.
+- `test_context_window_respects_a_user_who_already_chose_a_small_one` — a
+  deliberately small `$OLLAMA_EXTRACT_NUM_CTX` is not raised by a book that
+  would like more room. Narrow-only is also what makes the function safe to
+  call twice (cli preview, then pipeline).
+- `test_extract_book_reports_no_window_for_a_provider_without_one` — `None`
+  means "nothing to report", not a default, for Anthropic and the fakes.
+- `test_every_fact_from_a_split_chapter_keeps_the_chapters_own_index` — **the
+  property the whole splitting design rests on.** Splitting is for the model
+  only; `chapter_index` still addresses the chapter, which is what leaves
+  spoiler filtering, citations and `chat --chapter N` untouched. If this ever
+  fails, facts have moved into the wrong chapter and the spoiler guarantee is
+  gone.
+- `test_a_new_entity_is_grounded_against_the_whole_chapter_not_one_piece` — a
+  character named only in the first piece must not be rejected as
+  hallucinated when the fact about them comes back from a later piece. The
+  easy wrong implementation (ground against the piece) passes every other test
+  here and fails this one.
+
+### Splitting is opt-in (added 2026-09-23)
+
+- `test_an_oversized_chapter_is_not_split_by_default` — the default path makes
+  exactly one provider call for a 6,000-word chapter. Pinned because
+  `consolidate.SPLIT_OVERSIZED_CHAPTERS` is off on measured evidence (six
+  chapters, no surviving decision rule) and flipping it silently changes 48 of
+  The Eye of the World's 108 chapters.
+- `test_an_oversized_chapter_is_extracted_in_pieces_when_enabled` and
+  `test_a_new_entity_is_grounded_against_the_whole_chapter_not_one_piece` both
+  `monkeypatch.setattr(consolidate, "SPLIT_OVERSIZED_CHAPTERS", True)`, so the
+  split path stays genuinely exercised while the default stays off. Patching
+  the module attribute rather than the imported name is what makes it reach
+  `split_for_extraction`, which reads it at call time.

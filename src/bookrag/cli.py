@@ -12,7 +12,12 @@ from datetime import datetime
 from pathlib import Path
 
 from bookrag.eval import run_eval, summarize
-from bookrag.extract.pipeline import extract_book, resume_blocker, resume_start_index
+from bookrag.extract.pipeline import (
+    context_window_for,
+    extract_book,
+    resume_blocker,
+    resume_start_index,
+)
 from bookrag.ingest import epub_loader, pdf_loader
 from bookrag.ingest.chapter import Chapter
 from bookrag.ingest.consolidate import consolidate_fragments, fragment_groups, should_consolidate
@@ -31,7 +36,7 @@ from bookrag.library import (
     unlink_names,
 )
 from bookrag.locate import cite_facts
-from bookrag.providers.base import extraction_identity, model_placement
+from bookrag.providers.base import extraction_identity, model_placement, narrow_context_window
 from bookrag.providers.registry import get_provider
 from bookrag.query import facts_as_of, format_context, select_relevant_facts
 from bookrag.storage import (
@@ -148,6 +153,17 @@ def main(argv: list[str] | None = None) -> int:
     eval_cmd.add_argument("--providers", default="ollama", help="Comma-separated provider names")
     eval_cmd.add_argument(
         "--model", default=None, help="Same override as `extract --model`, applied to every provider listed"
+    )
+    eval_cmd.add_argument(
+        "--models",
+        default=None,
+        help=(
+            "Comma-separated models to compare against each other, e.g. "
+            "'qwen2.5:7b-instruct,llama3.2:3b'. Each is run over every provider in "
+            "--providers, so this is the way to compare two models of the SAME provider "
+            "(--model can only set one for all of them). Pulled models only - check with "
+            "`ollama list`."
+        ),
     )
 
     chat = subparsers.add_parser("chat", help="Ask spoiler-safe questions about a book, up to a chapter you've read")
@@ -546,6 +562,18 @@ def next_step_lines(book_id: str, chapter_count: int) -> list[str]:
         *(f"  {line}" for line in follow_commands(default_log_path(book_id))),
         "Ctrl+C is safe - progress is saved, and re-running resumes.",
         "",
+        # `bookrag eval` predates this line by a long way and was, in practice,
+        # invisible: this is the one place a user is told what to do next, and
+        # it sent them straight into a multi-hour commitment without mentioning
+        # that the model choice behind it can be checked in a couple of
+        # minutes. Changing that choice later means re-extracting the book from
+        # chapter 0, so "check first" is not a nicety. Same lesson as the
+        # doctor-only detectors: a capability reachable only from the README is
+        # a capability nobody uses.
+        "Not sure which model to use? Compare them on two chapters first,",
+        "read-only and in minutes - changing model later means re-extracting:",
+        f"  bookrag eval {book_id} --chapters 1,2 --models qwen2.5:7b-instruct,llama3.2:3b",
+        "",
         "Or try the whole pipeline instantly, no model needed:",
         f"  bookrag extract {book_id} --provider fake",
     ]
@@ -645,6 +673,16 @@ def _run_extract(args: argparse.Namespace) -> int:
         print(f"Could not initialize provider: {exc}")
         return 1
 
+    # Checked before anything else, because the alternative is finding out at
+    # the first chapter of a run the user expected to leave going for hours.
+    # A typo'd or unpulled --model is the likeliest way to start a run that
+    # cannot work, and it costs one HTTP call to rule out.
+    missing = missing_model_note(provider)
+    if missing:
+        for line in missing:
+            print(line)
+        return 1
+
     try:
         # Kept, not just counted: unlinked_narrator_warning needs the text to
         # tell whether this book has a split character about to be baked in.
@@ -662,7 +700,7 @@ def _run_extract(args: argparse.Namespace) -> int:
         # After the refusal above, never before it - see resume_blocker's
         # comment. Announcing a run that is about to be refused is exactly the
         # confusion this is meant to remove.
-        for line in extract_start_notes(args.book_id, chapter_count, start_index, provider):
+        for line in extract_start_notes(args.book_id, chapter_count, start_index, provider, chapters):
             print(line, flush=True)
         for line in unlinked_narrator_warning(args.book_id, chapters):
             print(line, flush=True)
@@ -733,22 +771,41 @@ def _eval(args: argparse.Namespace) -> int:
         return 1
 
     provider_names = [p.strip() for p in args.providers.split(",")]
+    # --models is the cross-product; --model stays a single override applied to
+    # every provider. [None] means "whatever each provider defaults to", which
+    # is what happens when neither flag is given.
+    models = [m.strip() for m in args.models.split(",")] if args.models else [args.model]
     try:
-        providers = {name: get_provider(name, model=args.model) for name in provider_names}
+        # A list of pairs, not a dict: two models of one provider have the same
+        # provider name, so a dict would silently keep only the last one - the
+        # exact comparison this command exists for.
+        providers = [
+            (_eval_label(name, model), get_provider(name, model=model))
+            for name in provider_names
+            for model in models
+        ]
     except Exception as exc:
         print(f"Could not initialize provider(s): {exc}")
         return 1
 
     try:
+        content_type = load_metadata(args.book_id).get("content_type", "fiction")
         results = run_eval(args.book_id, chapter_indices, providers)
         chapters = {c.index: c for c in load_chapters(args.book_id)}
     except Exception as exc:
         print(f"Eval failed: {exc}")
         return 1
 
-    for line in summarize(results, chapters):
+    for line in summarize(results, chapters, content_type=content_type):
         print(line)
     return 0
+
+
+def _eval_label(provider_name: str, model: str | None) -> str:
+    """How one row is named in the report. The model is included only when the
+    caller named one, so a plain `--providers ollama,fake` reads exactly as it
+    did before this supported several models."""
+    return f"{provider_name}:{model}" if model else provider_name
 
 
 def _chat(args: argparse.Namespace) -> int:
@@ -1299,8 +1356,33 @@ def unlinked_narrator_warning(book_id: str, chapters: list[Chapter]) -> list[str
     ]
 
 
+def missing_model_note(provider: object) -> list[str]:
+    """What to tell a user whose chosen model isn't pulled - empty if it is,
+    or if the provider can't say (hosted providers, the test fakes, an Ollama
+    that isn't answering).
+
+    Same optional-capability posture as `extraction_identity` and
+    `model_placement`: probe a method that may not exist, and treat any
+    failure as "no opinion" rather than as a problem.
+    """
+    probe = getattr(provider, "missing_model", None)
+    if not callable(probe):
+        return []
+    try:
+        missing = probe()
+    except Exception:  # noqa: BLE001 - a preflight must never be the blocker
+        return []
+    if not missing:
+        return []
+    return [
+        f"The model '{missing}' is not pulled, so this run would fail at the first chapter.",
+        f"  ollama pull {missing}",
+        "  (or pick another with --model; `ollama list` shows what you have)",
+    ]
+
+
 def extract_start_notes(
-    book_id: str, chapter_count: int, start_index: int, provider: object
+    book_id: str, chapter_count: int, start_index: int, provider: object, chapters: list | None = None
 ) -> list[str]:
     """What this run is about to do, said *before* the first chapter instead of
     after it.
@@ -1324,12 +1406,30 @@ def extract_start_notes(
         headline = f"Extracting {remaining} remaining chapter(s) of '{book_id}'{via}"
     else:
         headline = f"Extracting '{book_id}' - {chapter_count} chapter(s){via}"
-    return [
-        headline,
+    notes = [headline]
+    # Previewed here and applied again inside extract_book - the same
+    # two-call-sites shape as resume_start_index/resume_blacker above, and for
+    # the same reason: one source of truth for the policy, but the user is told
+    # before the run rather than after it. narrow_context_window only ever
+    # narrows, so applying it twice is a no-op the second time.
+    window = _narrow_for_book(chapters, provider) if chapters else None
+    if window is not None:
+        notes.append(f"  context window sized to {window} tokens from this book's longest chapter")
+    notes += [
         "  Expect several minutes before the first progress line: the model has to",
         "  load before chapter 1 starts, and a chapter then takes minutes on CPU.",
         "  Silence here is normal, not a hang.",
     ]
+    return notes
+
+
+def _narrow_for_book(chapters: list, provider: object) -> int | None:
+    """The context window this book will run at, having narrowed the provider
+    to it. None for a provider with no such setting."""
+    ceiling = getattr(provider, "extract_num_ctx", None)
+    if not isinstance(ceiling, int):
+        return None
+    return narrow_context_window(provider, context_window_for(chapters, ceiling=ceiling))
 
 
 def _progress_and_placement(start_time: float, start_index: int, provider: object):

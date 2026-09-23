@@ -1,8 +1,12 @@
 from bookrag.ingest.chapter import Chapter
 from bookrag.ingest.consolidate import (
     CONSOLIDATION_MEDIAN_WORDS_THRESHOLD,
+    CONSOLIDATION_TARGET_WORDS,
+    SPLIT_OVERSIZED_CHAPTERS,
+    SPLIT_THRESHOLD_WORDS,
     consolidate_fragments,
     should_consolidate,
+    split_for_extraction,
 )
 
 
@@ -106,3 +110,87 @@ def test_merging_chapters_without_pages_keeps_none() -> None:
     fragments = [Chapter(index=i, title=None, text="word " * 400) for i in range(4)]
 
     assert all(c.pages is None for c in consolidate_fragments(fragments, target_words=800))
+
+
+def test_a_normal_chapter_passes_through_split_untouched() -> None:
+    """The overwhelmingly common case, and the one that must be provably
+    unaffected: six of the eight books in this project's corpus have no
+    chapter anywhere near the threshold."""
+    text = "\n".join(f"Paragraph {i} of an ordinary chapter." for i in range(50))
+
+    assert split_for_extraction(text, threshold_words=3500) == [text]
+
+
+def test_an_oversized_chapter_is_split_into_pieces() -> None:
+    text = "\n".join("word " * 100 for _ in range(60))  # 6000 words
+
+    pieces = split_for_extraction(text, threshold_words=3500)
+
+    assert len(pieces) > 1
+    assert all(len(p.split()) < 3500 for p in pieces)
+
+
+def test_split_never_cuts_mid_sentence() -> None:
+    """Pieces begin and end on paragraph boundaries, so no piece ever starts
+    with half a sentence the model has to guess the front of."""
+    paragraphs = [f"Sentence {i} runs to its end here. " * 40 for i in range(40)]
+    text = "\n".join(paragraphs)
+
+    pieces = split_for_extraction(text, threshold_words=3500)
+
+    assert len(pieces) > 1
+    for piece in pieces:
+        for line in piece.splitlines():
+            assert line in paragraphs
+
+
+def test_split_overlaps_pieces_so_a_boundary_paraphrase_survives() -> None:
+    """Measured, not assumed: at 800-word pieces, adding a 150-word overlap
+    took statements whose quote was lost from 2 to 0."""
+    text = "\n".join(f"Paragraph {i} " + "word " * 100 for i in range(60))
+
+    with_overlap = split_for_extraction(text, threshold_words=3500)
+    without = split_for_extraction(text, overlap_words=0, threshold_words=3500)
+
+    assert sum(len(p.split()) for p in with_overlap) > sum(len(p.split()) for p in without)
+    # The tail of one piece really does reappear at the head of the next.
+    assert with_overlap[1].splitlines()[0] in with_overlap[0].splitlines()
+
+
+def test_split_handles_both_paragraph_separators() -> None:
+    """epub_loader joins paragraphs with "\n"; consolidate_fragments joins
+    fragments with "\n\n". Splitting on the blank line alone silently
+    produces one piece per chapter - it looks clean and does nothing."""
+    newline_joined = "\n".join("word " * 100 for _ in range(60))
+    blank_line_joined = "\n\n".join("word " * 100 for _ in range(60))
+
+    assert len(split_for_extraction(newline_joined, threshold_words=3500)) > 1
+    assert len(split_for_extraction(blank_line_joined, threshold_words=3500)) > 1
+
+
+def test_an_unbroken_wall_of_text_is_not_split() -> None:
+    """No paragraph boundary means no cut that isn't mid-sentence, and a
+    mid-sentence cut is worse than a merely large prompt."""
+    text = "word " * 6000
+
+    assert split_for_extraction(text, threshold_words=3500) == [text]
+
+
+def test_split_threshold_sits_above_the_consolidation_target() -> None:
+    """These two must not fight: a chapter consolidate_fragments has just
+    built up to CONSOLIDATION_TARGET_WORDS must never be immediately taken
+    apart again by the splitter."""
+    assert SPLIT_THRESHOLD_WORDS > CONSOLIDATION_TARGET_WORDS
+
+
+def test_splitting_is_off_by_default_whatever_the_chapter_size() -> None:
+    """The default path must not split, and the reason is evidence, not
+    caution: over six oversized real chapters no decision rule survived (see
+    SPLIT_OVERSIZED_CHAPTERS). Turning it on would change 48 of one book's 108
+    chapters. This pins the default so it can only be flipped deliberately."""
+    huge = "\n".join("word " * 100 for _ in range(200))  # 20,000 words
+
+    assert SPLIT_OVERSIZED_CHAPTERS is False
+    assert split_for_extraction(huge) == [huge]
+    # ...and the mechanism still works when explicitly asked.
+    assert len(split_for_extraction(huge, threshold_words=3500)) > 1

@@ -60,6 +60,66 @@ def extraction_identity(provider: object) -> str | None:
 
 
 @dataclass(frozen=True)
+class CallUsage:
+    """What one provider call actually cost.
+
+    `prompt_tokens` is the whole prompt the model was given; `prompt_seconds`
+    is how long evaluating it really took, and the two come apart badly. Ollama
+    reuses a cached KV prefix when consecutive requests share one, and it still
+    reports the full token count while charging almost no time - measured here,
+    an identical 1,439-token system prompt took 34.23s on the first call and
+    0.12s on the second. Anything reasoning about cost from the token count
+    alone will therefore be wrong, which is exactly the mistake this type
+    exists to stop: `prompt_seconds` is the honest number.
+
+    All fields are optional because not every provider can report them.
+    """
+
+    prompt_tokens: int | None = None
+    output_tokens: int | None = None
+    prompt_seconds: float | None = None
+    total_seconds: float | None = None
+
+
+def last_usage(provider: object) -> CallUsage | None:
+    """What the provider's most recent call cost, if it tracks that.
+
+    Same optional-capability shape as `extraction_identity` and
+    `model_placement` above, and for the same reasons - the Protocol stays
+    small, the many minimal test stand-ins keep working, and a diagnostic can
+    never be the thing that breaks a run.
+    """
+    usage = getattr(provider, "last_usage", None)
+    if callable(usage):
+        try:
+            usage = usage()
+        except Exception:  # noqa: BLE001 - diagnostics must never break a run
+            return None
+    return usage if isinstance(usage, CallUsage) else None
+
+
+def narrow_context_window(provider: object, window: int) -> int | None:
+    """Ask a provider to use a smaller context window for this run, returning
+    the window actually adopted (None if the provider has no such setting).
+
+    Only ever narrows: a provider whose window is already at or below `window`
+    is left alone, so a user who deliberately set a small `$OLLAMA_EXTRACT_NUM_CTX`
+    never has it silently raised by a book that would like more room.
+
+    Same optional-capability shape as the probes above - a hosted provider has
+    no local window to size, and the test suite's minimal stand-ins must not
+    have to grow one.
+    """
+    current = getattr(provider, "extract_num_ctx", None)
+    if not isinstance(current, int):
+        return None
+    if window < current:
+        provider.extract_num_ctx = window
+        return window
+    return current
+
+
+@dataclass(frozen=True)
 class ModelPlacement:
     """How much of a loaded model is resident on the GPU.
 

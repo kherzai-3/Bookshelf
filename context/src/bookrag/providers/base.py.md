@@ -1,7 +1,7 @@
 ---
 source: src/bookrag/providers/base.py
-last_synced: 2026-09-13T19:30:00Z
-source_hash: 782f9de70b0e810c70e12a2a09949cebf61ae456
+last_synced: 2026-09-23T00:00:00Z
+source_hash: 7eef66671de32c682990caf5f04783348a7a067d
 ---
 
 ## Purpose
@@ -74,6 +74,46 @@ never be what takes one down.
 
 Callers must read `None` as **"unknown, so unverifiable"**, never as "a
 different model".
+
+## `CallUsage` / `last_usage(provider)` (optional capability)
+What one provider call actually cost: `prompt_tokens`, `output_tokens`,
+`prompt_seconds`, `total_seconds`, all optional because not every provider can
+report them. Probed exactly like `extraction_identity` and `model_placement`,
+for the same reasons.
+
+**The token count and the seconds come apart badly, and that is the entire
+reason this type exists rather than a bare int.** Ollama reuses a cached KV
+prefix when consecutive requests share one, and it still reports the *full*
+prompt token count while charging almost no time. Measured here with three
+back-to-back calls sharing one system prompt:
+
+| call | `prompt_eval_count` | `prompt_eval_duration` |
+|---|---|---|
+| 1 (cold) | 1,439 | 34.23s |
+| 2 (identical prompt) | 1,439 | **0.12s** |
+| 3 (same system, different user text) | 1,448 | **0.75s** |
+
+So anything reasoning about cost from the token count alone is wrong, and
+wrong in a direction that matters: it was the basis of a planning estimate
+that a chunked extraction would cost +21% wall-clock by re-sending the system
+prompt per chunk. It does not - the system prompt and the known-entities
+preamble are a shared prefix across a chapter's chunks, and only the chunk's
+own text is really prefilled. `prompt_seconds` is the honest number; `eval.py`
+reports both.
+
+## `narrow_context_window(provider, window) -> int | None` (optional capability)
+Asks a provider to use a smaller context window for this run, returning the
+window adopted, or `None` for a provider with no such setting (Anthropic, the
+test fakes). Probed the same optional way as the capabilities above.
+
+**Only ever narrows.** A provider already at or below `window` is left alone,
+so a user who deliberately set a small `$OLLAMA_EXTRACT_NUM_CTX` never has it
+silently raised by a book that would like more room. Being narrow-only also
+makes it idempotent, which matters because it is called twice per run: once by
+`cli.extract_start_notes` to *tell the user* before the run starts, and once
+inside `extract_book` which is the real source of truth. That is the same
+two-call-sites shape as `resume_start_index`/`resume_blocker`, and for the same
+reason.
 
 ## `ModelPlacement` / `model_placement(provider)` (optional capability)
 Where a loaded model is resident: `model`, `size_bytes`, `vram_bytes`, plus
