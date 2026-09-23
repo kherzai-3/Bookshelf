@@ -192,7 +192,9 @@ Three providers, chosen via `--provider`/`--providers` or `$BOOKRAG_PROVIDER`:
 
     It reports exactly the table above: distinct entities, citation
     coverage, near-duplicate pairs, how often the fact ceiling was hit,
-    groundedness, and real cost in both seconds and tokens.
+    groundedness, and real cost in both seconds and tokens. See
+    [Comparing models before you commit](#comparing-models-before-you-commit)
+    for the full output and how to read it.
 
     Switching models for a book you have already extracted means
     re-extracting it from chapter 0 — `bookrag extract` refuses to append
@@ -776,18 +778,65 @@ seeds its "already-known entities" context from every earlier book in the
 series (via `series_reading_order`), so book 2 doesn't re-introduce a
 character book 1 already established.
 
-Compare provider output on the same chapters without touching real data
-(`eval` never writes to `facts.jsonl`/`entities.json`):
+Before committing to a run this long, see **[Comparing models](#comparing-models-before-you-commit)**
+below — changing model afterwards means re-extracting the book from chapter 0.
+
+### Comparing models before you commit
+
+`bookrag eval` runs one or more models over the same chapters and reports how
+they did. It is **read-only** — it never writes to `facts.jsonl` or
+`entities.json`, so it is safe against a real library.
 
 ```bash
+# Compare two models of the same provider - the usual case
+bookrag eval <book-id> --chapters 6,7 --models qwen2.5:7b-instruct,llama3.2:3b
+
+# Compare providers instead (a single model applied to each)
 bookrag eval <book-id> --chapters 0,1,2 --providers ollama,fake
+
+# One model, just to see what extraction looks like on this book
+bookrag eval <book-id> --chapters 0,1,2
 ```
 
-This prints a side-by-side report (fact count, sample statements per
-provider per chapter) plus an automated **groundedness score** per
-provider — a cheap lexical check (do a fact's key words actually appear in
-the chapter text), not a semantic judge. Meaningful even with one provider
-configured; more useful once a second (e.g. local-model) provider exists.
+`--models` is the one to reach for. `--model` sets a single override applied to
+*every* provider listed, so it cannot compare two models of one provider;
+`--models` takes the cross-product with `--providers` and labels each row
+`provider:model`. Only pulled models work — check with `ollama list`.
+
+Output looks like this:
+
+```
+[ollama:qwen2.5:7b-instruct] 41 facts across 2 chapter(s), 0 parse failure(s), avg groundedness 0.92
+  quality: 15 distinct entities, 71% citable, 1 near-duplicate pair(s), 0/2 chapter(s) at the 40-fact ceiling
+  cost: 489s total, 245s/chapter, 1967 output tokens, 7864 prompt tokens (143s to evaluate)
+  ch6: Martin was secretary to Baron Arald. | Alyss was a castle ward.
+```
+
+**How to read it.** Fact count and speed are the two numbers that will mislead
+you — on a real comparison the smaller model produced twice the facts 18%
+faster and was still clearly the wrong choice. The quality line is what
+actually separates models:
+
+- **distinct entities** — how many different characters/settings/themes it
+  found. A model producing many facts about few entities is padding.
+- **citable** — the share of statements the passage matcher can locate in the
+  chapter, i.e. how well [citations](#chatting-with-a-book) will work. A model
+  that paraphrases further from the prose costs you this silently.
+- **near-duplicate pair(s)** — statements that say the same thing in different
+  words. The pipeline's dedup only catches *exact* repeats, so these survive
+  into your library and inflate the fact count.
+- **N/M chapter(s) at the ceiling** — chapters that hit the schema's 40-fact
+  cap. That is never a healthy result: either truncation or padding.
+- **cost** — prompt tokens are reported alongside the seconds it actually took
+  to evaluate them, because Ollama caches a repeated prompt prefix and the two
+  numbers disagree wildly (an identical prompt measured 34.23s cold, 0.12s
+  warm). Trust the seconds.
+
+Groundedness is a cheap lexical check — do a fact's key words appear in the
+chapter text — not a semantic judge.
+
+Two chapters is usually enough to separate two clearly different models, and
+takes a few minutes rather than the hours a full book costs.
 
 ### Chatting with a book
 
